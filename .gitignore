@@ -8,6 +8,7 @@ out
 
 # builds
 /dist
+**/dist
 
 # env
 .env
