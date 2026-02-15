@@ -256,3 +256,84 @@ Wherever agent processes live (Clawdbot connector layer):
 4. **Attendance report (optional)**
    - Simple endpoint: `GET /api/v1/agents/:id/sessions?from=...&to=...`
    - UI: basic “hours online” in a date range.
+
+---
+
+## 8) Security & privacy (anti-spoofing + audit)
+
+Attendance/presence signals are **security-sensitive evidence**. If the feature is used for compliance, SLAs, billing, or incident response, treat it as a tamper-resistant telemetry pipeline.
+
+### 8.1 Threats
+
+- **Spoofed heartbeats**: attacker replays old requests or fabricates heartbeat traffic.
+- **Token theft**: stolen bearer token used from another host.
+- **Replay / reorder**: valid requests replayed to inflate online time.
+- **Tampering / repudiation**: records edited without trace; disputes over “was agent online?”.
+- **Privacy leakage**: storing more host metadata than necessary (hostnames, IPs, detailed UA).
+
+### 8.2 Stronger anti-spoofing: signed heartbeats (recommended beyond MVP)
+
+The MVP suggests bearer tokens/HMAC. For higher assurance, prefer **public-key signed heartbeats**.
+
+**Heartbeat payload (canonical JSON)**
+- `agentId`
+- `sessionId`
+- `seq` (monotonic counter per session)
+- `issuedAt` (client timestamp)
+- `nonce`
+- optional: `challenge` (server-provided)
+
+**Signature**
+- `sig = Sign(private_key, SHA-256(canonical_json(payload)))`
+- include `keyId` so the server can pick the correct public key.
+
+**Server verification rules**
+- Verify signature against enrolled public key for (`agentId`,`keyId`).
+- Enforce **monotonic `seq`** (reject duplicates/out-of-order beyond a tiny window).
+- Enforce **freshness** (`received_at` within allowed skew; e.g., ±2–5 minutes).
+- Enforce **replay protection** (store last `seq`, and/or seen `nonce` with a short TTL).
+- Bind to **active session** (`sessionId` must be currently open for that agent).
+
+**Challenge-response (stronger liveness)**
+- On session start (or periodically), server issues a random `challenge`.
+- Client must include it in the next signed heartbeat.
+- Reject heartbeats missing/old challenges.
+
+This makes it much harder to precompute heartbeats or replay captured traffic later.
+
+**Key management**
+- Use per-agent or per-runtime keys; store in OS keychain/TPM when available.
+- Support rotation with overlap; audit all enroll/revoke/rotate actions.
+
+### 8.3 Privacy minimization
+
+- `meta` should be treated as **untrusted and privacy-sensitive**.
+- Don’t persist raw IP or full user-agent in `agent_presence` by default.
+  - If needed for abuse detection, store **salted hashes** or coarse buckets.
+- Avoid storing hostnames and PIDs unless needed for debugging; if stored, limit retention.
+- Retain heartbeat rows only if necessary; prefer sessions + last_seen.
+
+### 8.4 Audit events (minimum set)
+
+Record these in the global audit log (see `SECURITY.md`). Do not put full heartbeat payloads in audit events.
+
+**Presence / sessions**
+- `presence.heartbeat.accepted` (agentId, sessionId, seq, keyId)
+- `presence.heartbeat.rejected` (agentId, sessionId, seq, reason: bad_sig|replay|stale|unknown_key|auth_failed)
+- `presence.status.transition` (agentId, from, to, reason: heartbeat|timeout_sweep|admin)
+- `presence.session.opened` / `presence.session.closed` (agentId, session row id, reason)
+
+**Key management (if signed heartbeats)**
+- `presence.key.enrolled` (agentId, keyId, method)
+- `presence.key.revoked` (agentId, keyId, reason)
+- `presence.key.rotated` (agentId, fromKeyId, toKeyId)
+
+**Exports / overrides**
+- `presence.export.requested|completed|denied` (who, scope)
+- `presence.override.applied` (who, agentId, justification)
+
+### 8.5 Operational safeguards
+
+- Rate-limit heartbeat endpoints per agent (e.g., 1 request / 5–15s).
+- Enforce maximum request size (meta can be abused).
+- Ensure timeout sweep actions also create audit events (status changes are evidence).
