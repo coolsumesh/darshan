@@ -1,246 +1,258 @@
-# Darshan — Attendance / Agent Presence Monitoring (v1)
+# Attendance / Presence Monitoring (MVP)
 
-This document defines how Darshan tracks **online/offline** status per agent, records presence changes, and exposes realtime UI hooks.
+This doc proposes a minimal, implementation-oriented plan for **agent attendance** (online/offline/away) in the current **Fastify + Next.js** monorepo.
 
-It complements `ARCHITECTURE.md` (presence events) and `DB.md` (core schema). This file focuses on *agent attendance*: system-wide reachability + recent activity.
-
----
-
-## 1) Goals / Non-goals
-
-### Goals (v1)
-- Show each agent as **online / offline / unknown / degraded** with a clear “last seen” timestamp.
-- Record every significant presence transition as an **append-only** event for audit/debug.
-- Make presence updates available to the UI via **WebSocket** events.
-- Keep the model robust to flaky networks and restarts.
-
-### Non-goals (v1)
-- Full observability/telemetry (CPU/mem, tracing) beyond a few lightweight health signals.
-- Perfect “human-style attendance” semantics (e.g., activity in the last N minutes across tools). v1 is about *connectivity + heartbeat*.
+> Scope: heartbeat endpoint, presence polling, WebSocket `presence.updated` events, DB schema additions, and a minimal MVP code plan.
 
 ---
 
-## 2) Core concepts
+## Implementation
 
-### 2.1 Presence vs. status
-- **Presence**: is Darshan currently receiving heartbeats (or has a live connector session) for an agent?
-- **Status**: what the UI should show (`online/offline/unknown/degraded`). Status is derived from presence + recent errors.
+### 1) Definitions (what “attendance” means)
 
-In v1, we persist the **current status** on `agents.status` for quick list rendering and store detailed history separately.
+- **Presence**: current state for an agent (`online | offline | unknown`, optionally `away`).
+- **Heartbeat**: periodic signal from an agent runtime/connector indicating it is alive.
+- **Attendance** (MVP): derive online/offline intervals from heartbeat stream.
 
-### 2.2 Sources of truth (signals)
-Presence can be derived from one or more signals; order below is typical for v1:
-1. **Connector session lifecycle** (best): if Darshan maintains a websocket/session to the agent connector, session up/down is authoritative.
-2. **Heartbeat** (good): periodic “I am alive” pings from agent/connector to Darshan.
-3. **Active run activity** (weak): runs completing implies reachability, but absence of runs shouldn’t imply offline.
-4. **Manual ping** (debug): user triggers a ping; results are recorded.
-
-### 2.3 State machine (UI-facing)
-Suggested UI states:
-- `online`: last heartbeat within threshold; no recent critical errors.
-- `degraded`: last heartbeat within threshold, but recent connector errors/timeouts suggest partial connectivity.
-- `offline`: explicit disconnect OR heartbeat stale beyond threshold.
-- `unknown`: never seen OR status cannot be determined after startup until first signal arrives.
-
-Recommended transitions are event-driven and monotonic in time (ignore out-of-order signals).
+Key design choice:
+- Do **not** store an event row for every heartbeat forever.
+- Store **current presence** (hot path) + optionally store **session intervals** (attendance history).
 
 ---
 
-## 3) Data model (DB)
+### 2) API: Heartbeat endpoint
 
-### 3.1 Minimal additions
-Keep `agents.status` as the current UI status (already in `DB.md`). Add:
+#### Endpoint
+`POST /api/v1/agents/:agentId/heartbeat`
 
-#### 3.1.1 `agent_presence`
-One row per agent storing “current” presence-derived fields.
+#### Auth (MVP)
+- Use a shared secret per agent connector (e.g., `Authorization: Bearer <AGENT_TOKEN>`), or HMAC signature.
+- Keep tokens **out of the DB** rows that are returned to the UI.
+
+#### Request body (example)
+```json
+{
+  "sessionId": "uuid-or-random",
+  "state": "online", 
+  "meta": {
+    "hostname": "ip-172-31-...",
+    "pid": 1234,
+    "version": "clawdbot-...",
+    "capabilities": {"ws": true}
+  }
+}
+```
+
+Notes:
+- `state` can be optional; server can treat any heartbeat as “online”.
+- `sessionId` allows stable tracking across restarts. If absent, the server can generate/rotate a session.
+
+#### Response
+```json
+{ "ok": true, "serverTime": "...", "status": "online" }
+```
+
+#### Server behavior
+On heartbeat:
+1. Validate agent + auth.
+2. Upsert current presence row.
+3. If status transitioned (offline→online, online→offline), write a session boundary (optional, see DB below).
+4. Emit WS event `presence.updated` (throttled / only on change).
+
+**Throttling guidance**
+- Heartbeats can be frequent (e.g., every 10–30s). Don’t broadcast every ping.
+- Emit WS updates when:
+  - status changes OR
+  - `last_seen_at` is older than some interval (e.g., 30s) and UI needs “freshness”.
+
+---
+
+### 3) Presence calculation & polling
+
+#### Online/offline rules (simple + robust)
+- If `now - last_heartbeat_at <= OFFLINE_AFTER_MS` ⇒ `online`
+- Else ⇒ `offline`
+
+Recommended MVP values:
+- `HEARTBEAT_INTERVAL_MS = 15_000–30_000`
+- `OFFLINE_AFTER_MS = 2 * HEARTBEAT_INTERVAL_MS + jitter` (e.g., 70s)
+
+#### Why not rely purely on client “disconnect”
+- WS disconnects are noisy (sleep, network blips). Heartbeat-based presence is more stable.
+
+#### UI polling (backup + first MVP)
+Even if WS exists, keep a fallback poll:
+- `GET /api/v1/agents` returns agents with computed presence fields.
+- Poll every 10–20 seconds.
+
+This ensures:
+- UI stays correct when WS is down.
+- Server can compute presence from DB without pushing.
+
+---
+
+### 4) WebSocket: `presence.updated` events
+
+#### WS endpoint
+- Add WS to Fastify (`@fastify/websocket`) at `GET /ws` (as described in `ARCHITECTURE.md`).
+
+#### Event envelope
+```json
+{
+  "type": "presence.updated",
+  "ts": "2026-02-15T...Z",
+  "data": {
+    "agentId": "...",
+    "status": "online",
+    "lastHeartbeatAt": "...",
+    "sessionId": "...",
+    "meta": {"hostname": "..."}
+  }
+}
+```
+
+#### When to emit
+- Always emit on status transitions.
+- Optionally emit periodic refresh (e.g., every 30s) for agents still online.
+
+#### Fanout
+MVP: broadcast to all connected UI clients.
+Later: RBAC-filter if needed (admin vs user).
+
+---
+
+### 5) DB schema additions
+
+The existing `DB.md` defines `agents` with a `status`. For presence/attendance, add:
+
+#### 5.1 `agent_presence` (current state, hot path)
+Stores the latest heartbeat and computed presence.
 
 ```sql
 create table agent_presence (
   agent_id uuid primary key references agents(id) on delete cascade,
 
-  -- session tracking (if connector provides it)
-  session_id text,
-
-  -- presence timestamps
-  first_seen_at timestamptz,
-  last_seen_at timestamptz,
-  last_heartbeat_at timestamptz,
-
-  -- derived
-  computed_status text not null default 'unknown'
-    check (computed_status in ('online','offline','unknown','degraded')),
-
-  -- debugging
-  last_error_code text,
-  last_error_message text,
-  last_error_at timestamptz,
-
-  updated_at timestamptz not null default now()
-);
-
-create index agent_presence_last_seen_idx on agent_presence (last_seen_at desc);
-```
-
-Notes
-- `computed_status` is kept in sync with `agents.status` (either duplicate for convenience or choose one canonical location). If you keep both, `agents.status` is the cached copy used by list queries.
-- `session_id` is *not secret*; it is a short-lived opaque identifier for debugging.
-
-#### 3.1.2 `agent_presence_events`
-Append-only history of presence transitions and key observations.
-
-```sql
-create table agent_presence_events (
-  id uuid primary key default gen_random_uuid(),
-  seq bigint generated always as identity,
-
-  agent_id uuid not null references agents(id) on delete cascade,
-
-  event_type text not null,
-  -- examples: 'session.connected','session.disconnected',
-  --           'heartbeat.received','heartbeat.missed',
-  --           'status.changed','ping.requested','ping.succeeded','ping.failed'
-
-  observed_status text,
-  -- optional: one of ('online','offline','unknown','degraded')
+  status text not null default 'unknown'
+    check (status in ('online','offline','unknown','away')),
 
   session_id text,
+  last_heartbeat_at timestamptz not null,
+  last_seen_at timestamptz not null, -- can equal last_heartbeat_at; reserved if later we track WS/user activity
 
   meta jsonb not null default '{}',
-  observed_at timestamptz not null default now()
+
+  updated_at timestamptz not null default now(),
+  created_at timestamptz not null default now()
 );
 
-create index agent_presence_events_agent_seq_idx on agent_presence_events (agent_id, seq desc);
-create index agent_presence_events_observed_at_idx on agent_presence_events (observed_at desc);
+create index agent_presence_status_idx on agent_presence (status);
+create index agent_presence_last_heartbeat_idx on agent_presence (last_heartbeat_at desc);
 ```
 
-Why an events table?
-- Debugging “why did this agent show offline?” becomes a queryable timeline.
-- You can later compute uptime metrics without changing the core UI.
+Implementation detail:
+- Keep `agents.status` as a denormalized convenience OR deprecate it and compute from `agent_presence`.
+- If you keep it, update it transactionally with the presence upsert.
 
-### 3.2 Relationship to `audit_log`
-Presence is operational and may be high-volume. Recommendation:
-- Store detailed presence signals in `agent_presence_events`.
-- Write to `audit_log` **only** for user-initiated actions (e.g., manual ping) and important derived transitions (e.g., online→offline) if you need security-level traceability.
+#### 5.2 `agent_sessions` (optional MVP+, for attendance history)
+Tracks online intervals without storing every heartbeat.
 
----
+```sql
+create table agent_sessions (
+  id uuid primary key default gen_random_uuid(),
+  agent_id uuid not null references agents(id) on delete cascade,
 
-## 4) Event flow (backend)
+  session_id text, -- from heartbeat payload; useful for debugging
 
-### 4.1 Heartbeat ingestion
-**Input**: connector/agent calls `POST /api/v1/agents/:id/heartbeat` (or sends via WS).
+  started_at timestamptz not null,
+  ended_at timestamptz,
 
-Backend steps:
-1. Validate agent id + auth (connector credential).
-2. Upsert `agent_presence`:
-   - set `last_seen_at = now()`
-   - set `last_heartbeat_at = now()`
-   - if `first_seen_at is null`, set it
-3. Compute `computed_status`:
-   - if within threshold: `online` (or `degraded` if recent error)
-4. If status changed, update `agents.status` and insert `agent_presence_events` rows:
-   - `heartbeat.received`
-   - optionally `status.changed` (include `from`, `to` in `meta`)
-5. Emit WS event(s) to subscribed UIs.
+  start_reason text, -- 'heartbeat' | 'manual' | 'admin'
+  end_reason text,   -- 'timeout' | 'shutdown' | 'admin'
 
-### 4.2 Staleness sweep (offline detection)
-Heartbeats can stop silently; Darshan should mark agents offline when stale.
+  meta jsonb not null default '{}',
 
-Mechanism (v1): periodic job (every ~10–30s) does:
-- for each agent with `agent_presence.last_seen_at < now() - STALE_AFTER`:
-  - if currently `computed_status != 'offline'`:
-    - set `computed_status='offline'`, update `agents.status='offline'`
-    - insert `agent_presence_events`: `heartbeat.missed` and `status.changed`
-    - emit WS update
+  created_at timestamptz not null default now()
+);
 
-Parameters:
-- `HEARTBEAT_INTERVAL`: e.g., 10s
-- `STALE_AFTER`: e.g., 30s (3 missed heartbeats)
-- `DEGRADED_AFTER_ERRORS`: e.g., if last error within 2 min
+create index agent_sessions_agent_started_idx on agent_sessions (agent_id, started_at desc);
+create index agent_sessions_open_idx on agent_sessions (agent_id) where ended_at is null;
+```
 
-Important: ignore out-of-order heartbeats by comparing `observed_at`/`last_seen_at`.
+Session boundary rules:
+- On first heartbeat when currently offline/unknown ⇒ open a session (`started_at=now`).
+- On a timeout sweep or explicit offline transition ⇒ close open session (`ended_at=now`).
 
-### 4.3 Connector session lifecycle (preferred)
-If the connector maintains long-lived sessions, treat these as high-confidence signals:
-- On session connect: upsert `agent_presence.session_id`, set `last_seen_at`, mark `online`.
-- On session disconnect: mark `offline` immediately (or after a short grace window), insert `session.disconnected`.
+#### 5.3 Presence “timeout sweep”
+Because heartbeats may stop without a final message:
+- Run a periodic job (in-process interval for MVP) that marks agents offline when `last_heartbeat_at` is too old.
+- When it flips an agent to offline, also close the open `agent_sessions` row.
 
-This reduces reliance on sweep intervals and improves UI responsiveness.
-
-### 4.4 Manual ping (user-initiated)
-**Input**: `POST /api/v1/agents/:id/ping`.
-
-Backend steps:
-1. Insert `agent_presence_events`: `ping.requested` (audit_log too).
-2. Enqueue a connector ping job (Redis).
-3. On result:
-   - success: insert `ping.succeeded`, update `last_seen_at`, maybe mark `online`.
-   - failure/timeout: insert `ping.failed`, set `last_error_*`, maybe mark `degraded` or keep prior.
-4. Emit WS update.
-
-UI should show ping as a transient action; presence should still be primarily heartbeat/session-based.
+MVP note: the job can live in the API server process (setInterval). Production: move to a worker.
 
 ---
 
-## 5) Realtime UI hooks
+### 6) Minimal MVP code plan (Fastify + Next)
 
-### 5.1 WebSocket events
-Use the shared envelope described in `ARCHITECTURE.md`.
+This is the smallest set of changes to get a working attendance UI.
 
-Recommended events:
-- `presence.agent.updated`
-  - payload: `{ agentId, status, lastSeenAt, lastHeartbeatAt, sessionId?, lastError? }`
-- `presence.agent.event` (optional, for a timeline panel)
-  - payload: `{ agentId, eventType, observedAt, meta }`
+#### 6.1 API app (`apps/api`)
+1. **Add DB access layer** (if not present yet)
+   - For MVP, `pg` is fine (later Drizzle).
+   - Create `packages/shared` types for presence payloads.
 
-Best practice:
-- UI list uses `presence.agent.updated` to update badges without refetch.
-- Only show `presence.agent.event` in an “Events/Debug” drawer to avoid noise.
+2. **Add routes**
+   - `POST /api/v1/agents/:id/heartbeat`
+   - `GET /api/v1/agents` includes `presence` fields:
+     - `status`
+     - `lastHeartbeatAt`
+     - `sessionId`
 
-### 5.2 UI components
-- **Agents list row**
-  - status badge (online/offline/degraded/unknown)
-  - “last seen” tooltip (relative time)
-  - optional “ping” button
-- **Agent details panel**
-  - last heartbeat, last error
-  - presence event timeline (last N events)
+3. **Add WebSocket server**
+   - Register `@fastify/websocket`.
+   - Add `GET /ws` that upgrades and stores connections in a simple in-memory set.
+   - Implement `broadcast(event)` helper.
 
-### 5.3 API endpoints (suggested)
-- `GET /api/v1/agents` includes cached fields:
-  - `{ id, name, status, lastSeenAt?, lastHeartbeatAt? }`
-- `GET /api/v1/agents/:id/presence/events?limit=100` returns timeline from `agent_presence_events`.
+4. **Presence logic module**
+   - `computeStatus(lastHeartbeatAt)`
+   - `upsertPresence(agentId, sessionId, meta)`
+   - `transitionIfNeeded(prevStatus, nextStatus)` ⇒ maybe create/close session.
 
----
+5. **Timeout sweep (in-process)**
+   - Every 15–30 seconds:
+     - query `agent_presence` where `status='online'` and `last_heartbeat_at < now()-OFFLINE_AFTER`.
+     - mark them offline, close sessions, emit `presence.updated`.
 
-## 6) Edge cases / rules
+#### 6.2 Web app (`apps/web`)
+1. **Agents list page/panel**
+   - Display status badge + last seen.
 
-### 6.1 Unknown vs offline
-- `unknown`: agent has never connected/heartbeated since Darshan started tracking.
-- `offline`: agent was seen before but is currently stale/disconnected.
+2. **Data transport (choose order of implementation)**
+   - MVP-0: polling only (`GET /api/v1/agents` every 10–20s).
+   - MVP-1: add WS subscription to receive `presence.updated` and patch local state.
 
-### 6.2 Flapping protection
-To avoid UI flicker:
-- Use `STALE_AFTER` grace window.
-- Optionally require N consecutive missed heartbeats before offline.
-- On quick reconnect, record events but the UI can debounce (e.g., 500ms).
+3. **UI behavior**
+   - If WS connected: optimistic live updates.
+   - If WS disconnected: fall back to polling.
 
-### 6.3 Degraded semantics
-Set `degraded` when:
-- connector ping fails but last heartbeat is recent, or
-- a run request times out repeatedly, or
-- connector reports partial failure (meta: `{"errorRate":...}` later).
-
-### 6.4 Ordering + idempotency
-- Use `agent_presence.last_seen_at` as the monotonic gate: ignore updates older than the stored timestamp.
-- For connector callbacks, include an idempotency key (e.g., session id + seq) if needed.
+#### 6.3 Connector / agent runtime changes (outside Darshan UI)
+Wherever agent processes live (Clawdbot connector layer):
+- Add a timer to call `POST /api/v1/agents/:id/heartbeat` every N seconds.
+- Include a stable `sessionId` per process start.
 
 ---
 
-## 7) Implementation notes (v1)
+### 7) MVP milestones (practical)
 
-- Start with heartbeat-only + staleness sweep. Add session lifecycle when the connector supports it.
-- Keep presence events lightweight; don’t store secrets or full logs in `meta`.
-- Ensure presence updates are **fast** and don’t contend with message/runs writes:
-  - separate indexes
-  - small rows
-  - consider batching WS broadcasts
+1. **Presence stored + visible**
+   - Heartbeat endpoint updates `agent_presence`.
+   - `GET /agents` shows computed status.
+
+2. **Offline timeout**
+   - Sweep flips status and closes sessions.
+
+3. **Realtime WS updates**
+   - Broadcast `presence.updated` on transitions.
+
+4. **Attendance report (optional)**
+   - Simple endpoint: `GET /api/v1/agents/:id/sessions?from=...&to=...`
+   - UI: basic “hours online” in a date range.
