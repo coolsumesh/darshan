@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Darshan — Clickable Wireframe Prototype</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: system-ui, -apple-system, sans-serif; background: #1a1a1a; color: #fff; min-height: 100vh; }
+    
+    .nav { background: #2a2a2a; padding: 12px 24px; display: flex; gap: 24px; align-items: center; border-bottom: 1px solid #444; }
+    .nav a { color: #aaa; text-decoration: none; padding: 8px 16px; border-radius: 6px; transition: all 0.2s; }
+    .nav a:hover { background: #333; color: #fff; }
+    .nav a.active { background: #4a4a4a; color: #fff; font-weight: 600; }
+    .nav .logo { font-weight: 700; font-size: 1.2em; color: #fff; margin-right: 24px; }
+    
+    .screen { max-width: 1600px; margin: 24px auto; position: relative; }
+    .screen img { width: 100%; height: auto; border-radius: 8px; box-shadow: 0 4px 24px rgba(0,0,0,0.4); }
+    
+    /* Clickable hotspots */
+    .hotspot { position: absolute; cursor: pointer; border: 2px dashed transparent; border-radius: 4px; transition: all 0.2s; }
+    .hotspot:hover { border-color: #4a9eff; background: rgba(74, 158, 255, 0.15); }
+    .hotspot::after { content: attr(data-label); position: absolute; bottom: -24px; left: 50%; transform: translateX(-50%); background: #4a9eff; color: #fff; padding: 2px 8px; border-radius: 4px; font-size: 11px; opacity: 0; transition: opacity 0.2s; white-space: nowrap; }
+    .hotspot:hover::after { opacity: 1; }
+    
+    .instructions { max-width: 1600px; margin: 0 auto 16px; padding: 0 24px; color: #888; font-size: 14px; }
+    .instructions strong { color: #4a9eff; }
+    
+    h1 { padding: 24px; text-align: center; font-size: 1.5em; color: #ccc; }
+  </style>
+</head>
+<body>
+  <nav class="nav">
+    <span class="logo">Darshan</span>
+    <a href="index.html" id="nav-dashboard">Dashboard</a>
+    <a href="attendance.html" id="nav-attendance">Attendance</a>
+    <a href="#" onclick="alert('Agent Profile screen coming soon')">Agents</a>
+    <a href="#" onclick="alert('Thread view coming soon')">Threads</a>
+  </nav>
+  
+  <h1>Main Dashboard — 3-Pane Layout</h1>
+  <p class="instructions">Hover over regions to see clickable areas. <strong>Click "Attendance"</strong> in the nav or on the left pane to navigate.</p>
+  
+  <div class="screen" id="dashboard-screen">
+    <img src="darshan-wireframe-dashboard-3pane.png" alt="Darshan Dashboard Wireframe">
+    
+    <!-- Left pane: Agents section - click to go to Attendance as example -->
+    <a href="attendance.html" class="hotspot" data-label="→ Attendance Report" style="top: 52%; left: 1.5%; width: 20%; height: 35%;"></a>
+    
+    <!-- Left pane: Needs Attention -->
+    <div class="hotspot" data-label="Needs Attention Queue" style="top: 15%; left: 1.5%; width: 20%; height: 33%;" onclick="alert('Click an item to open its thread in the center pane')"></div>
+    
+    <!-- Center pane: Thread timeline -->
+    <div class="hotspot" data-label="Thread / Activity Timeline" style="top: 15%; left: 23%; width: 45%; height: 72%;" onclick="alert('Messages stream here. Click a message to inspect it.')"></div>
+    
+    <!-- Center pane: Composer -->
+    <div class="hotspot" data-label="Composer (type message)" style="top: 88%; left: 23%; width: 45%; height: 9%;" onclick="alert('Type your message here and hit Enter to send')"></div>
+    
+    <!-- Right pane: Context -->
+    <div class="hotspot" data-label="Agent/Thread Context" style="top: 15%; left: 69%; width: 29%; height: 25%;" onclick="alert('Shows selected agent or thread metadata')"></div>
+    
+    <!-- Right pane: Actions -->
+    <div class="hotspot" data-label="Actions / Controls" style="top: 42%; left: 69%; width: 29%; height: 22%;" onclick="alert('Assign, broadcast, intervene, stop, escalate')"></div>
+    
+    <!-- Right pane: Diagnostics -->
+    <div class="hotspot" data-label="Diagnostics (logs, heartbeat)" style="top: 66%; left: 69%; width: 29%; height: 30%;" onclick="alert('Last heartbeat, capabilities, recent runs, logs')"></div>
+  </div>
+  
+  <script>
+    // Highlight active nav
+    const path = window.location.pathname;
+    if (path.includes('attendance')) {
+      document.getElementById('nav-attendance').classList.add('active');
+    } else {
+      document.getElementById('nav-dashboard').classList.add('active');
+    }
+  </script>
+</body>
+</html>

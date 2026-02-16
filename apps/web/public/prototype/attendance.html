@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Darshan — Attendance Report</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: system-ui, -apple-system, sans-serif; background: #1a1a1a; color: #fff; min-height: 100vh; }
+    
+    .nav { background: #2a2a2a; padding: 12px 24px; display: flex; gap: 24px; align-items: center; border-bottom: 1px solid #444; }
+    .nav a { color: #aaa; text-decoration: none; padding: 8px 16px; border-radius: 6px; transition: all 0.2s; }
+    .nav a:hover { background: #333; color: #fff; }
+    .nav a.active { background: #4a4a4a; color: #fff; font-weight: 600; }
+    .nav .logo { font-weight: 700; font-size: 1.2em; color: #fff; margin-right: 24px; }
+    
+    .screen { max-width: 1600px; margin: 24px auto; position: relative; }
+    .screen img { width: 100%; height: auto; border-radius: 8px; box-shadow: 0 4px 24px rgba(0,0,0,0.4); }
+    
+    /* Clickable hotspots */
+    .hotspot { position: absolute; cursor: pointer; border: 2px dashed transparent; border-radius: 4px; transition: all 0.2s; }
+    .hotspot:hover { border-color: #4a9eff; background: rgba(74, 158, 255, 0.15); }
+    .hotspot::after { content: attr(data-label); position: absolute; bottom: -24px; left: 50%; transform: translateX(-50%); background: #4a9eff; color: #fff; padding: 2px 8px; border-radius: 4px; font-size: 11px; opacity: 0; transition: opacity 0.2s; white-space: nowrap; }
+    .hotspot:hover::after { opacity: 1; }
+    
+    .instructions { max-width: 1600px; margin: 0 auto 16px; padding: 0 24px; color: #888; font-size: 14px; }
+    .instructions strong { color: #4a9eff; }
+    
+    h1 { padding: 24px; text-align: center; font-size: 1.5em; color: #ccc; }
+  </style>
+</head>
+<body>
+  <nav class="nav">
+    <span class="logo">Darshan</span>
+    <a href="index.html" id="nav-dashboard">Dashboard</a>
+    <a href="attendance.html" id="nav-attendance">Attendance</a>
+    <a href="#" onclick="alert('Agent Profile screen coming soon')">Agents</a>
+    <a href="#" onclick="alert('Thread view coming soon')">Threads</a>
+  </nav>
+  
+  <h1>Attendance Report</h1>
+  <p class="instructions">Hover over regions to see clickable areas. <strong>Click "Dashboard"</strong> to go back to the main view.</p>
+  
+  <div class="screen" id="attendance-screen">
+    <img src="darshan-wireframe-attendance-report.png" alt="Darshan Attendance Report Wireframe">
+    
+    <!-- Left pane: Agent picker -->
+    <div class="hotspot" data-label="Agent Picker (select agent)" style="top: 15%; left: 1.5%; width: 20%; height: 70%;" onclick="alert('Select an agent to filter the attendance report')"></div>
+    
+    <!-- Center pane: Controls -->
+    <div class="hotspot" data-label="Date Range / Export Controls" style="top: 15%; left: 23%; width: 45%; height: 12%;" onclick="alert('Set date range, timezone, granularity, or export CSV')"></div>
+    
+    <!-- Center pane: Presence timeline -->
+    <div class="hotspot" data-label="Presence Timeline (online/offline)" style="top: 28%; left: 23%; width: 45%; height: 28%;" onclick="alert('Visual timeline showing online (blue) vs offline (gray) intervals')"></div>
+    
+    <!-- Center pane: Sessions table -->
+    <div class="hotspot" data-label="Sessions Table" style="top: 58%; left: 23%; width: 45%; height: 38%;" onclick="alert('Detailed session log: start, end, duration, disconnect reason')"></div>
+    
+    <!-- Right pane: Summary -->
+    <div class="hotspot" data-label="Summary Stats" style="top: 15%; left: 69%; width: 29%; height: 22%;" onclick="alert('Total online hours, offline hours, last heartbeat')"></div>
+    
+    <!-- Right pane: Notes -->
+    <div class="hotspot" data-label="Notes / Metadata" style="top: 40%; left: 69%; width: 29%; height: 25%;" onclick="alert('Derived from heartbeats & session intervals')"></div>
+  </div>
+  
+  <script>
+    // Highlight active nav
+    document.getElementById('nav-attendance').classList.add('active');
+  </script>
+</body>
+</html>
