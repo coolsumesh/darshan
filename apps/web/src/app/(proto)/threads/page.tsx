@@ -28,7 +28,7 @@ export default function ThreadsPage() {
               ].map((t) => (
                 <div
                   key={t.id}
-                  className="flex items-center justify-between rounded-2xl bg-white p-4 ring-1 ring-line hover:bg-slate-50"
+                  className="flex items-center justify-between rounded-2xl bg-white p-4 ring-1 ring-line hover:bg-slate-50 dark:bg-slate-950 dark:ring-slate-800 dark:hover:bg-slate-900/40"
                 >
                   <div>
                     <div className="text-sm font-semibold">

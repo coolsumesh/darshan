@@ -28,7 +28,7 @@ export default function AgentsPage() {
               ].map((a) => (
                 <div
                   key={a.name}
-                  className="rounded-2xl bg-white p-4 ring-1 ring-line hover:bg-slate-50"
+                  className="rounded-2xl bg-white p-4 ring-1 ring-line hover:bg-slate-50 dark:bg-slate-950 dark:ring-slate-800 dark:hover:bg-slate-900/40"
                 >
                   <div className="flex items-start justify-between">
                     <div>
@@ -67,7 +67,7 @@ export default function AgentsPage() {
             <CardTitle>Notes</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-sm text-slate-700">
+            <div className="text-sm text-slate-700 dark:text-slate-200">
               This section is a placeholder to make navigation feel real.
             </div>
           </CardContent>
