@@ -282,6 +282,10 @@ export default function SettingsPage() {
                 Intended for stakeholder UX review: theme switching, typography
                 scaling, and accessibility toggles.
               </p>
+              <p>
+                <strong>Note:</strong> Agents are expected to update USER.md / IDENTITY.md /
+                MEMORY.md daily.
+              </p>
             </div>
           </CardContent>
         </Card>

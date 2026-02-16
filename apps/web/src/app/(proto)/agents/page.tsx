@@ -1,6 +1,8 @@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { AGENTS } from "@/lib/agents";
+import { formatDateShort, formatRelativeTime } from "@/lib/time";
 
 export default function AgentsPage() {
   return (
@@ -20,20 +22,21 @@ export default function AgentsPage() {
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-              {[
-                { name: "Mira", desc: "Ops triage", status: "online" },
-                { name: "Nia", desc: "Support", status: "away" },
-                { name: "Kaito", desc: "Incident response", status: "offline" },
-                { name: "Anya", desc: "QA", status: "online" },
-              ].map((a) => (
+              {AGENTS.map((a) => (
                 <div
-                  key={a.name}
+                  key={a.id}
                   className="rounded-2xl bg-white p-4 ring-1 ring-line hover:bg-slate-50 dark:bg-slate-950 dark:ring-slate-800 dark:hover:bg-slate-900/40"
                 >
-                  <div className="flex items-start justify-between">
-                    <div>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
                       <div className="text-sm font-semibold">{a.name}</div>
                       <div className="mt-1 text-xs text-muted">{a.desc}</div>
+                      <div className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+                        <span className="font-semibold text-slate-600 dark:text-slate-300">
+                          Profile last updated
+                        </span>
+                        : {formatRelativeTime(a.lastProfileUpdateAt)} • {formatDateShort(a.lastProfileUpdateAt)}
+                      </div>
                     </div>
                     <Badge
                       tone={
