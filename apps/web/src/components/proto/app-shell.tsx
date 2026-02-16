@@ -28,19 +28,29 @@ const NAV = [
 
 const NEEDS_ATTENTION = [
   {
-    title: "Tool error: calendar_fetch timed out",
-    meta: "Agent: Mira • 2m ago",
-    tone: "warning" as const,
+    category: "Comment",
+    categoryClass:
+      "bg-rose-50 text-rose-700 ring-rose-200", // coral/red-ish
+    title: "Calendar tool timed out",
+    description: "calendar_fetch exceeded 4.8s p95. Suggest retry or fallback provider.",
+    who: "Mira",
+    time: "2m",
   },
   {
-    title: "Thread stalled: awaiting operator approval",
-    meta: "Thread #1842 • 11m ago",
-    tone: "neutral" as const,
+    category: "Approval",
+    categoryClass: "bg-amber-50 text-amber-800 ring-amber-200",
+    title: "Awaiting operator decision",
+    description: "Thread #1842 is blocked on deploy confirmation.",
+    who: "Ops",
+    time: "11m",
   },
   {
+    category: "Alert",
+    categoryClass: "bg-violet-50 text-violet-700 ring-violet-200",
     title: "Low confidence: identity match",
-    meta: "Agent: Darshan • 23m ago",
-    tone: "warning" as const,
+    description: "Secondary signal diverged. Recommend manual verification step.",
+    who: "Darshan",
+    time: "23m",
   },
 ];
 
@@ -140,31 +150,58 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               </div>
             )}
 
-            <div className="space-y-2">
-              {NEEDS_ATTENTION.map((q, idx) => (
+            <div
+              className={cn(
+                "overflow-hidden rounded-2xl ring-1 ring-line bg-white",
+                collapsed && "rounded-xl"
+              )}
+            >
+              {NEEDS_ATTENTION.map((n, idx) => (
                 <div
                   key={idx}
                   className={cn(
-                    "rounded-xl p-3 ring-1 ring-line transition hover:bg-slate-50",
-                    collapsed && "p-2"
+                    "group flex items-start gap-3 px-3 py-3 transition",
+                    "hover:bg-slate-50",
+                    idx !== NEEDS_ATTENTION.length - 1 && "border-b border-line/70"
                   )}
                 >
-                  <div className="flex items-start gap-2">
-                    <span
-                      className={cn(
-                        "mt-1 h-2.5 w-2.5 rounded-full",
-                        q.tone === "warning" ? "bg-amber-400" : "bg-slate-300"
-                      )}
-                    />
-                    {!collapsed && (
-                      <div className="min-w-0">
-                        <div className="truncate text-xs font-medium text-slate-800">
-                          {q.title}
-                        </div>
-                        <div className="truncate text-[11px] text-muted">{q.meta}</div>
-                      </div>
+                  {/* Avatar */}
+                  <div
+                    className={cn(
+                      "mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-2xl",
+                      "bg-slate-900 text-white shadow-softSm"
                     )}
+                    aria-hidden
+                  >
+                    <span className="text-xs font-semibold">
+                      {n.who.slice(0, 1).toUpperCase()}
+                    </span>
                   </div>
+
+                  {!collapsed ? (
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <Badge className={cn("ring-1", n.categoryClass)}>
+                              {n.category}
+                            </Badge>
+                            <div className="truncate text-xs font-semibold text-slate-900">
+                              {n.title}
+                            </div>
+                          </div>
+                          <div className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-muted">
+                            {n.description}
+                          </div>
+                        </div>
+                        <div className="shrink-0 text-[11px] text-slate-400">
+                          {n.time}
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="mt-1 h-2.5 w-2.5 rounded-full bg-amber-400" />
+                  )}
                 </div>
               ))}
             </div>
