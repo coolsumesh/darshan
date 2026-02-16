@@ -20,6 +20,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import ThemeToggle from "@/components/proto/theme-toggle";
+import FontSizeToggle from "@/components/proto/font-size-toggle";
 
 const NAV = [
   { href: "/dashboard", label: "Dashboard", icon: Activity },
@@ -456,6 +457,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             </div>
 
             <div className="flex items-center gap-2">
+              <FontSizeToggle />
               <ThemeToggle />
               <Button variant="secondary" size="sm">
                 New thread

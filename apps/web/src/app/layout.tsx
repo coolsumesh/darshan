@@ -25,10 +25,17 @@ export default function RootLayout({
           dangerouslySetInnerHTML={{
             __html: `(() => {
   try {
-    const stored = localStorage.getItem('darshan-theme');
-    const theme = stored ?? (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    // Theme
+    const storedTheme = localStorage.getItem('darshan-theme');
+    const theme = storedTheme ?? (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
     if (theme === 'dark') document.documentElement.classList.add('dark');
     else document.documentElement.classList.remove('dark');
+
+    // Font size (rem scaling)
+    const storedSize = localStorage.getItem('darshan-font-size');
+    const map = { sm: 14, md: 16, lg: 18, xl: 20 };
+    const px = (storedSize && map[storedSize]) ? map[storedSize] : 16;
+    document.documentElement.style.setProperty('--base-font-size', px + 'px');
   } catch (e) {}
 })();`,
           }}

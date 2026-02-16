@@ -1,9 +1,30 @@
+"use client";
+
+import * as React from "react";
 import ThemeToggle from "@/components/proto/theme-toggle";
+import {
+  FontSizeSelector,
+  setFontSizePreset,
+  type FontSizePreset,
+} from "@/components/proto/font-size-toggle";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 
 export default function SettingsPage() {
+  const [fontSize, setFontSize] = React.useState<FontSizePreset>("md");
+
+  React.useEffect(() => {
+    try {
+      const stored = localStorage.getItem("darshan-font-size") as FontSizePreset | null;
+      const next: FontSizePreset = stored === "sm" || stored === "md" || stored === "lg" || stored === "xl" ? stored : "md";
+      setFontSize(next);
+      setFontSizePreset(next);
+    } catch {
+      // no-op
+    }
+  }, []);
+
   return (
     <div className="grid grid-cols-12 gap-4">
       <div className="col-span-12 lg:col-span-7">
@@ -36,6 +57,24 @@ export default function SettingsPage() {
                 </div>
                 <div className="mt-2">
                   <ThemeToggle size="md" />
+                </div>
+              </div>
+
+              <div>
+                <div className="text-xs font-semibold text-slate-700 dark:text-slate-200">
+                  Font size
+                </div>
+                <div className="mt-2">
+                  <FontSizeSelector
+                    value={fontSize}
+                    onChange={(v) => {
+                      setFontSize(v);
+                      setFontSizePreset(v);
+                    }}
+                  />
+                </div>
+                <div className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+                  Uses rem scaling (default: Medium / 16px).
                 </div>
               </div>
 
