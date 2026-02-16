@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Darshan — Web UI (Prototype)</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">Darshan <span class="muted">Web UI</span></div>
+      <nav class="nav">
+        <a href="#" id="nav-agents" class="navlink">Agents</a>
+        <a href="#team" id="nav-team" class="navlink">Team</a>
+      </nav>
+    </header>
+
+    <main class="app" id="app"></main>
+
+    <!-- Profile viewer: modal / side sheet -->
+    <div class="overlay hidden" id="profile-overlay" aria-hidden="true">
+      <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="profile-title">
+        <div class="sheet-header">
+          <div>
+            <h2 id="profile-title">Profile Viewer</h2>
+            <div class="pill">Prototype / mocked</div>
+          </div>
+          <button class="btn btn-ghost" id="profile-close" aria-label="Close profile viewer">✕</button>
+        </div>
+
+        <div class="banner" role="note">
+          <strong>Warning:</strong> Profiles may contain sensitive info. Access is audited.
+        </div>
+
+        <div class="tabs" role="tablist" aria-label="Profile sections">
+          <button class="tab active" role="tab" aria-selected="true" data-tab="identity">Identity</button>
+          <button class="tab" role="tab" aria-selected="false" data-tab="user-notes">User Notes</button>
+          <button class="tab" role="tab" aria-selected="false" data-tab="memory">Memory</button>
+        </div>
+
+        <section class="tabpanes">
+          <div class="pane active" role="tabpanel" data-pane="identity">
+            <pre class="code" id="profile-identity"></pre>
+          </div>
+          <div class="pane" role="tabpanel" data-pane="user-notes">
+            <pre class="code" id="profile-user"></pre>
+          </div>
+          <div class="pane" role="tabpanel" data-pane="memory">
+            <pre class="code" id="profile-memory"></pre>
+          </div>
+        </section>
+
+        <div class="sheet-footer">
+          <div class="muted small">
+            This is a UI-only prototype. Content is hardcoded; no backend wiring.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>
