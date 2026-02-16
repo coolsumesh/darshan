@@ -222,6 +222,34 @@ When rate-limited:
 - emit `*.rate_limited` audit events
 - prefer queued backoff over hard failure for connector retries
 
+### Rate-limit logging (privacy-aware)
+Rate limiting is a security control, but its logs can easily become a privacy leak. Log **enough to investigate abuse and tune limits**, without capturing user content.
+
+**What to log (recommended)**
+- Timestamp, environment, service name/version
+- `event`: e.g. `auth.rate_limited`, `message.rate_limited`, `run.rate_limited`, `a2a.delegate.rate_limited`
+- Actor identifiers: `actor_type` + `actor_id` (internal ID). If you must log IP/user-agent, **minimize** (e.g., truncated IP, hashed UA).
+- Scope/key metadata (no raw values): which limiter was hit (per-ip/per-user/per-thread/per-connector), bucket name, and a **hashed** rate-limit key
+- Target/action metadata: route name or action, HTTP method, status code
+- Limit parameters: `limit`, `window_ms`, current count (if available), and `retry_after_ms`
+- Correlation IDs: `trace_id`/`span_id`; include `thread_id`/`run_id` only as identifiers (no content)
+
+**What to never log**
+- Prompts, message bodies, attachments, tool inputs/outputs, or model responses
+- Secrets of any kind: API keys, OAuth tokens, Authorization headers, cookies, signing keys
+- Full request/response bodies or headers (even on errors)
+- Raw connector payloads or third-party responses
+
+**Access control**
+- Treat rate-limit logs as **sensitive security telemetry** (similar to audit logs).
+- Restrict access to admins/security operators only; enforce least privilege and record access in audit logs where feasible.
+- Store separately from general application logs; apply encryption at rest and in transit.
+
+**Retention**
+- Default to short retention for raw rate-limit events (e.g., **7–30 days**) unless a longer period is justified.
+- Prefer aggregations (counts per limiter/action) for longer-term analytics.
+- Make retention configurable per environment/tenant and document deletion/rotation procedures.
+
 ---
 
 ## 6) Secure defaults checklist for deployment
