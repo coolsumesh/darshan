@@ -1,5 +1,6 @@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ButtonLink } from "@/components/ui/button-link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 export default function ThreadsPage() {
@@ -40,9 +41,13 @@ export default function ThreadsPage() {
                   </div>
                   <div className="flex items-center gap-2">
                     <Badge tone={t.tone as any}>{t.tone}</Badge>
-                    <Button size="sm" variant="ghost">
-                      Open
-                    </Button>
+                    <ButtonLink
+                      href={`/inspect/${t.id.replace("#", "")}`}
+                      size="sm"
+                      variant="ghost"
+                    >
+                      Inspect
+                    </ButtonLink>
                   </div>
                 </div>
               ))}

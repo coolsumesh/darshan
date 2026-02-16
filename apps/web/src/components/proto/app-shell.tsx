@@ -11,11 +11,13 @@ import {
   CalendarDays,
   ChevronLeft,
   ChevronRight,
+  FolderKanban,
   Menu,
   MessageSquareText,
   MoreHorizontal,
   Settings,
   Sparkles,
+  Tags,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { Badge } from "@/components/ui/badge";
@@ -28,6 +30,8 @@ import { applyPrefsToDom, loadPrefs, useUIPreferences } from "@/components/proto
 const NAV = [
   { kind: "link", href: "/dashboard", label: "Dashboard", icon: Activity },
   { kind: "link", href: "/agents", label: "Agents", icon: Bot },
+  { kind: "link", href: "/projects", label: "Projects", icon: FolderKanban },
+  { kind: "link", href: "/topics", label: "Topics", icon: Tags },
   { kind: "link", href: "/threads", label: "Threads", icon: MessageSquareText },
   { kind: "link", href: "/attendance", label: "Attendance", icon: CalendarClock },
   { kind: "section", label: "Analytics" },
