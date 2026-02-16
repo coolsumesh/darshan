@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <!-- Background -->
+  <rect width="256" height="256" fill="#f5f3ff"/>
+  
+  <!-- Decorative circle -->
+  <circle cx="128" cy="128" r="107.52" fill="#8b5cf6" opacity="0.15"/>
+  <circle cx="128" cy="128" r="89.6" fill="#8b5cf6" opacity="0.25"/>
+  
+  <!-- Main circle -->
+  <circle cx="128" cy="128" r="81.92" fill="#8b5cf6"/>
+  
+  <!-- Symbol -->
+  <g color="#3b82f6">
+    
+        <text x="128" y="163.84" text-anchor="middle" font-family="monospace" font-size="197.12" font-weight="bold" fill="currentColor">&lt;/&gt;</text>
+        
+  </g>
+  
+  <!-- Accent ring -->
+  <circle cx="128" cy="128" r="97.28" fill="none" stroke="#c4b5fd" stroke-width="2" opacity="0.6"/>
+</svg>
