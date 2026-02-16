@@ -21,6 +21,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import ThemeToggle from "@/components/proto/theme-toggle";
 import FontSizeToggle from "@/components/proto/font-size-toggle";
+import { applyPrefsToDom, loadPrefs, useUIPreferences } from "@/components/proto/ui-preferences";
 
 const NAV = [
   { href: "/dashboard", label: "Dashboard", icon: Activity },
@@ -102,7 +103,7 @@ function Tabs({
             onClick={() => onChange(t.key)}
             className={cn(
               "inline-flex min-w-0 flex-1 items-center justify-center gap-2 rounded-lg px-2 py-2 text-xs font-semibold transition",
-              "focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40",
+              "focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgb(var(--accent-500)/0.45)]",
               active
                 ? "bg-white text-slate-900 shadow-softSm ring-1 ring-line dark:bg-slate-950 dark:text-slate-100 dark:ring-slate-800"
                 : "text-slate-600 hover:bg-white/70 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-950/40"
@@ -231,7 +232,7 @@ function NeedsAttentionQueue({ collapsed }: { collapsed: boolean }) {
                       className={cn(
                         "inline-flex h-11 w-11 items-center justify-center rounded-xl ring-1 ring-transparent",
                         "text-slate-500 hover:bg-slate-100 hover:text-slate-700 hover:ring-line",
-                        "focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40",
+                        "focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgb(var(--accent-500)/0.45)]",
                         "dark:text-slate-300 dark:hover:bg-slate-900/60 dark:hover:text-slate-100 dark:hover:ring-slate-800"
                       )}
                       aria-label={`More actions for ${n.source}`}
@@ -318,11 +319,26 @@ function Sidebar({
         {showCollapse && setCollapsed && (
           <button
             type="button"
-            onClick={() => setCollapsed(!collapsed)}
+            onClick={() => {
+              const next = !collapsed;
+              setCollapsed(next);
+              try {
+                const stored = loadPrefs();
+                const updated = { ...stored, sidebarCollapsed: next };
+                localStorage.setItem("darshan-ui-prefs", JSON.stringify(updated));
+                window.dispatchEvent(
+                  new CustomEvent("darshan:prefs", {
+                    detail: updated,
+                  })
+                );
+              } catch {
+                // no-op
+              }
+            }}
             className={cn(
               "inline-flex h-11 w-11 items-center justify-center rounded-xl ring-1 ring-line",
               "text-slate-500 hover:bg-slate-50 hover:text-slate-700",
-              "focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40",
+              "focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgb(var(--accent-500)/0.45)]",
               "dark:ring-slate-800 dark:hover:bg-slate-900/60 dark:text-slate-300 dark:hover:text-slate-100"
             )}
             aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
@@ -353,7 +369,7 @@ function Sidebar({
                 href={item.href}
                 className={cn(
                   "group flex items-center gap-3 rounded-xl px-3 py-3 text-sm transition",
-                  "hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40",
+                  "hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgb(var(--accent-500)/0.45)]",
                   "dark:hover:bg-slate-900/40",
                   active &&
                     "bg-brand-50 text-brand-700 ring-1 ring-brand-100 dark:bg-brand-500/10 dark:text-brand-100 dark:ring-brand-500/20"
@@ -390,8 +406,28 @@ function Sidebar({
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const { prefs } = useUIPreferences();
   const [collapsed, setCollapsed] = React.useState(false);
   const [mobileOpen, setMobileOpen] = React.useState(false);
+
+  // Apply UI preferences immediately and keep in sync.
+  React.useEffect(() => {
+    try {
+      applyPrefsToDom(prefs);
+    } catch {
+      // no-op
+    }
+  }, [prefs]);
+
+  // Initialize sidebar collapsed state from prefs/localStorage.
+  React.useEffect(() => {
+    try {
+      const initial = loadPrefs().sidebarCollapsed;
+      setCollapsed(!!initial);
+    } catch {
+      // no-op
+    }
+  }, []);
 
   // Close mobile drawer on navigation.
   React.useEffect(() => {
@@ -437,7 +473,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                 className={cn(
                   "inline-flex h-11 w-11 items-center justify-center rounded-xl ring-1 ring-line",
                   "text-slate-600 hover:bg-slate-50 hover:text-slate-900",
-                  "focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40",
+                  "focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgb(var(--accent-500)/0.45)]",
                   "lg:hidden",
                   "dark:ring-slate-800 dark:hover:bg-slate-900/60 dark:text-slate-300 dark:hover:text-slate-100"
                 )}

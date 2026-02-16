@@ -93,7 +93,7 @@ export function FontSizeSelector({
             onClick={() => onChange(p.key)}
             className={
               "inline-flex flex-1 items-center justify-center rounded-lg px-2 py-2 text-xs font-semibold transition " +
-              "focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40 " +
+              "focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgb(var(--accent-500)/0.45)] " +
               (active
                 ? "bg-white text-slate-900 shadow-softSm ring-1 ring-line dark:bg-slate-950 dark:text-slate-100 dark:ring-slate-800"
                 : "text-slate-600 hover:bg-white/70 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-950/40")

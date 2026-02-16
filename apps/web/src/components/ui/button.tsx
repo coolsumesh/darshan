@@ -16,7 +16,7 @@ export function Button({
     <button
       className={cn(
         "inline-flex items-center justify-center gap-2 rounded-xl font-medium transition",
-        "focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/50 focus-visible:ring-offset-2 focus-visible:ring-offset-transparent",
+        "focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgb(var(--accent-500)/0.55)] focus-visible:ring-offset-2 focus-visible:ring-offset-transparent",
         "disabled:pointer-events-none disabled:opacity-50",
         size === "sm" ? "h-11 sm:h-9 px-3 text-sm" : "h-11 sm:h-10 px-4 text-sm",
         variant === "primary" &&

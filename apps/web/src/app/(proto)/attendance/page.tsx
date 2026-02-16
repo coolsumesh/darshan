@@ -167,7 +167,7 @@ export default function AttendancePage() {
                     onClick={() => setSelectedAgent(a.name)}
                     className={cn(
                       "flex items-center gap-3 rounded-2xl p-3 text-left ring-1 transition",
-                      "focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40",
+                      "focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgb(var(--accent-500)/0.45)]",
                       selected
                         ? "bg-brand-50 ring-brand-100 dark:bg-brand-500/10 dark:ring-brand-500/20"
                         : "bg-white ring-line hover:bg-slate-50 dark:bg-slate-950 dark:ring-slate-800 dark:hover:bg-slate-900/40"

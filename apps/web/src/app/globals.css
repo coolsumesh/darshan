@@ -3,11 +3,27 @@
 :root {
   --background: 248 250 252;
   --foreground: 15 23 42;
+
+  /* Accent (used for focus rings + a few affordances). */
+  --accent-500: 59 130 246;
+  --accent-600: 37 99 235;
+  --accent-700: 29 78 216;
 }
 
 .dark {
   --background: 2 6 23; /* slate-950 */
   --foreground: 226 232 240; /* slate-200 */
+}
+
+/* High contrast mode (best-effort; many Tailwind colors are still fixed) */
+.hc {
+  --background: 255 255 255;
+  --foreground: 0 0 0;
+}
+
+.dark.hc {
+  --background: 0 0 0;
+  --foreground: 255 255 255;
 }
 
 html,
@@ -37,4 +53,20 @@ body {
 
 .dark .bg-grid {
   background-image: radial-gradient(rgba(148, 163, 184, 0.10) 1px, transparent 1px);
+}
+
+/* Reduced motion */
+.reduce-motion *,
+.reduce-motion *::before,
+.reduce-motion *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
+
+/* Focus indicators toggle (disables focus-visible rings globally) */
+.no-focus *:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
 }

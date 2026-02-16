@@ -76,7 +76,7 @@ function CommentPopover({
         <div className="text-xs font-semibold text-slate-800">Add Comment</div>
         <button
           onClick={onClose}
-          className="rounded-lg px-2 py-1 text-xs text-slate-500 hover:bg-slate-50 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40 dark:hover:bg-slate-900/40 dark:text-slate-300 dark:hover:text-slate-100"
+          className="rounded-lg px-2 py-1 text-xs text-slate-500 hover:bg-slate-50 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgb(var(--accent-500)/0.45)] dark:hover:bg-slate-900/40 dark:text-slate-300 dark:hover:text-slate-100"
         >
           Close
         </button>
@@ -92,7 +92,7 @@ function CommentPopover({
         {["👍", "✅", "👀", "🔥", "❓"].map((e) => (
           <button
             key={e}
-            className="inline-flex items-center rounded-full bg-white px-2.5 py-1 text-xs ring-1 ring-line hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40 dark:bg-slate-950 dark:ring-slate-800 dark:hover:bg-slate-900/50"
+            className="inline-flex items-center rounded-full bg-white px-2.5 py-1 text-xs ring-1 ring-line hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgb(var(--accent-500)/0.45)] dark:bg-slate-950 dark:ring-slate-800 dark:hover:bg-slate-900/50"
             onClick={() => setValue((v) => (v ? `${v} ${e}` : e))}
             title={`Add ${e}`}
           >
@@ -184,7 +184,7 @@ function Bubble({
                 onClick={onComment}
                 className={cn(
                   "inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs",
-                  "bg-white shadow-softSm ring-1 ring-line hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40 dark:bg-slate-950 dark:ring-slate-800 dark:hover:bg-slate-900/40"
+                  "bg-white shadow-softSm ring-1 ring-line hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgb(var(--accent-500)/0.45)] dark:bg-slate-950 dark:ring-slate-800 dark:hover:bg-slate-900/40"
                 )}
               >
                 <MessageCirclePlus className="h-4 w-4 text-slate-500" />
