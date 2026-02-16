@@ -5,8 +5,10 @@ import { usePathname } from "next/navigation";
 import * as React from "react";
 import {
   Activity,
+  BarChart3,
   Bot,
   CalendarClock,
+  CalendarDays,
   ChevronLeft,
   ChevronRight,
   Menu,
@@ -24,11 +26,15 @@ import FontSizeToggle from "@/components/proto/font-size-toggle";
 import { applyPrefsToDom, loadPrefs, useUIPreferences } from "@/components/proto/ui-preferences";
 
 const NAV = [
-  { href: "/dashboard", label: "Dashboard", icon: Activity },
-  { href: "/agents", label: "Agents", icon: Bot },
-  { href: "/threads", label: "Threads", icon: MessageSquareText },
-  { href: "/attendance", label: "Attendance", icon: CalendarClock },
-  { href: "/settings", label: "Settings", icon: Settings },
+  { kind: "link", href: "/dashboard", label: "Dashboard", icon: Activity },
+  { kind: "link", href: "/agents", label: "Agents", icon: Bot },
+  { kind: "link", href: "/threads", label: "Threads", icon: MessageSquareText },
+  { kind: "link", href: "/attendance", label: "Attendance", icon: CalendarClock },
+  { kind: "section", label: "Analytics" },
+  { kind: "link", href: "/summary/week", label: "Week summary", icon: BarChart3 },
+  { kind: "link", href: "/summary/day", label: "Day summary", icon: CalendarDays },
+  { kind: "section", label: "Preferences" },
+  { kind: "link", href: "/settings", label: "Settings", icon: Settings },
 ] as const;
 
 type NeedsAttentionType = "error" | "approval" | "unanswered";
@@ -361,6 +367,18 @@ function Sidebar({
 
         <nav className="space-y-1" aria-label="Primary">
           {NAV.map((item) => {
+            if (item.kind === "section") {
+              if (collapsed) return null;
+              return (
+                <div
+                  key={`section-${item.label}`}
+                  className="px-3 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400"
+                >
+                  {item.label}
+                </div>
+              );
+            }
+
             const active = pathname === item.href;
             const Icon = item.icon;
             return (
@@ -382,6 +400,7 @@ function Sidebar({
                       ? "text-brand-700 dark:text-brand-100"
                       : "text-slate-500 group-hover:text-slate-700 dark:text-slate-300 dark:group-hover:text-slate-100"
                   )}
+                  aria-hidden
                 />
                 {!collapsed && (
                   <span className={cn("font-medium", active && "text-brand-700")}>{item.label}</span>
