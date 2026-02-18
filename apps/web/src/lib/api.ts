@@ -50,8 +50,9 @@ export function fetchThreads(): Promise<{ ok: true; threads: ApiThread[] }> {
 export type ApiMessage = {
   id: string;
   thread_id: string;
-  author_type: string;
+  author_type: "human" | "agent" | "system";
   author_user_id: string | null;
+  author_agent_id: string | null;
   content: string;
   created_at: string;
 };

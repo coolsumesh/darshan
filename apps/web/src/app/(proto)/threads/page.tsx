@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import {
+  fetchProjectThreads,
   fetchThreads,
   fetchAgents,
   fetchMessages,
@@ -15,40 +16,77 @@ import {
   type ApiThread,
   type ApiMessage,
 } from "@/lib/api";
+import { useProject } from "@/lib/project-context";
 import { formatRelativeTime } from "@/lib/time";
 
 function threadLabel(t: ApiThread) {
   return t.title ?? `Thread #${t.id.slice(0, 8)}`;
 }
 
+/** Resolve display name for a message sender */
+function senderName(
+  msg: ApiMessage,
+  agentMap: Map<string, ApiAgent>,
+): string {
+  if (msg.author_type === "human") return msg.author_user_id ?? "Human";
+  if (msg.author_type === "system") return "System";
+  if (msg.author_agent_id) {
+    const agent = agentMap.get(msg.author_agent_id);
+    if (agent) return agent.name;
+  }
+  return "Agent";
+}
+
 export default function ThreadsPage() {
+  const { selected: project } = useProject();
+
   const [threads, setThreads] = React.useState<ApiThread[]>([]);
   const [agents, setAgents] = React.useState<ApiAgent[]>([]);
+  const [agentMap, setAgentMap] = React.useState<Map<string, ApiAgent>>(new Map());
   const [loading, setLoading] = React.useState(true);
+
   const [selected, setSelected] = React.useState<ApiThread | null>(null);
   const [messages, setMessages] = React.useState<ApiMessage[]>([]);
   const [msgLoading, setMsgLoading] = React.useState(false);
+
   const [draft, setDraft] = React.useState("");
   const [sending, setSending] = React.useState(false);
   const [selectedAgentIds, setSelectedAgentIds] = React.useState<string[]>([]);
+
   const [newTitle, setNewTitle] = React.useState("");
   const [creating, setCreating] = React.useState(false);
   const [showThreadList, setShowThreadList] = React.useState(true);
+
   const messagesEndRef = React.useRef<HTMLDivElement>(null);
   const pollRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
 
-  React.useEffect(() => {
-    Promise.all([fetchThreads(), fetchAgents()])
+  // Load threads (project-scoped when available) + agents
+  function loadThreads(projectId?: string) {
+    setLoading(true);
+    const threadsReq = projectId ? fetchProjectThreads(projectId) : fetchThreads();
+    Promise.all([threadsReq, fetchAgents()])
       .then(([threadRes, agentRes]) => {
         setThreads(threadRes.threads);
         setAgents(agentRes.agents);
-        // auto-select first thread
-        if (threadRes.threads.length > 0) setSelected(threadRes.threads[0]);
+
+        // Build id → agent lookup map
+        const map = new Map<string, ApiAgent>();
+        for (const a of agentRes.agents) map.set(a.id, a);
+        setAgentMap(map);
+
+        // Auto-select first thread
+        if (threadRes.threads.length > 0) {
+          setSelected((prev) => prev ?? threadRes.threads[0]);
+        }
       })
       .finally(() => setLoading(false));
-  }, []);
+  }
 
-  // Load messages when thread selected
+  React.useEffect(() => {
+    loadThreads(project?.id);
+  }, [project?.id]);
+
+  // Load messages + start polling when thread changes
   React.useEffect(() => {
     if (!selected) return;
     setMsgLoading(true);
@@ -57,16 +95,19 @@ export default function ThreadsPage() {
       .catch(() => setMessages([]))
       .finally(() => setMsgLoading(false));
 
-    // Poll for new messages every 3s
+    // Poll every 3s for new messages
     if (pollRef.current) clearInterval(pollRef.current);
     pollRef.current = setInterval(() => {
       fetchMessages(selected.id)
         .then((res) => setMessages(res.messages))
         .catch(() => {});
     }, 3000);
-    return () => { if (pollRef.current) clearInterval(pollRef.current); };
-  }, [selected]);
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
+  }, [selected?.id]);
 
+  // Scroll to bottom on new messages
   React.useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
@@ -77,7 +118,7 @@ export default function ThreadsPage() {
     try {
       await postMessage(selected.id, draft.trim(), selectedAgentIds);
       setDraft("");
-      // immediately reload messages
+      // Immediately reload messages
       const res = await fetchMessages(selected.id);
       setMessages(res.messages);
     } catch {
@@ -90,7 +131,7 @@ export default function ThreadsPage() {
   async function handleCreate() {
     setCreating(true);
     try {
-      const res = await createThread(newTitle.trim() || undefined);
+      const res = await createThread(newTitle.trim() || undefined, project?.id);
       setThreads((prev) => [res.thread, ...prev]);
       setSelected(res.thread);
       setMessages([]);
@@ -105,15 +146,30 @@ export default function ThreadsPage() {
   return (
     <div className="flex gap-4" style={{ height: "calc(100vh - 9rem)" }}>
 
-      {/* Thread list — collapsible on mobile */}
-      <div className={`flex-shrink-0 ${showThreadList ? "w-72" : "w-0 overflow-hidden"} flex flex-col gap-3 transition-all`}>
+      {/* Thread list — collapsible */}
+      <div
+        className={`flex-shrink-0 ${
+          showThreadList ? "w-72" : "w-0 overflow-hidden"
+        } flex flex-col gap-3 transition-all`}
+      >
         <Card className="flex flex-col h-full overflow-hidden">
           <CardHeader className="flex flex-row items-center justify-between pb-3">
-            <CardTitle className="text-sm">Threads</CardTitle>
-            <Button size="sm" variant="primary" onClick={handleCreate} disabled={creating}>
+            <div>
+              <CardTitle className="text-sm">Threads</CardTitle>
+              {project && (
+                <div className="mt-0.5 text-xs text-muted">{project.name}</div>
+              )}
+            </div>
+            <Button
+              size="sm"
+              variant="primary"
+              onClick={handleCreate}
+              disabled={creating}
+            >
               {creating ? "…" : "New"}
             </Button>
           </CardHeader>
+
           <CardContent className="flex flex-col gap-3 flex-1 overflow-auto pt-0">
             <Input
               placeholder="Thread title…"
@@ -121,16 +177,25 @@ export default function ThreadsPage() {
               onChange={(e) => setNewTitle(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleCreate()}
             />
-            {loading && <div className="text-xs text-muted text-center py-4">Loading…</div>}
-            {!loading && threads.length === 0 && (
-              <div className="text-xs text-muted text-center py-4">No threads yet.</div>
+
+            {loading && (
+              <div className="text-xs text-muted text-center py-4">Loading…</div>
             )}
+            {!loading && threads.length === 0 && (
+              <div className="text-xs text-muted text-center py-4">
+                No threads yet.
+              </div>
+            )}
+
             <div className="space-y-1">
               {threads.map((t) => (
                 <button
                   key={t.id}
                   type="button"
-                  onClick={() => { setSelected(t); setShowThreadList(false); }}
+                  onClick={() => {
+                    setSelected(t);
+                    setShowThreadList(false);
+                  }}
                   className={`w-full text-left rounded-xl p-3 ring-1 transition text-sm ${
                     selected?.id === t.id
                       ? "bg-brand-50 ring-brand-200 dark:bg-brand-500/10 dark:ring-brand-500/30 font-semibold"
@@ -170,7 +235,7 @@ export default function ThreadsPage() {
             </div>
           </div>
 
-          {/* Agent selector */}
+          {/* Agent selector — only show online agents */}
           {selected && onlineAgents.length > 0 && (
             <div className="mt-2 flex flex-wrap gap-2">
               <span className="text-xs text-muted self-center">Reply from:</span>
@@ -180,7 +245,9 @@ export default function ThreadsPage() {
                   type="button"
                   onClick={() =>
                     setSelectedAgentIds((prev) =>
-                      prev.includes(a.id) ? prev.filter((id) => id !== a.id) : [...prev, a.id]
+                      prev.includes(a.id)
+                        ? prev.filter((id) => id !== a.id)
+                        : [...prev, a.id]
                     )
                   }
                   className={`rounded-full px-3 py-1 text-xs ring-1 transition ${
@@ -207,7 +274,9 @@ export default function ThreadsPage() {
             </div>
           )}
           {selected && msgLoading && (
-            <div className="flex h-full items-center justify-center text-sm text-muted">Loading…</div>
+            <div className="flex h-full items-center justify-center text-sm text-muted">
+              Loading…
+            </div>
           )}
           {selected && !msgLoading && messages.length === 0 && (
             <div className="flex h-full items-center justify-center text-sm text-muted">
@@ -218,8 +287,12 @@ export default function ThreadsPage() {
             <div className="space-y-3 px-1">
               {messages.map((m) => {
                 const isHuman = m.author_type === "human";
+                const name = senderName(m, agentMap);
                 return (
-                  <div key={m.id} className={`flex ${isHuman ? "justify-end" : "justify-start"}`}>
+                  <div
+                    key={m.id}
+                    className={`flex ${isHuman ? "justify-end" : "justify-start"}`}
+                  >
                     <div
                       className={`max-w-[75%] rounded-2xl px-4 py-3 text-sm ${
                         isHuman
@@ -229,7 +302,7 @@ export default function ThreadsPage() {
                     >
                       {!isHuman && (
                         <div className="mb-1 text-xs font-semibold opacity-70">
-                          {m.author_user_id ?? "Agent"}
+                          {name}
                         </div>
                       )}
                       <div className="whitespace-pre-wrap">{m.content}</div>
@@ -266,7 +339,11 @@ export default function ThreadsPage() {
                 }}
                 disabled={sending}
               />
-              <Button variant="primary" onClick={handleSend} disabled={sending || !draft.trim()}>
+              <Button
+                variant="primary"
+                onClick={handleSend}
+                disabled={sending || !draft.trim()}
+              >
                 {sending ? "…" : "Send"}
               </Button>
             </div>
