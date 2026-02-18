@@ -13,6 +13,7 @@ import { registerRuns } from "./routes/runs.js";
 import { registerA2A } from "./routes/a2a.js";
 import { registerAuditRoute } from "./routes/auditRoute.js";
 import { registerTasks } from "./routes/tasks.js";
+import { registerProjects } from "./routes/projects.js";
 import { registerWs } from "./routes/ws.js";
 import { startConnector } from "./connector.js";
 
@@ -42,6 +43,7 @@ await registerRuns(server, db);
 await registerA2A(server, db);
 await registerAuditRoute(server, db);
 await registerTasks(server, db);
+await registerProjects(server, db);
 await registerOpsRateLimits(server, db);
 await registerWs(server);
 
