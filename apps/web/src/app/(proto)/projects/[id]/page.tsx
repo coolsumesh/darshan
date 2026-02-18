@@ -2,11 +2,11 @@
 
 import * as React from "react";
 import { useParams, useRouter } from "next/navigation";
-import { ChevronLeft, Plus, Circle, CheckCircle2, Clock, Lightbulb, XCircle } from "lucide-react";
+import { ChevronLeft, Plus, CheckCircle2, Clock, Lightbulb, XCircle } from "lucide-react";
 import {
-  fetchProject, fetchAgents, fetchProjectTasks,
+  fetchProject, fetchProjectTasks, fetchProjectThreads,
   createTask, approveTask, rejectTask,
-  type ApiProject, type ApiAgent, type ApiTask,
+  type ApiProject, type ApiTask, type ApiThread,
 } from "@/lib/api";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -27,12 +27,12 @@ function Avatar({ name, size = "md" }: { name: string; size?: "sm" | "md" | "lg"
   );
 }
 
-type TabId = "sprint" | "team" | "assignments";
+type TabId = "sprint" | "queue" | "feedback";
 
 const TABS: { id: TabId; label: string }[] = [
-  { id: "sprint",      label: "Sprint Board" },
-  { id: "team",        label: "Team" },
-  { id: "assignments", label: "Task Assignments" },
+  { id: "sprint", label: "Sprint Board" },
+  { id: "queue", label: "Task Queue" },
+  { id: "feedback", label: "Feedback Threads" },
 ];
 
 const STATUS_META: Record<string, { label: string; color: string; icon: React.ReactNode }> = {
@@ -177,62 +177,9 @@ function SprintBoard({ projectId, tasks, onRefresh }: { projectId: string; tasks
   );
 }
 
-// ── Team tab ─────────────────────────────────────────────────────────────────
+// ── Task Queue tab ───────────────────────────────────────────────────────────
 
-function TeamTab({ members, allAgents }: { members: ApiAgent[]; allAgents: ApiAgent[] }) {
-  const memberIds = new Set(members.map((m) => m.id));
-  const nonMembers = allAgents.filter((a) => !memberIds.has(a.id));
-
-  return (
-    <div className="flex flex-col gap-4">
-      <div>
-        <div className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-3">
-          Active on this project ({members.length})
-        </div>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {members.map((a) => (
-            <div key={a.id} className="flex items-center gap-3 rounded-2xl bg-white dark:bg-slate-950 ring-1 ring-line dark:ring-slate-800 p-4">
-              <Avatar name={a.name} />
-              <div className="flex-1 min-w-0">
-                <div className="text-sm font-semibold text-slate-900 dark:text-slate-100 truncate">{a.name}</div>
-                <div className="text-xs text-muted truncate">{(a as any).capabilities?.role ?? "Agent"}</div>
-              </div>
-              <div className="flex items-center gap-1 text-xs">
-                <Circle className={`h-2 w-2 fill-current ${a.status === "online" ? "text-emerald-500" : "text-slate-300"}`} />
-                <span className={a.status === "online" ? "text-emerald-600 dark:text-emerald-400" : "text-slate-400"}>
-                  {a.status}
-                </span>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {nonMembers.length > 0 && (
-        <div>
-          <div className="text-sm font-semibold text-slate-500 dark:text-slate-400 mb-3">
-            Not yet on this project
-          </div>
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
-            {nonMembers.map((a) => (
-              <div key={a.id} className="flex items-center gap-3 rounded-2xl bg-slate-50 dark:bg-slate-900/40 ring-1 ring-line dark:ring-slate-800 p-3 opacity-60">
-                <Avatar name={a.name} size="sm" />
-                <div className="flex-1 min-w-0">
-                  <div className="text-sm font-medium text-slate-700 dark:text-slate-300 truncate">{a.name}</div>
-                  <div className="text-xs text-muted">{(a as any).capabilities?.role ?? "Agent"}</div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ── Task Assignments tab ──────────────────────────────────────────────────────
-
-function AssignmentsTab({ tasks }: { tasks: ApiTask[] }) {
+function TaskQueueTab({ tasks }: { tasks: ApiTask[] }) {
   const inProgress = tasks.filter((t) => t.status === "in_progress");
   const approved = tasks.filter((t) => t.status === "approved");
 
@@ -299,6 +246,39 @@ function AssignmentsTab({ tasks }: { tasks: ApiTask[] }) {
   );
 }
 
+function FeedbackThreadsTab({ threads }: { threads: ApiThread[] }) {
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex items-center justify-between">
+        <div className="text-sm text-slate-600 dark:text-slate-300">
+          Threads scoped to this project ({threads.length})
+        </div>
+        <a
+          href="/threads"
+          className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-700"
+        >
+          Open Threads Workspace
+        </a>
+      </div>
+
+      {threads.length === 0 ? (
+        <div className="rounded-2xl border-2 border-dashed border-slate-200 dark:border-slate-700 p-6 text-center text-sm text-slate-400">
+          No feedback threads yet for this project.
+        </div>
+      ) : (
+        <div className="flex flex-col gap-2">
+          {threads.map((t) => (
+            <div key={t.id} className="rounded-xl bg-white dark:bg-slate-950 ring-1 ring-line dark:ring-slate-800 p-3">
+              <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">{t.title ?? `Thread ${t.id.slice(0, 6)}`}</div>
+              <div className="text-xs text-slate-500 mt-1">Updated: {new Date(t.updated_at).toLocaleString()}</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function ProjectDetailPage() {
@@ -306,22 +286,20 @@ export default function ProjectDetailPage() {
   const router = useRouter();
   const [tab, setTab] = React.useState<TabId>("sprint");
   const [project, setProject] = React.useState<ApiProject | null>(null);
-  const [members, setMembers] = React.useState<ApiAgent[]>([]);
-  const [allAgents, setAllAgents] = React.useState<ApiAgent[]>([]);
   const [tasks, setTasks] = React.useState<ApiTask[]>([]);
+  const [threads, setThreads] = React.useState<ApiThread[]>([]);
   const [loading, setLoading] = React.useState(true);
 
   const load = React.useCallback(async () => {
     try {
-      const [pRes, aRes, tRes] = await Promise.all([
+      const [pRes, tRes, thRes] = await Promise.all([
         fetchProject(id),
-        fetchAgents(),
         fetchProjectTasks(id),
+        fetchProjectThreads(id),
       ]);
       setProject(pRes.project);
-      setMembers(pRes.members);
-      setAllAgents(aRes.agents);
       setTasks(tRes.tasks);
+      setThreads(thRes.threads);
     } finally {
       setLoading(false);
     }
@@ -375,11 +353,11 @@ export default function ProjectDetailPage() {
       {tab === "sprint" && (
         <SprintBoard projectId={id} tasks={tasks} onRefresh={load} />
       )}
-      {tab === "team" && (
-        <TeamTab members={members} allAgents={allAgents} />
+      {tab === "queue" && (
+        <TaskQueueTab tasks={tasks} />
       )}
-      {tab === "assignments" && (
-        <AssignmentsTab tasks={tasks} />
+      {tab === "feedback" && (
+        <FeedbackThreadsTab threads={threads} />
       )}
     </div>
   );

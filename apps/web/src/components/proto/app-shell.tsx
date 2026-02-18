@@ -12,8 +12,6 @@ import {
   Settings,
   Sparkles,
   Users,
-  CheckSquare,
-  MessagesSquare,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import ThemeToggle from "@/components/proto/theme-toggle";
@@ -80,10 +78,8 @@ function ProjectSwitcher({ collapsed }: { collapsed: boolean }) {
 
 const NAV = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/projects", label: "Projects", icon: FolderKanban },
-  { href: "/tasks", label: "Task Queue", icon: CheckSquare },
   { href: "/agents", label: "Agent Registry", icon: Users },
-  { href: "/threads", label: "Feedback Threads", icon: MessagesSquare },
+  { href: "/projects", label: "Projects", icon: FolderKanban },
   { href: "/settings", label: "Settings", icon: Settings },
 ] as const;
 
