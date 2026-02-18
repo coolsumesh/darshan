@@ -14,6 +14,7 @@ import { registerA2A } from "./routes/a2a.js";
 import { registerAuditRoute } from "./routes/auditRoute.js";
 import { registerWs } from "./routes/ws.js";
 import { startConnector } from "./connector.js";
+import { registerProjects } from "./routes/projects.js";
 
 const PORT = Number(process.env.PORT ?? 4000);
 const HOST = process.env.HOST ?? "0.0.0.0";
@@ -41,6 +42,7 @@ await registerRuns(server, db);
 await registerA2A(server, db);
 await registerAuditRoute(server, db);
 await registerOpsRateLimits(server, db);
+await registerProjects(server, db);
 await registerWs(server);
 
 startConnector(db);

@@ -20,14 +20,11 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/cn";
 import {
   PROJECTS,
-  TASKS,
   type Task,
   type TaskStatus,
-  type TeamMember,
-  getTasksForProject,
-  getTeamForProject,
 } from "@/lib/projects";
-import { AGENTS, type Agent } from "@/lib/agents";
+import { type Agent } from "@/lib/agents";
+import { fetchProject, fetchTasks, fetchTeam, fetchAgents, createTask, addTeamMember, removeTeamMember, type TeamMemberWithAgent } from "@/lib/api";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 type Tab = "architecture" | "tech-spec" | "sprint-board" | "team";
@@ -193,20 +190,19 @@ function TechSpecTab() {
 
 // ─── Sprint Board Tab ─────────────────────────────────────────────────────────
 function SprintBoardTab({ projectId }: { projectId: string }) {
-  const initial = getTasksForProject(projectId);
-  const [tasks, setTasks] = React.useState<Task[]>(initial);
+  const [tasks, setTasks] = React.useState<Task[]>([]);
   const [addingIn, setAddingIn] = React.useState<TaskStatus | null>(null);
   const [newTitle, setNewTitle] = React.useState("");
 
-  function addTask(status: TaskStatus) {
+  React.useEffect(() => {
+    fetchTasks(projectId).then(setTasks);
+  }, [projectId]);
+
+  async function addTask(status: TaskStatus) {
     if (!newTitle.trim()) return;
-    const task: Task = {
-      id: `t-${Date.now()}`,
-      projectId,
-      title: newTitle.trim(),
-      status,
-      proposer: "You",
-    };
+    const payload = { title: newTitle.trim(), status, proposer: "You" };
+    const created = await createTask(projectId, payload);
+    const task: Task = created ?? { id: `t-${Date.now()}`, projectId, title: newTitle.trim(), status, proposer: "You" };
     setTasks((prev) => [...prev, task]);
     setNewTitle("");
     setAddingIn(null);
@@ -300,16 +296,18 @@ function SprintBoardTab({ projectId }: { projectId: string }) {
 
 // ─── Agent Registry Panel ─────────────────────────────────────────────────────
 function AgentRegistryPanel({
+  agents,
   onAdd,
   onClose,
   alreadyAdded,
 }: {
+  agents: Agent[];
   onAdd: (agent: Agent) => void;
   onClose: () => void;
   alreadyAdded: string[];
 }) {
   const [search, setSearch] = React.useState("");
-  const filtered = AGENTS.filter(
+  const filtered = agents.filter(
     (a) =>
       a.name.toLowerCase().includes(search.toLowerCase()) ||
       a.desc.toLowerCase().includes(search.toLowerCase())
@@ -402,25 +400,25 @@ function AgentRegistryPanel({
 
 // ─── Team Tab ─────────────────────────────────────────────────────────────────
 function TeamTab({ projectId }: { projectId: string }) {
-  const initial = getTeamForProject(projectId).map((m) => ({
-    ...m,
-    agent: AGENTS.find((a) => a.id === m.agentId),
-  }));
-
-  const [team, setTeam] = React.useState(initial);
+  const [team, setTeam] = React.useState<TeamMemberWithAgent[]>([]);
+  const [allAgents, setAllAgents] = React.useState<Agent[]>([]);
   const [showRegistry, setShowRegistry] = React.useState(false);
+
+  React.useEffect(() => {
+    fetchTeam(projectId).then(setTeam);
+    fetchAgents().then(setAllAgents);
+  }, [projectId]);
 
   const addedIds = team.map((m) => m.agentId);
 
-  function handleAdd(agent: Agent) {
+  async function handleAdd(agent: Agent) {
     if (addedIds.includes(agent.id)) return;
-    setTeam((prev) => [
-      ...prev,
-      { agentId: agent.id, role: "Member", joinedAt: new Date().toISOString().slice(0, 10), agent },
-    ]);
+    await addTeamMember(projectId, agent.id, "Member");
+    setTeam((prev) => [...prev, { agentId: agent.id, role: "Member", joinedAt: new Date().toISOString().slice(0, 10), agent }]);
   }
 
-  function handleRemove(agentId: string) {
+  async function handleRemove(agentId: string) {
+    await removeTeamMember(projectId, agentId);
     setTeam((prev) => prev.filter((m) => m.agentId !== agentId));
   }
 
@@ -494,6 +492,7 @@ function TeamTab({ projectId }: { projectId: string }) {
 
       {showRegistry && (
         <AgentRegistryPanel
+          agents={allAgents}
           onAdd={handleAdd}
           onClose={() => setShowRegistry(false)}
           alreadyAdded={addedIds}
@@ -514,8 +513,12 @@ const TABS: { id: Tab; label: string; icon: React.ElementType }[] = [
 // ─── Page ─────────────────────────────────────────────────────────────────────
 export default function ProjectDetailPage(props: { params: Promise<{ id: string }> }) {
   const params = React.use(props.params);
-  const project = PROJECTS.find((p) => p.id === params.id);
+  const [project, setProject] = React.useState(PROJECTS.find((p) => p.id === params.id));
   const [activeTab, setActiveTab] = React.useState<Tab>("architecture");
+
+  React.useEffect(() => {
+    fetchProject(params.id).then((p) => { if (p) setProject(p); });
+  }, [params.id]);
 
   if (!project) {
     return (

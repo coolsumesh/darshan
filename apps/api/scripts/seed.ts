@@ -123,6 +123,72 @@ async function seed() {
     console.log(`  ✓ ${from} → ${to}: ${policy}`);
   }
 
+  // ── Projects ────────────────────────────────────────────────────────────────
+  const PROJECTS = [
+    { slug: "darshan", name: "Darshan", description: "Multi-agent project management platform — dashboards, sprint boards, and team coordination.", status: "active", progress: 42 },
+    { slug: "alpha", name: "Alpha Analytics", description: "Analytics pipeline for product telemetry and real-time reporting.", status: "active", progress: 68 },
+    { slug: "beta", name: "Beta Platform", description: "Platform MVP with auth, real-time data, and agent coordination.", status: "planned", progress: 12 },
+  ] as const;
+
+  console.log("\n  Projects:");
+  const projectIds: Record<string, string> = {};
+  for (const p of PROJECTS) {
+    const { rows } = await db.query(
+      `insert into projects (slug, name, description, status, progress)
+       values ($1, $2, $3, $4, $5)
+       on conflict (lower(slug)) do update
+         set name = excluded.name, description = excluded.description,
+             status = excluded.status, progress = excluded.progress, updated_at = now()
+       returning id, slug`,
+      [p.slug, p.name, p.description, p.status, p.progress]
+    );
+    projectIds[p.slug] = rows[0].id;
+    console.log(`  ✓ Project: ${p.name} (${rows[0].id})`);
+  }
+
+  // ── Tasks ───────────────────────────────────────────────────────────────────
+  const TASKS = [
+    { project: "darshan", title: "Define MVP scope", description: "Finalise feature list and acceptance criteria for the MVP release.", status: "done", proposer: "Mira", assignee: "Kaito" },
+    { project: "darshan", title: "Design dashboard cards", description: "Create project card component with status, progress, and team indicators.", status: "in-progress", proposer: "Anya", assignee: "Mira" },
+    { project: "darshan", title: "Build Sprint Board Kanban", description: "Implement drag-and-drop Kanban columns with task cards.", status: "approved", proposer: "Kaito", assignee: "Nia" },
+    { project: "darshan", title: "Team tab with Add Agent flow", description: "Inline Agent Registry panel accessible from the Team tab.", status: "proposed", proposer: "Mira", assignee: null },
+    { project: "alpha", title: "Ingest telemetry pipeline", description: "Set up data ingestion for product events.", status: "done", proposer: "Mira", assignee: "Anya" },
+    { project: "alpha", title: "Create data schema", description: "Define normalised schema for telemetry events.", status: "in-progress", proposer: "Kaito", assignee: "Mira" },
+    { project: "beta", title: "OAuth2 auth flow", description: "Implement OAuth2 login and session management.", status: "proposed", proposer: "Nia", assignee: null },
+  ] as const;
+
+  console.log("\n  Tasks:");
+  for (const t of TASKS) {
+    await db.query(
+      `insert into tasks (project_id, title, description, status, proposer, assignee)
+       values ($1, $2, $3, $4, $5, $6)
+       on conflict do nothing`,
+      [projectIds[t.project], t.title, t.description, t.status, t.proposer, t.assignee]
+    );
+    console.log(`  ✓ Task: [${t.status}] ${t.title}`);
+  }
+
+  // ── Project team ─────────────────────────────────────────────────────────────
+  const TEAM = [
+    { project: "darshan", agent: "Mira", role: "Lead Engineer" },
+    { project: "darshan", agent: "Kaito", role: "Incident Response" },
+    { project: "darshan", agent: "Anya", role: "QA Engineer" },
+    { project: "alpha",   agent: "Mira", role: "Data Engineer" },
+    { project: "alpha",   agent: "Nia",  role: "Support" },
+    { project: "beta",    agent: "Kaito", role: "Platform Engineer" },
+  ] as const;
+
+  console.log("\n  Project team:");
+  for (const m of TEAM) {
+    await db.query(
+      `insert into project_team (project_id, agent_id, role)
+       values ($1, $2, $3)
+       on conflict (project_id, agent_id) do update set role = excluded.role`,
+      [projectIds[m.project], agentIds[m.agent], m.role]
+    );
+    console.log(`  ✓ ${m.agent} → ${m.project} (${m.role})`);
+  }
+
   console.log("\n✅ Seed complete.");
   await db.end();
 }

@@ -1,10 +1,12 @@
 "use client";
 
+import * as React from "react";
 import Link from "next/link";
 import { ArrowRight, Users } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { PROJECTS, type ProjectStatus } from "@/lib/projects";
+import { fetchProjects } from "@/lib/api";
+import { type Project, type ProjectStatus } from "@/lib/projects";
 import { cn } from "@/lib/cn";
 
 function statusTone(status: ProjectStatus): "brand" | "warning" | "neutral" {
@@ -29,6 +31,12 @@ function relativeTime(iso: string): string {
 }
 
 export default function DashboardPage() {
+  const [projects, setProjects] = React.useState<Project[]>([]);
+
+  React.useEffect(() => {
+    fetchProjects().then(setProjects);
+  }, []);
+
   return (
     <div className="flex flex-col gap-6">
       {/* Header */}
@@ -36,7 +44,7 @@ export default function DashboardPage() {
         <div>
           <h1 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Projects</h1>
           <p className="mt-0.5 text-sm text-slate-500 dark:text-slate-400">
-            {PROJECTS.length} active workspaces
+            {projects.length} active workspaces
           </p>
         </div>
         <Button variant="primary" size="sm">
@@ -46,7 +54,7 @@ export default function DashboardPage() {
 
       {/* Project grid */}
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {PROJECTS.map((project) => (
+        {projects.map((project) => (
           <Link
             key={project.id}
             href={`/projects/${project.id}`}
