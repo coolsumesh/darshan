@@ -21,7 +21,12 @@ pnpm build        # Build that workspace
 pnpm typecheck    # tsc --noEmit for that workspace
 ```
 
-**Prerequisites:** Docker must be running before `pnpm dev`; set `DATABASE_URL` in `apps/api/.env`.
+**API-only:**
+```bash
+pnpm --filter @darshan/api seed   # Seed agents + default thread (idempotent)
+```
+
+**Prerequisites:** Docker must be running before `pnpm dev`; copy `apps/api/.env.example` to `apps/api/.env` and set `DATABASE_URL`.
 
 ## Architecture
 
@@ -44,22 +49,33 @@ The frontend is currently **prototype-only**: pages use mock data (a static `AGE
 
 ### Backend (`apps/api`)
 
-- `src/index.ts` — Fastify server entry point; registers CORS, routes, runs migrations on startup
+- `src/index.ts` — Fastify server entry point; registers CORS + WebSocket plugin, all routes, runs migrations, starts stub connector
 - `src/db.ts` — PostgreSQL connection pool (requires `DATABASE_URL`)
-- `src/migrations.ts` — File-based migration runner; scans `migrations/*.sql` in filename order
+- `src/migrations.ts` — File-based migration runner; scans `migrations/*.sql` in filename order; wraps each in a transaction
 - `src/audit.ts` — `appendAuditEvent()` for the append-only audit trail; `recordLlmFallbackEvent()` for LLM provider failures
+- `src/broadcast.ts` — In-process WebSocket broadcaster; `addConnection(ws)` / `broadcast(type, data)`
+- `src/connector.ts` — Stub connector; `startConnector(db)` polls every 2s for queued runs and produces canned agent replies; `processQueued(db)` can also be called directly
 - `src/llm/withFallback.ts` — LLM provider fallback wrapper
-- `src/routes/opsRateLimits.ts` — `GET /api/v1/ops/rate-limits` returns LLM fallback audit events
+- `scripts/seed.ts` — Idempotent seed script; upserts agents (Mira, Nia, Kaito, Anya), default "General" thread, A2A routes
 
-Only the audit log migration (`001_audit_log.sql`) exists. The full data model (agents, threads, messages, runs, a2a_routes) is designed in `DB.md` but **not yet migrated**.
+**Migrations** (in `migrations/`):
+- `001_audit_log.sql` — pgcrypto extension, schema_migrations table, audit_log table
+- `002_core_tables.sql` — agents, threads, thread_participants, messages, runs, a2a_routes + all indexes
 
-Currently implemented API endpoints:
-- `GET /health`
+**Implemented REST endpoints** (`/api/v1`):
+- `GET /agents`, `GET /agents/:id`
+- `GET /threads`, `POST /threads`, `GET /threads/:id`, `POST /threads/:id/archive`
+- `GET /threads/:id/messages?limit&beforeSeq`, `POST /threads/:id/messages`
+- `GET /threads/:id/runs`, `GET /runs/:id`, `POST /runs/:id/cancel`
+- `GET /a2a/routes`, `POST /a2a/routes`
+- `GET /audit`
 - `GET /api/v1/ops/rate-limits`
 
-Planned endpoints (not yet implemented): see `ARCHITECTURE.md` for the full REST + WebSocket spec.
+**WebSocket:** `GET /ws` — emits `connected`, `message.created`, `run.created`, `run.updated` events.
 
-### Data model (planned, see `DB.md`)
+The `POST /threads/:id/messages` body accepts `{ content, targets?: { agentIds?: string[] }, mode?: "direct"|"broadcast" }`. User identity comes from the `x-user-id` request header (defaults to `"sumesh"`).
+
+### Data model (see `DB.md` for full schema)
 
 Key tables: `agents`, `threads`, `thread_participants`, `messages`, `runs` (agent invocations with status queued→running→done), `a2a_routes` (delegation policies), `audit_log`.
 
