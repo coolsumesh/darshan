@@ -19,6 +19,64 @@ import { cn } from "@/lib/cn";
 import ThemeToggle from "@/components/proto/theme-toggle";
 import FontSizeToggle from "@/components/proto/font-size-toggle";
 import { applyPrefsToDom, loadPrefs, useUIPreferences } from "@/components/proto/ui-preferences";
+import { useProject } from "@/lib/project-context";
+
+function ProjectSwitcher({ collapsed }: { collapsed: boolean }) {
+  const { projects, selected, setSelected, loading } = useProject();
+
+  if (loading) {
+    return (
+      <div className="h-10 animate-pulse rounded-xl bg-slate-100 dark:bg-slate-800" />
+    );
+  }
+
+  if (projects.length === 0) return null;
+
+  if (collapsed) {
+    return (
+      <div
+        className="grid h-11 w-11 place-items-center rounded-xl bg-brand-50 ring-1 ring-brand-100 dark:bg-brand-500/10 dark:ring-brand-500/20"
+        title={selected?.name ?? "Project"}
+        aria-label="Selected project"
+      >
+        <span className="text-xs font-bold text-brand-700 dark:text-brand-300">
+          {selected?.name?.slice(0, 1) ?? "P"}
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="relative">
+      <label className="sr-only" htmlFor="project-switcher">
+        Active project
+      </label>
+      <select
+        id="project-switcher"
+        className={cn(
+          "w-full appearance-none rounded-xl border border-line bg-brand-50 px-3 py-2.5",
+          "text-sm font-semibold text-brand-700 focus:outline-none",
+          "focus-visible:ring-2 focus-visible:ring-[rgb(var(--accent-500)/0.45)]",
+          "dark:border-brand-500/20 dark:bg-brand-500/10 dark:text-brand-300"
+        )}
+        value={selected?.id ?? ""}
+        onChange={(e) => {
+          const p = projects.find((x) => x.id === e.target.value);
+          if (p) setSelected(p);
+        }}
+      >
+        {projects.map((p) => (
+          <option key={p.id} value={p.id}>
+            {p.name}
+          </option>
+        ))}
+      </select>
+      <div className="pointer-events-none absolute inset-y-0 right-3 flex items-center">
+        <ChevronRight className="h-3 w-3 rotate-90 text-brand-500" aria-hidden />
+      </div>
+    </div>
+  );
+}
 
 const NAV = [
   { href: "/dashboard", label: "Dashboard",  icon: LayoutDashboard },
@@ -76,6 +134,11 @@ function Sidebar({
             <ChevronLeft className="h-4 w-4" />
           </button>
         )}
+      </div>
+
+      {/* Project switcher */}
+      <div className={cn("px-2 pt-2", collapsed && "flex justify-center")}>
+        <ProjectSwitcher collapsed={collapsed} />
       </div>
 
       {/* Nav */}
