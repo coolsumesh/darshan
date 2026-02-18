@@ -9,34 +9,69 @@ export type Agent = {
   lastProfileUpdateAt: string;
 };
 
-// Prototype-friendly mock data (no backend).
+// MithranLabs team — real agent data.
 export const AGENTS: Agent[] = [
   {
-    id: "mira",
-    name: "Mira",
-    desc: "Ops triage",
+    id: "mithran",
+    name: "Mithran ⚡",
+    desc: "Coordinator",
     status: "online",
-    lastProfileUpdateAt: "2026-02-16T07:10:00Z",
+    lastProfileUpdateAt: "2026-02-18T07:00:00Z",
   },
   {
-    id: "nia",
-    name: "Nia",
-    desc: "Support",
-    status: "away",
-    lastProfileUpdateAt: "2026-02-15T22:30:00Z",
+    id: "komal",
+    name: "Komal 🌸",
+    desc: "Developer",
+    status: "online",
+    lastProfileUpdateAt: "2026-02-18T07:00:00Z",
   },
   {
-    id: "kaito",
-    name: "Kaito",
-    desc: "Incident response",
+    id: "anantha",
+    name: "Anantha 🐍",
+    desc: "Systems Architect",
     status: "offline",
-    lastProfileUpdateAt: "2026-02-12T09:00:00Z",
+    lastProfileUpdateAt: "2026-02-18T07:00:00Z",
   },
   {
-    id: "anya",
-    name: "Anya",
-    desc: "QA",
-    status: "online",
-    lastProfileUpdateAt: "2026-02-16T05:45:00Z",
+    id: "vishwakarma",
+    name: "Vishwakarma 🏗️",
+    desc: "DevOps/Infrastructure",
+    status: "offline",
+    lastProfileUpdateAt: "2026-02-18T07:00:00Z",
+  },
+  {
+    id: "ganesha",
+    name: "Ganesha 📝",
+    desc: "Technical Writer",
+    status: "offline",
+    lastProfileUpdateAt: "2026-02-18T07:00:00Z",
+  },
+  {
+    id: "drishti",
+    name: "Drishti 👁️",
+    desc: "Product/Requirements Analyst",
+    status: "offline",
+    lastProfileUpdateAt: "2026-02-18T07:00:00Z",
+  },
+  {
+    id: "lekha",
+    name: "Lekha 🗄️",
+    desc: "Database Specialist",
+    status: "offline",
+    lastProfileUpdateAt: "2026-02-18T07:00:00Z",
+  },
+  {
+    id: "sanjaya",
+    name: "Sanjaya 🎨",
+    desc: "Image Generation",
+    status: "offline",
+    lastProfileUpdateAt: "2026-02-18T07:00:00Z",
+  },
+  {
+    id: "suraksha",
+    name: "Suraksha 🛡️",
+    desc: "Security Expert",
+    status: "offline",
+    lastProfileUpdateAt: "2026-02-18T07:00:00Z",
   },
 ];
