@@ -17,28 +17,58 @@ const db = new Pool({ connectionString: process.env.DATABASE_URL });
 
 const AGENTS = [
   {
-    name: "Mira",
+    name: "Mithran",
     status: "online",
-    connector_ref: "clawdbot://mira",
-    capabilities: { role: "ops-triage", skills: ["monitoring", "alerting", "escalation"] },
+    connector_ref: "openclaw:agent:main:agent:main:main",
+    capabilities: { role: "coordinator", emoji: "⚡", skills: ["coordination", "planning", "approval"] },
   },
   {
-    name: "Nia",
+    name: "Komal",
     status: "online",
-    connector_ref: "clawdbot://nia",
-    capabilities: { role: "support", skills: ["customer-queries", "ticket-routing"] },
+    connector_ref: "openclaw:agent:komal:agent:komal:main",
+    capabilities: { role: "developer", emoji: "🌸", skills: ["frontend", "backend", "typescript"] },
   },
   {
-    name: "Kaito",
-    status: "online",
-    connector_ref: "clawdbot://kaito",
-    capabilities: { role: "incident-response", skills: ["diagnosis", "runbooks", "post-mortems"] },
+    name: "Anantha",
+    status: "offline",
+    connector_ref: "",
+    capabilities: { role: "systems-architect", emoji: "🐍", skills: ["architecture", "system-design"] },
   },
   {
-    name: "Anya",
-    status: "online",
-    connector_ref: "clawdbot://anya",
-    capabilities: { role: "qa", skills: ["test-review", "regression", "quality-gates"] },
+    name: "Vishwakarma",
+    status: "offline",
+    connector_ref: "",
+    capabilities: { role: "devops", emoji: "🏗️", skills: ["infrastructure", "ci-cd", "cloud"] },
+  },
+  {
+    name: "Ganesha",
+    status: "offline",
+    connector_ref: "",
+    capabilities: { role: "technical-writer", emoji: "📝", skills: ["documentation", "specs"] },
+  },
+  {
+    name: "Drishti",
+    status: "offline",
+    connector_ref: "",
+    capabilities: { role: "product-analyst", emoji: "👁️", skills: ["requirements", "product"] },
+  },
+  {
+    name: "Lekha",
+    status: "offline",
+    connector_ref: "",
+    capabilities: { role: "database-specialist", emoji: "🗄️", skills: ["postgres", "data-modelling"] },
+  },
+  {
+    name: "Sanjaya",
+    status: "offline",
+    connector_ref: "",
+    capabilities: { role: "image-generation", emoji: "🎨", skills: ["image-gen", "design"] },
+  },
+  {
+    name: "Suraksha",
+    status: "offline",
+    connector_ref: "",
+    capabilities: { role: "security-expert", emoji: "🛡️", skills: ["security", "audit", "hardening"] },
   },
 ] as const;
 
@@ -104,15 +134,15 @@ async function seed() {
     console.log(`  ✓ Participant: ${name} (agent)`);
   }
 
-  // ── A2A routes (sample allowlist) ──────────────────────────────────────────
+  // ── A2A routes ──────────────────────────────────────────────────────────────
   const routePairs = [
-    { from: "Mira", to: "Kaito", policy: "allowed", notes: "Mira can escalate incidents to Kaito" },
-    { from: "Mira", to: "Nia",   policy: "allowed", notes: "Mira can hand off support queries to Nia" },
-    { from: "Kaito", to: "Anya", policy: "requires_human_approval", notes: "Incident → QA requires approval" },
+    { from: "Komal", to: "Mithran", policy: "allowed", notes: "Komal can propose tasks to Mithran for approval" },
+    { from: "Mithran", to: "Komal", policy: "allowed", notes: "Mithran can delegate dev tasks to Komal" },
   ] as const;
 
   console.log("\n  A2A routes:");
   for (const { from, to, policy, notes } of routePairs) {
+    if (!agentIds[from] || !agentIds[to]) continue;
     await db.query(
       `insert into a2a_routes (from_agent_id, to_agent_id, policy, notes)
        values ($1, $2, $3, $4)
