@@ -7,9 +7,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import {
   fetchThreads,
+  fetchAgents,
   fetchMessages,
   postMessage,
   createThread,
+  type ApiAgent,
   type ApiThread,
   type ApiMessage,
 } from "@/lib/api";
@@ -21,30 +23,32 @@ function threadLabel(t: ApiThread) {
 
 export default function ThreadsPage() {
   const [threads, setThreads] = React.useState<ApiThread[]>([]);
+  const [agents, setAgents] = React.useState<ApiAgent[]>([]);
   const [loading, setLoading] = React.useState(true);
-  const [error, setError] = React.useState<string | null>(null);
-
   const [selected, setSelected] = React.useState<ApiThread | null>(null);
   const [messages, setMessages] = React.useState<ApiMessage[]>([]);
   const [msgLoading, setMsgLoading] = React.useState(false);
-
   const [draft, setDraft] = React.useState("");
   const [sending, setSending] = React.useState(false);
-
-  const [creating, setCreating] = React.useState(false);
+  const [selectedAgentIds, setSelectedAgentIds] = React.useState<string[]>([]);
   const [newTitle, setNewTitle] = React.useState("");
-
+  const [creating, setCreating] = React.useState(false);
+  const [showThreadList, setShowThreadList] = React.useState(true);
   const messagesEndRef = React.useRef<HTMLDivElement>(null);
+  const pollRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Load thread list
   React.useEffect(() => {
-    fetchThreads()
-      .then((res) => setThreads(res.threads))
-      .catch((err) => setError(err.message))
+    Promise.all([fetchThreads(), fetchAgents()])
+      .then(([threadRes, agentRes]) => {
+        setThreads(threadRes.threads);
+        setAgents(agentRes.agents);
+        // auto-select first thread
+        if (threadRes.threads.length > 0) setSelected(threadRes.threads[0]);
+      })
       .finally(() => setLoading(false));
   }, []);
 
-  // Load messages when thread is selected
+  // Load messages when thread selected
   React.useEffect(() => {
     if (!selected) return;
     setMsgLoading(true);
@@ -52,9 +56,17 @@ export default function ThreadsPage() {
       .then((res) => setMessages(res.messages))
       .catch(() => setMessages([]))
       .finally(() => setMsgLoading(false));
+
+    // Poll for new messages every 3s
+    if (pollRef.current) clearInterval(pollRef.current);
+    pollRef.current = setInterval(() => {
+      fetchMessages(selected.id)
+        .then((res) => setMessages(res.messages))
+        .catch(() => {});
+    }, 3000);
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, [selected]);
 
-  // Scroll to bottom when messages change
   React.useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
@@ -63,11 +75,13 @@ export default function ThreadsPage() {
     if (!selected || !draft.trim()) return;
     setSending(true);
     try {
-      const res = await postMessage(selected.id, draft.trim());
-      setMessages((prev) => [...prev, res.message]);
+      await postMessage(selected.id, draft.trim(), selectedAgentIds);
       setDraft("");
+      // immediately reload messages
+      const res = await fetchMessages(selected.id);
+      setMessages(res.messages);
     } catch {
-      // TODO: show toast
+      // ignore
     } finally {
       setSending(false);
     }
@@ -81,75 +95,50 @@ export default function ThreadsPage() {
       setSelected(res.thread);
       setMessages([]);
       setNewTitle("");
-    } catch {
-      // TODO: show toast
     } finally {
       setCreating(false);
     }
   }
 
+  const onlineAgents = agents.filter((a) => a.status === "online");
+
   return (
-    <div className="grid grid-cols-12 gap-4 h-[calc(100vh-10rem)]">
-      {/* Thread list */}
-      <div className="col-span-12 lg:col-span-4 overflow-auto">
-        <Card className="h-full">
-          <CardHeader className="flex flex-row items-center justify-between">
-            <div>
-              <CardTitle>Threads</CardTitle>
-              <div className="mt-1 text-xs text-muted">Your conversations</div>
-            </div>
-            <Button
-              size="sm"
-              variant="primary"
-              onClick={handleCreate}
-              disabled={creating}
-            >
-              {creating ? "Creating…" : "New"}
+    <div className="flex gap-4" style={{ height: "calc(100vh - 9rem)" }}>
+
+      {/* Thread list — collapsible on mobile */}
+      <div className={`flex-shrink-0 ${showThreadList ? "w-72" : "w-0 overflow-hidden"} flex flex-col gap-3 transition-all`}>
+        <Card className="flex flex-col h-full overflow-hidden">
+          <CardHeader className="flex flex-row items-center justify-between pb-3">
+            <CardTitle className="text-sm">Threads</CardTitle>
+            <Button size="sm" variant="primary" onClick={handleCreate} disabled={creating}>
+              {creating ? "…" : "New"}
             </Button>
           </CardHeader>
-          <CardContent>
-            {/* New thread title input */}
-            <div className="mb-3 flex gap-2">
-              <Input
-                placeholder="Thread title (optional)"
-                value={newTitle}
-                onChange={(e) => setNewTitle(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleCreate()}
-              />
-            </div>
-
-            {loading && (
-              <div className="py-8 text-center text-sm text-muted">
-                Loading…
-              </div>
+          <CardContent className="flex flex-col gap-3 flex-1 overflow-auto pt-0">
+            <Input
+              placeholder="Thread title…"
+              value={newTitle}
+              onChange={(e) => setNewTitle(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleCreate()}
+            />
+            {loading && <div className="text-xs text-muted text-center py-4">Loading…</div>}
+            {!loading && threads.length === 0 && (
+              <div className="text-xs text-muted text-center py-4">No threads yet.</div>
             )}
-            {error && (
-              <div className="py-8 text-center text-sm text-red-500">
-                {error}
-              </div>
-            )}
-            {!loading && !error && threads.length === 0 && (
-              <div className="py-8 text-center text-sm text-muted">
-                No threads yet. Create one above.
-              </div>
-            )}
-
-            <div className="space-y-2">
+            <div className="space-y-1">
               {threads.map((t) => (
                 <button
                   key={t.id}
                   type="button"
-                  onClick={() => setSelected(t)}
-                  className={`w-full text-left rounded-2xl p-4 ring-1 transition ${
+                  onClick={() => { setSelected(t); setShowThreadList(false); }}
+                  className={`w-full text-left rounded-xl p-3 ring-1 transition text-sm ${
                     selected?.id === t.id
-                      ? "bg-brand-50 ring-brand-200 dark:bg-brand-500/10 dark:ring-brand-500/30"
-                      : "bg-white ring-line hover:bg-slate-50 dark:bg-slate-950 dark:ring-slate-800 dark:hover:bg-slate-900/40"
+                      ? "bg-brand-50 ring-brand-200 dark:bg-brand-500/10 dark:ring-brand-500/30 font-semibold"
+                      : "bg-white ring-line hover:bg-slate-50 dark:bg-slate-950 dark:ring-slate-800"
                   }`}
                 >
-                  <div className="text-sm font-semibold truncate">
-                    {threadLabel(t)}
-                  </div>
-                  <div className="mt-1 flex items-center gap-2 text-xs text-muted">
+                  <div className="truncate font-medium">{threadLabel(t)}</div>
+                  <div className="mt-0.5 flex items-center gap-1.5 text-xs text-muted">
                     <Badge tone="neutral">{t.visibility}</Badge>
                     <span>{formatRelativeTime(t.updated_at)}</span>
                   </div>
@@ -161,100 +150,129 @@ export default function ThreadsPage() {
       </div>
 
       {/* Message pane */}
-      <div className="col-span-12 lg:col-span-8 flex flex-col overflow-hidden">
-        <Card className="flex flex-col h-full overflow-hidden">
-          <CardHeader className="border-b border-line dark:border-slate-800">
-            <CardTitle>
-              {selected ? threadLabel(selected) : "Select a thread"}
-            </CardTitle>
-            {selected && (
-              <div className="mt-1 text-xs text-muted">
-                ID: {selected.id} • {selected.visibility}
-              </div>
-            )}
-          </CardHeader>
+      <Card className="flex flex-col flex-1 min-w-0 overflow-hidden">
+        <CardHeader className="border-b border-line dark:border-slate-800 pb-3">
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setShowThreadList((v) => !v)}
+              className="text-xs text-muted hover:text-slate-700 dark:hover:text-slate-200 rounded-lg px-2 py-1 ring-1 ring-line"
+            >
+              {showThreadList ? "← hide" : "☰ threads"}
+            </button>
+            <div>
+              <CardTitle className="text-sm">
+                {selected ? threadLabel(selected) : "Select a thread"}
+              </CardTitle>
+              {selected && (
+                <div className="text-xs text-muted">{selected.id.slice(0, 8)}</div>
+              )}
+            </div>
+          </div>
 
-          {/* Messages scroll area */}
-          <CardContent className="flex-1 overflow-auto py-4">
-            {!selected && (
-              <div className="flex h-full items-center justify-center text-sm text-muted">
-                Choose a thread from the left.
-              </div>
-            )}
-            {selected && msgLoading && (
-              <div className="flex h-full items-center justify-center text-sm text-muted">
-                Loading messages…
-              </div>
-            )}
-            {selected && !msgLoading && messages.length === 0 && (
-              <div className="flex h-full items-center justify-center text-sm text-muted">
-                No messages yet. Say something!
-              </div>
-            )}
-            {selected && !msgLoading && messages.length > 0 && (
-              <div className="space-y-3">
-                {messages.map((m) => {
-                  const isHuman = m.author_type === "human";
-                  return (
-                    <div
-                      key={m.id}
-                      className={`flex ${isHuman ? "justify-end" : "justify-start"}`}
-                    >
-                      <div
-                        className={`max-w-[75%] rounded-2xl px-4 py-3 text-sm ${
-                          isHuman
-                            ? "bg-brand-600 text-white"
-                            : "bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-slate-100"
-                        }`}
-                      >
-                        {!isHuman && (
-                          <div className="mb-1 text-xs font-semibold opacity-70">
-                            {m.author_user_id ?? "Agent"}
-                          </div>
-                        )}
-                        <div>{m.content}</div>
-                        <div
-                          className={`mt-1 text-right text-[10px] opacity-60`}
-                        >
-                          {formatRelativeTime(m.created_at)}
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-                <div ref={messagesEndRef} />
-              </div>
-            )}
-          </CardContent>
-
-          {/* Send bar */}
-          {selected && (
-            <div className="border-t border-line p-4 dark:border-slate-800">
-              <div className="flex gap-2">
-                <Input
-                  placeholder="Type a message…"
-                  value={draft}
-                  onChange={(e) => setDraft(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.shiftKey) {
-                      e.preventDefault();
-                      handleSend();
-                    }
-                  }}
-                  disabled={sending}
-                />
-                <Button
-                  variant="primary"
-                  onClick={handleSend}
-                  disabled={sending || !draft.trim()}
+          {/* Agent selector */}
+          {selected && onlineAgents.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-2">
+              <span className="text-xs text-muted self-center">Reply from:</span>
+              {onlineAgents.map((a) => (
+                <button
+                  key={a.id}
+                  type="button"
+                  onClick={() =>
+                    setSelectedAgentIds((prev) =>
+                      prev.includes(a.id) ? prev.filter((id) => id !== a.id) : [...prev, a.id]
+                    )
+                  }
+                  className={`rounded-full px-3 py-1 text-xs ring-1 transition ${
+                    selectedAgentIds.includes(a.id)
+                      ? "bg-brand-600 text-white ring-brand-600"
+                      : "bg-white ring-line text-slate-700 hover:bg-slate-50 dark:bg-slate-900 dark:text-slate-200 dark:ring-slate-700"
+                  }`}
                 >
-                  {sending ? "…" : "Send"}
-                </Button>
-              </div>
+                  {a.name}
+                </button>
+              ))}
+              {selectedAgentIds.length > 0 && (
+                <span className="text-xs text-muted self-center">will respond</span>
+              )}
             </div>
           )}
-        </Card>
-      </div>
+        </CardHeader>
+
+        {/* Messages */}
+        <CardContent className="flex-1 overflow-auto py-4 min-h-0">
+          {!selected && (
+            <div className="flex h-full items-center justify-center text-sm text-muted">
+              Click a thread on the left to open it.
+            </div>
+          )}
+          {selected && msgLoading && (
+            <div className="flex h-full items-center justify-center text-sm text-muted">Loading…</div>
+          )}
+          {selected && !msgLoading && messages.length === 0 && (
+            <div className="flex h-full items-center justify-center text-sm text-muted">
+              No messages yet — type below to start.
+            </div>
+          )}
+          {selected && !msgLoading && messages.length > 0 && (
+            <div className="space-y-3 px-1">
+              {messages.map((m) => {
+                const isHuman = m.author_type === "human";
+                return (
+                  <div key={m.id} className={`flex ${isHuman ? "justify-end" : "justify-start"}`}>
+                    <div
+                      className={`max-w-[75%] rounded-2xl px-4 py-3 text-sm ${
+                        isHuman
+                          ? "bg-brand-600 text-white"
+                          : "bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-slate-100"
+                      }`}
+                    >
+                      {!isHuman && (
+                        <div className="mb-1 text-xs font-semibold opacity-70">
+                          {m.author_user_id ?? "Agent"}
+                        </div>
+                      )}
+                      <div className="whitespace-pre-wrap">{m.content}</div>
+                      <div className="mt-1 text-right text-[10px] opacity-60">
+                        {formatRelativeTime(m.created_at)}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+              <div ref={messagesEndRef} />
+            </div>
+          )}
+        </CardContent>
+
+        {/* Send bar */}
+        {selected && (
+          <div className="border-t border-line p-4 dark:border-slate-800">
+            {selectedAgentIds.length === 0 && (
+              <div className="mb-2 text-xs text-amber-600 dark:text-amber-400">
+                💡 Select an agent above to get a reply (Mithran or Komal).
+              </div>
+            )}
+            <div className="flex gap-2">
+              <Input
+                placeholder="Type a message… (Enter to send)"
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    handleSend();
+                  }
+                }}
+                disabled={sending}
+              />
+              <Button variant="primary" onClick={handleSend} disabled={sending || !draft.trim()}>
+                {sending ? "…" : "Send"}
+              </Button>
+            </div>
+          </div>
+        )}
+      </Card>
     </div>
   );
 }
