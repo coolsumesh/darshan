@@ -57,7 +57,7 @@ export default function DashboardPage() {
         {projects.map((project) => (
           <Link
             key={project.id}
-            href={`/projects/${project.id}`}
+            href={`/projects/${project.slug ?? project.id}`}
             className={cn(
               "group flex flex-col gap-4 rounded-2xl bg-white p-5 ring-1 ring-line shadow-softSm",
               "transition hover:bg-slate-50 hover:shadow-soft focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgb(var(--accent-500)/0.45)]",

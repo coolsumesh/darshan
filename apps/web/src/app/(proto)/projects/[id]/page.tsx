@@ -514,11 +514,24 @@ const TABS: { id: Tab; label: string; icon: React.ElementType }[] = [
 export default function ProjectDetailPage(props: { params: Promise<{ id: string }> }) {
   const params = React.use(props.params);
   const [project, setProject] = React.useState(PROJECTS.find((p) => p.id === params.id));
+  const [loading, setLoading] = React.useState(!project);
   const [activeTab, setActiveTab] = React.useState<Tab>("architecture");
 
   React.useEffect(() => {
-    fetchProject(params.id).then((p) => { if (p) setProject(p); });
+    setLoading(true);
+    fetchProject(params.id).then((p) => {
+      if (p) setProject(p);
+      setLoading(false);
+    });
   }, [params.id]);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <div className="text-sm text-slate-500 dark:text-slate-400">Loading project…</div>
+      </div>
+    );
+  }
 
   if (!project) {
     return (

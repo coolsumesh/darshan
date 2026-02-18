@@ -3,6 +3,7 @@ export type TaskStatus = "proposed" | "approved" | "in-progress" | "done";
 
 export type Project = {
   id: string;
+  slug?: string;
   name: string;
   description: string;
   status: ProjectStatus;
