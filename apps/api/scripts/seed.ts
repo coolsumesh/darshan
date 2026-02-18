@@ -15,53 +15,17 @@ const { Pool } = pg;
 
 const db = new Pool({ connectionString: process.env.DATABASE_URL });
 
-const AGENTS = [
-  {
-    name: "Mira",
-    status: "online",
-    connector_ref: "clawdbot://mira",
-    capabilities: { role: "ops-triage", skills: ["monitoring", "alerting", "escalation"] },
-  },
-  {
-    name: "Nia",
-    status: "online",
-    connector_ref: "clawdbot://nia",
-    capabilities: { role: "support", skills: ["customer-queries", "ticket-routing"] },
-  },
-  {
-    name: "Kaito",
-    status: "online",
-    connector_ref: "clawdbot://kaito",
-    capabilities: { role: "incident-response", skills: ["diagnosis", "runbooks", "post-mortems"] },
-  },
-  {
-    name: "Anya",
-    status: "online",
-    connector_ref: "clawdbot://anya",
-    capabilities: { role: "qa", skills: ["test-review", "regression", "quality-gates"] },
-  },
-] as const;
+// Agents are seeded from the live DB — no static list needed.
 
 async function seed() {
   console.log("🌱 Seeding Darshan database...\n");
 
-  // ── Agents ──────────────────────────────────────────────────────────────────
+  // ── Agents (read existing — do not overwrite live agent records) ─────────────
   const agentIds: Record<string, string> = {};
-
-  for (const agent of AGENTS) {
-    const { rows } = await db.query(
-      `insert into agents (name, status, connector_ref, capabilities)
-       values ($1, $2, $3, $4)
-       on conflict (lower(name)) do update
-         set status = excluded.status,
-             connector_ref = excluded.connector_ref,
-             capabilities = excluded.capabilities,
-             updated_at = now()
-       returning id, name`,
-      [agent.name, agent.status, agent.connector_ref, JSON.stringify(agent.capabilities)]
-    );
-    agentIds[agent.name] = rows[0].id;
-    console.log(`  ✓ Agent: ${agent.name} (${rows[0].id})`);
+  const { rows: existingAgents } = await db.query(`select id, name from agents`);
+  for (const a of existingAgents) {
+    agentIds[a.name] = a.id;
+    console.log(`  ✓ Agent (existing): ${a.name} (${a.id})`);
   }
 
   // ── Default thread ──────────────────────────────────────────────────────────
@@ -168,25 +132,31 @@ async function seed() {
     console.log(`  ✓ Task: [${t.status}] ${t.title}`);
   }
 
-  // ── Project team ─────────────────────────────────────────────────────────────
+  // ── Project team (use real agents from DB by slug) ───────────────────────────
+  const { rows: realAgents } = await db.query(`select id, slug, name from agents`);
+  const realAgentIds: Record<string, string> = {};
+  for (const a of realAgents) realAgentIds[a.slug] = a.id;
+
   const TEAM = [
-    { project: "darshan", agent: "Mira", role: "Lead Engineer" },
-    { project: "darshan", agent: "Kaito", role: "Incident Response" },
-    { project: "darshan", agent: "Anya", role: "QA Engineer" },
-    { project: "alpha",   agent: "Mira", role: "Data Engineer" },
-    { project: "alpha",   agent: "Nia",  role: "Support" },
-    { project: "beta",    agent: "Kaito", role: "Platform Engineer" },
+    { project: "darshan", agentSlug: "mithran", role: "Coordinator" },
+    { project: "darshan", agentSlug: "komal",   role: "Product & UX" },
+    { project: "darshan", agentSlug: "anantha", role: "Backend" },
+    { project: "alpha",   agentSlug: "mithran", role: "Lead" },
+    { project: "alpha",   agentSlug: "anantha", role: "Data Engineer" },
+    { project: "beta",    agentSlug: "komal",   role: "Product" },
   ] as const;
 
   console.log("\n  Project team:");
   for (const m of TEAM) {
+    const agentId = realAgentIds[m.agentSlug];
+    if (!agentId) { console.log(`  ⚠ Agent ${m.agentSlug} not found, skipping`); continue; }
     await db.query(
       `insert into project_team (project_id, agent_id, role)
        values ($1, $2, $3)
        on conflict (project_id, agent_id) do update set role = excluded.role`,
-      [projectIds[m.project], agentIds[m.agent], m.role]
+      [projectIds[m.project], agentId, m.role]
     );
-    console.log(`  ✓ ${m.agent} → ${m.project} (${m.role})`);
+    console.log(`  ✓ ${m.agentSlug} → ${m.project} (${m.role})`);
   }
 
   console.log("\n✅ Seed complete.");
