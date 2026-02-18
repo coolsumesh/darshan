@@ -71,7 +71,7 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
       vals.push(req.params.id);
       const { rows } = await db.query(
         `update projects set ${sets.join(", ")}, updated_at = now()
-         where id = $${vals.length} or lower(slug) = lower($${vals.length}) returning *`,
+         where id::text = $${vals.length} or lower(slug) = lower($${vals.length}) returning *`,
         vals
       );
       if (!rows[0]) return reply.status(404).send({ ok: false, error: "project not found" });
@@ -84,7 +84,7 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
     "/api/v1/projects/:id/tasks",
     async (req, reply) => {
       const { rows: project } = await db.query(
-        `select id from projects where id = $1 or lower(slug) = lower($1)`,
+        `select id from projects where id::text = $1 or lower(slug) = lower($1)`,
         [req.params.id]
       );
       if (!project[0]) return reply.status(404).send({ ok: false, error: "project not found" });
@@ -107,7 +107,7 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
     "/api/v1/projects/:id/tasks",
     async (req, reply) => {
       const { rows: project } = await db.query(
-        `select id from projects where id = $1 or lower(slug) = lower($1)`,
+        `select id from projects where id::text = $1 or lower(slug) = lower($1)`,
         [req.params.id]
       );
       if (!project[0]) return reply.status(404).send({ ok: false, error: "project not found" });
@@ -152,7 +152,7 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
     "/api/v1/projects/:id/team",
     async (req, reply) => {
       const { rows: project } = await db.query(
-        `select id from projects where id = $1 or lower(slug) = lower($1)`,
+        `select id from projects where id::text = $1 or lower(slug) = lower($1)`,
         [req.params.id]
       );
       if (!project[0]) return reply.status(404).send({ ok: false, error: "project not found" });
@@ -174,7 +174,7 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
     "/api/v1/projects/:id/team",
     async (req, reply) => {
       const { rows: project } = await db.query(
-        `select id from projects where id = $1 or lower(slug) = lower($1)`,
+        `select id from projects where id::text = $1 or lower(slug) = lower($1)`,
         [req.params.id]
       );
       if (!project[0]) return reply.status(404).send({ ok: false, error: "project not found" });
@@ -196,7 +196,7 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
     "/api/v1/projects/:id/team/:agentId",
     async (req, reply) => {
       const { rows: project } = await db.query(
-        `select id from projects where id = $1 or lower(slug) = lower($1)`,
+        `select id from projects where id::text = $1 or lower(slug) = lower($1)`,
         [req.params.id]
       );
       if (!project[0]) return reply.status(404).send({ ok: false, error: "project not found" });
