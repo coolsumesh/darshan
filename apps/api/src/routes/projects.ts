@@ -30,7 +30,7 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
          from projects p
          left join project_team pt on pt.project_id = p.id
          left join tasks t on t.project_id = p.id
-         where p.id = $1 or lower(p.slug) = lower($1)
+         where p.id::text = $1 or lower(p.slug) = lower($1)
          group by p.id`,
         [req.params.id]
       );
