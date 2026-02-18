@@ -23,8 +23,9 @@ export type ApiAgent = {
   id: string;
   name: string;
   desc: string;
-  status: "online" | "away" | "offline";
+  status: "online" | "away" | "offline" | "unknown";
   last_profile_update_at: string;
+  capabilities?: Record<string, unknown>;
 };
 
 export function fetchAgents(): Promise<{ ok: true; agents: ApiAgent[] }> {
@@ -41,11 +42,8 @@ export type ApiThread = {
   updated_at: string;
   created_at: string;
   archived_at: string | null;
+  project_id?: string | null;
 };
-
-export function fetchThreads(): Promise<{ ok: true; threads: ApiThread[] }> {
-  return apiFetch("/api/v1/threads");
-}
 
 export type ApiMessage = {
   id: string;
@@ -56,6 +54,14 @@ export type ApiMessage = {
   content: string;
   created_at: string;
 };
+
+export function fetchThreads(): Promise<{ ok: true; threads: ApiThread[] }> {
+  return apiFetch("/api/v1/threads");
+}
+
+export function fetchProjectThreads(projectId: string): Promise<{ ok: true; threads: ApiThread[] }> {
+  return apiFetch(`/api/v1/projects/${projectId}/threads`);
+}
 
 export function fetchMessages(
   threadId: string,
@@ -88,14 +94,14 @@ export function createThread(
 
 export type ApiProject = {
   id: string;
-  seq: number;
+  seq?: number;
   name: string;
   description: string;
   status: "active" | "archived";
   created_by: string;
+  member_count: number;
   created_at: string;
   updated_at: string;
-  member_count: number;
 };
 
 export function fetchProjects(status?: string): Promise<{ ok: true; projects: ApiProject[] }> {
@@ -103,57 +109,93 @@ export function fetchProjects(status?: string): Promise<{ ok: true; projects: Ap
   return apiFetch(`/api/v1/projects${q}`);
 }
 
-export function createProject(
-  name: string,
-  description?: string,
-): Promise<{ ok: true; project: ApiProject }> {
+export function fetchProject(id: string): Promise<{ ok: true; project: ApiProject; members: ApiAgent[] }> {
+  return apiFetch(`/api/v1/projects/${id}`);
+}
+
+export function createProject(name: string, description?: string): Promise<{ ok: true; project: ApiProject }> {
   return apiFetch("/api/v1/projects", {
     method: "POST",
     body: JSON.stringify({ name, description: description ?? "" }),
   });
 }
 
-export function fetchProjectThreads(
-  projectId: string,
-): Promise<{ ok: true; threads: ApiThread[] }> {
-  return apiFetch(`/api/v1/projects/${projectId}/threads`);
+export function addProjectMember(projectId: string, agentId: string): Promise<{ ok: true }> {
+  return apiFetch(`/api/v1/projects/${projectId}/members`, {
+    method: "POST",
+    body: JSON.stringify({ agentId }),
+  });
+}
+
+export function removeProjectMember(projectId: string, agentId: string): Promise<{ ok: true }> {
+  return apiFetch(`/api/v1/projects/${projectId}/members/${agentId}`, {
+    method: "DELETE",
+  });
 }
 
 // ── Tasks ─────────────────────────────────────────────────────────────────────
 
 export type ApiTask = {
   id: string;
-  seq: number;
+  seq?: number;
   title: string;
   description: string;
   status: "proposed" | "approved" | "in_progress" | "done" | "rejected";
-  proposed_by_type: "human" | "agent";
+  proposed_by_type: "human" | "agent" | string;
   proposed_by_user_id: string | null;
   proposed_by_agent_id: string | null;
   proposed_by_agent_name: string | null;
   claimed_by_agent_id: string | null;
   claimed_by_agent_name: string | null;
-  approved_at: string | null;
-  completed_at: string | null;
+  approved_at?: string | null;
+  completed_at?: string | null;
   project_id: string | null;
   created_at: string;
   updated_at: string;
 };
 
-export function fetchProjectTasks(
-  projectId: string,
-  status?: string,
-): Promise<{ ok: true; tasks: ApiTask[] }> {
-  const q = status ? `?status=${status}` : "";
-  return apiFetch(`/api/v1/projects/${projectId}/tasks${q}`);
+export function fetchProjectTasks(projectId: string, status?: string): Promise<{ ok: true; tasks: ApiTask[] }> {
+  const qs = status ? `?status=${status}` : "";
+  return apiFetch(`/api/v1/projects/${projectId}/tasks${qs}`);
+}
+
+export function fetchTasks(status?: string): Promise<{ ok: true; tasks: ApiTask[] }> {
+  const qs = status ? `?status=${status}` : "";
+  return apiFetch(`/api/v1/tasks${qs}`);
 }
 
 export function createTask(
   title: string,
   description?: string,
+  projectId?: string,
 ): Promise<{ ok: true; task: ApiTask }> {
   return apiFetch("/api/v1/tasks", {
     method: "POST",
-    body: JSON.stringify({ title, description: description ?? "" }),
+    body: JSON.stringify({ title, description: description ?? "", projectId }),
+  });
+}
+
+export function approveTask(taskId: string): Promise<{ ok: true; task: ApiTask }> {
+  return apiFetch(`/api/v1/tasks/${taskId}/approve`, { method: "PATCH" });
+}
+
+export function rejectTask(taskId: string, reason?: string): Promise<{ ok: true; task: ApiTask }> {
+  return apiFetch(`/api/v1/tasks/${taskId}/reject`, {
+    method: "PATCH",
+    body: JSON.stringify({ reason }),
+  });
+}
+
+export function claimTask(taskId: string, agentId: string): Promise<{ ok: true; task: ApiTask }> {
+  return apiFetch(`/api/v1/tasks/${taskId}/claim`, {
+    method: "PATCH",
+    body: JSON.stringify({ agentId }),
+  });
+}
+
+export function completeTask(taskId: string, agentId: string): Promise<{ ok: true; task: ApiTask }> {
+  return apiFetch(`/api/v1/tasks/${taskId}/done`, {
+    method: "PATCH",
+    body: JSON.stringify({ agentId }),
   });
 }

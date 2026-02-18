@@ -35,11 +35,12 @@ export async function registerTasks(server: FastifyInstance, db: pg.Pool) {
     Body: {
       title: string;
       description?: string;
+      projectId?: string;
       proposedByAgentId?: string; // if agent is proposing
     };
   }>("/api/v1/tasks", async (req, reply) => {
     const userId = getUserId(req);
-    const { title, description = "", proposedByAgentId } = req.body ?? {};
+    const { title, description = "", projectId, proposedByAgentId } = req.body ?? {};
 
     if (!title?.trim()) {
       return reply.status(400).send({ ok: false, error: "title is required" });
@@ -73,8 +74,8 @@ export async function registerTasks(server: FastifyInstance, db: pg.Pool) {
     const { rows } = await db.query(
       `insert into tasks
          (title, description, status, proposed_by_type, proposed_by_user_id, proposed_by_agent_id,
-          approved_at)
-       values ($1, $2, $3, $4, $5, $6, $7)
+          approved_at, project_id)
+       values ($1, $2, $3, $4, $5, $6, $7, $8)
        returning *`,
       [
         title.trim(),
@@ -83,7 +84,8 @@ export async function registerTasks(server: FastifyInstance, db: pg.Pool) {
         proposedByType,
         proposedByUserId,
         proposedByAgentIdVal,
-        isAgentProposal ? null : new Date(), // human tasks auto-approved
+        isAgentProposal ? null : new Date(),
+        projectId ?? null,
       ]
     );
     const task = rows[0];

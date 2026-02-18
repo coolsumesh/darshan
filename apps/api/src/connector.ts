@@ -58,19 +58,31 @@ async function sendToAgent(sessionKey: string, message: string): Promise<OpenCla
       return { ok: false, error: `HTTP ${res.status}: ${text}` };
     }
 
-    const data = await res.json() as { ok: boolean; result?: { reply?: string; status?: string; error?: string }; error?: unknown };
+    const data = await res.json() as {
+      ok: boolean;
+      result?: {
+        details?: { runId?: string; status?: string; reply?: string; error?: string };
+        content?: Array<{ type: string; text: string }>;
+      };
+      error?: unknown;
+    };
 
     if (!data.ok) {
       return { ok: false, error: JSON.stringify(data.error ?? "unknown error") };
     }
 
-    const result = data.result ?? {};
+    // Gateway wraps tool results: real payload is in result.details
+    const details = data.result?.details ?? {};
 
-    if (result.status === "error") {
-      return { ok: false, error: result.error ?? "agent returned error" };
+    if (details.status === "error") {
+      return { ok: false, error: details.error ?? "agent returned error" };
     }
 
-    return { ok: true, reply: result.reply ?? "(no reply)" };
+    if (details.status === "timeout") {
+      return { ok: false, error: "agent did not reply in time (timeout)" };
+    }
+
+    return { ok: true, reply: details.reply ?? undefined };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }
@@ -190,8 +202,12 @@ export async function processQueued(db: pg.Pool) {
 
       if (result.ok && result.reply) {
         responseContent = result.reply;
+      } else if (result.ok && !result.reply) {
+        // Agent ran but returned no text (e.g. NO_REPLY / HEARTBEAT_OK)
+        responseContent = `[${agentName}] (no response text returned)`;
+        runStatus = "succeeded";
       } else {
-        responseContent = `[${agentName}] Failed to get response: ${result.error ?? "unknown error"}`;
+        responseContent = `[${agentName}] ${result.error ?? "unknown error"}`;
         runStatus = "failed";
         errorMessage = result.error;
       }
