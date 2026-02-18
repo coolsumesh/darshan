@@ -1,29 +1,129 @@
+/**
+ * Darshan Agent Connector — OpenClaw backend
+ *
+ * Replaces the fake canned-response stub with real agent invocations via
+ * the OpenClaw Gateway HTTP API (POST /tools/invoke → sessions_send).
+ *
+ * connector_ref format stored in agents table:
+ *   "openclaw:agent:<agentId>:<sessionKey>"
+ *   e.g. "openclaw:agent:main:agent:main:main"
+ *        "openclaw:agent:komal:agent:komal:main"
+ *
+ * The sessionKey is the full OpenClaw session key passed to sessions_send.
+ */
+
 import type pg from "pg";
 import { appendAuditEvent } from "./audit.js";
 import { broadcast } from "./broadcast.js";
 
 const POLL_INTERVAL_MS = 2000;
-const THINK_TIME_MS = 1500;
 
-const CANNED_RESPONSES: Record<string, string> = {
-  default: "Acknowledged. I've reviewed your message and will proceed accordingly.",
-  mira: "Got it. I've triaged this and flagged the relevant ops items for follow-up.",
-  nia: "Thanks for reaching out. I've logged this and will follow up with the appropriate team.",
-  kaito: "Understood. I'm assessing the incident now and will report back shortly.",
-  anya: "Received. Running quality checks on this now — I'll have results for you soon.",
-};
+// OpenClaw Gateway — loopback, same server
+const OPENCLAW_URL   = process.env.OPENCLAW_URL   ?? "http://127.0.0.1:18789";
+const OPENCLAW_TOKEN = process.env.OPENCLAW_TOKEN  ?? "";
 
-function sleep(ms: number) {
-  return new Promise<void>((resolve) => setTimeout(resolve, ms));
+// Per-run timeout: how long to wait for an agent reply (ms)
+const AGENT_TIMEOUT_SECONDS = 120;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// OpenClaw HTTP helper
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface OpenClawSendResult {
+  ok: boolean;
+  reply?: string;
+  error?: string;
 }
 
-function pickResponse(agentName: string): string {
-  const key = agentName.toLowerCase();
-  return CANNED_RESPONSES[key] ?? CANNED_RESPONSES["default"]!;
+async function sendToAgent(sessionKey: string, message: string): Promise<OpenClawSendResult> {
+  try {
+    const res = await fetch(`${OPENCLAW_URL}/tools/invoke`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${OPENCLAW_TOKEN}`,
+      },
+      body: JSON.stringify({
+        tool: "sessions_send",
+        args: {
+          sessionKey,
+          message,
+          timeoutSeconds: AGENT_TIMEOUT_SECONDS,
+        },
+      }),
+    });
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      return { ok: false, error: `HTTP ${res.status}: ${text}` };
+    }
+
+    const data = await res.json() as { ok: boolean; result?: { reply?: string; status?: string; error?: string }; error?: unknown };
+
+    if (!data.ok) {
+      return { ok: false, error: JSON.stringify(data.error ?? "unknown error") };
+    }
+
+    const result = data.result ?? {};
+
+    if (result.status === "error") {
+      return { ok: false, error: result.error ?? "agent returned error" };
+    }
+
+    return { ok: true, reply: result.reply ?? "(no reply)" };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Parse connector_ref → OpenClaw session key
+// Format: "openclaw:agent:<agentId>:<fullSessionKey>"
+// e.g.   "openclaw:agent:komal:agent:komal:main"
+// ─────────────────────────────────────────────────────────────────────────────
+
+function parseConnectorRef(ref: string): string | null {
+  if (!ref.startsWith("openclaw:agent:")) return null;
+  // Everything after "openclaw:agent:<agentId>:" is the session key
+  const parts = ref.split(":");
+  // parts: ["openclaw", "agent", "<agentId>", ...rest of session key]
+  if (parts.length < 4) return null;
+  // Session key starts at index 3
+  return parts.slice(3).join(":");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Build the message context to send to the agent
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function buildAgentMessage(
+  db: pg.Pool,
+  run: { thread_id: string; input_message_id: string | null }
+): Promise<string> {
+  // Get the triggering human message
+  if (!run.input_message_id) return "(task triggered with no message content)";
+
+  const { rows } = await db.query(
+    `select m.content, t.title as thread_title
+     from messages m
+     join threads t on t.id = m.thread_id
+     where m.id = $1`,
+    [run.input_message_id]
+  );
+
+  if (rows.length === 0) return "(message not found)";
+
+  const { content, thread_title } = rows[0];
+  const context = thread_title ? `[Thread: ${thread_title}]\n\n` : "";
+  return `${context}${content}`;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Process queued runs
+// ─────────────────────────────────────────────────────────────────────────────
 
 export async function processQueued(db: pg.Pool) {
-  // Claim queued runs (limit to small batch to avoid thundering herd)
+  // Claim queued runs in batch (skip locked for safe concurrency)
   const { rows: queued } = await db.query<{
     id: string;
     thread_id: string;
@@ -37,22 +137,29 @@ export async function processQueued(db: pg.Pool) {
        select id from runs
        where status = 'queued'
        order by seq asc
-       limit 10
+       limit 5
        for update skip locked
      )
      returning id, thread_id, target_agent_id, requested_by_user_id, input_message_id`
   );
 
   for (const run of queued) {
-    // Fetch updated run + agent name for broadcast
+    // Fetch agent details (name + connector_ref)
+    const { rows: agentRows } = await db.query(
+      `select id, name, connector_ref from agents where id = $1`,
+      [run.target_agent_id]
+    );
+    const agent = agentRows[0];
+    const agentName = agent?.name ?? "Agent";
+
+    // Broadcast: run is now running
     const { rows: runRows } = await db.query(
       `select r.*, a.name as target_agent_name
        from runs r join agents a on a.id = r.target_agent_id
        where r.id = $1`,
       [run.id]
     );
-    const updatedRun = runRows[0];
-    broadcast("run.updated", { run: updatedRun });
+    broadcast("run.updated", { run: runRows[0] });
 
     await appendAuditEvent(db, {
       actor: { actor_type: "system" },
@@ -64,18 +171,33 @@ export async function processQueued(db: pg.Pool) {
       decision: "allow",
     });
 
-    // Simulate agent thinking
-    await sleep(THINK_TIME_MS);
+    // ── Invoke the real agent via OpenClaw ──
+    let responseContent: string;
+    let runStatus: "succeeded" | "failed" = "succeeded";
+    let errorMessage: string | undefined;
 
-    // Fetch agent name for canned response
-    const { rows: agentRows } = await db.query(
-      `select name from agents where id = $1`,
-      [run.target_agent_id]
-    );
-    const agentName = agentRows[0]?.name ?? "Agent";
-    const responseContent = `[${agentName}] ${pickResponse(agentName)}`;
+    const connectorRef = agent?.connector_ref ?? "";
+    const sessionKey = parseConnectorRef(connectorRef);
 
-    // Persist agent response message
+    if (!sessionKey) {
+      // No valid connector_ref — agent not yet connected to OpenClaw
+      responseContent = `[${agentName}] Not yet connected to OpenClaw (connector_ref missing or invalid: "${connectorRef}"). Set connector_ref to "openclaw:agent:<agentId>:<sessionKey>" in the agents table.`;
+      runStatus = "failed";
+      errorMessage = "no_connector_ref";
+    } else {
+      const message = await buildAgentMessage(db, run);
+      const result = await sendToAgent(sessionKey, message);
+
+      if (result.ok && result.reply) {
+        responseContent = result.reply;
+      } else {
+        responseContent = `[${agentName}] Failed to get response: ${result.error ?? "unknown error"}`;
+        runStatus = "failed";
+        errorMessage = result.error;
+      }
+    }
+
+    // Persist agent response as a message
     const { rows: msgRows } = await db.query(
       `insert into messages
          (thread_id, author_type, author_agent_id, content, run_id)
@@ -85,30 +207,32 @@ export async function processQueued(db: pg.Pool) {
     );
     const agentMessage = msgRows[0];
 
-    // Mark run succeeded
+    // Update run status
     const { rows: doneRows } = await db.query(
       `update runs
-       set status = 'succeeded', ended_at = now(), updated_at = now()
+       set status = $2,
+           ended_at = now(),
+           updated_at = now(),
+           error_code = $3,
+           error_message = $4
        where id = $1
        returning *`,
-      [run.id]
+      [run.id, runStatus, runStatus === "failed" ? "connector_error" : null, errorMessage ?? null]
     );
     const doneRun = doneRows[0];
 
     // Update thread updated_at
-    await db.query(
-      `update threads set updated_at = now() where id = $1`,
-      [run.thread_id]
-    );
+    await db.query(`update threads set updated_at = now() where id = $1`, [run.thread_id]);
 
     await appendAuditEvent(db, {
       actor: { actor_type: "system" },
-      action: "run.complete",
+      action: runStatus === "succeeded" ? "run.complete" : "run.fail",
       resource_type: "run",
       resource_id: run.id,
       thread_id: run.thread_id,
       run_id: run.id,
-      decision: "allow",
+      decision: runStatus === "succeeded" ? "allow" : "error",
+      reason: errorMessage,
     });
 
     broadcast("message.created", { message: agentMessage });
@@ -116,14 +240,24 @@ export async function processQueued(db: pg.Pool) {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Polling loop
+// ─────────────────────────────────────────────────────────────────────────────
+
 export function startConnector(db: pg.Pool) {
+  if (!OPENCLAW_TOKEN) {
+    console.warn("[connector] OPENCLAW_TOKEN not set — agent calls will fail. Set it in .env");
+  }
+
   async function poll() {
     try {
       await processQueued(db);
-    } catch {
-      // Swallow errors; log via Fastify logger not available here
+    } catch (err) {
+      console.error("[connector] poll error:", err);
     }
     setTimeout(poll, POLL_INTERVAL_MS);
   }
+
+  console.log(`[connector] Starting OpenClaw connector (gateway: ${OPENCLAW_URL})`);
   setTimeout(poll, POLL_INTERVAL_MS);
 }
