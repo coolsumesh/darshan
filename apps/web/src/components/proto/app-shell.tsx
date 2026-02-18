@@ -29,14 +29,6 @@ import { applyPrefsToDom, loadPrefs, useUIPreferences } from "@/components/proto
 
 const NAV = [
   { kind: "link", href: "/dashboard", label: "Dashboard", icon: Activity },
-  { kind: "link", href: "/agents", label: "Agents", icon: Bot },
-  { kind: "link", href: "/projects", label: "Projects", icon: FolderKanban },
-  { kind: "link", href: "/topics", label: "Topics", icon: Tags },
-  { kind: "link", href: "/threads", label: "Threads", icon: MessageSquareText },
-  { kind: "link", href: "/attendance", label: "Attendance", icon: CalendarClock },
-  { kind: "section", label: "Analytics" },
-  { kind: "link", href: "/summary/week", label: "Week summary", icon: BarChart3 },
-  { kind: "link", href: "/summary/day", label: "Day summary", icon: CalendarDays },
   { kind: "section", label: "Preferences" },
   { kind: "link", href: "/settings", label: "Settings", icon: Settings },
 ] as const;
@@ -507,10 +499,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
               <div className="min-w-0">
                 <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-                  Operator Console
+                  Darshan Hub
                 </div>
                 <div className="text-xs text-slate-500 dark:text-slate-400">
-                  Live thread triage • 12 active agents
+                  Project management • MithranLabs
                 </div>
               </div>
             </div>
