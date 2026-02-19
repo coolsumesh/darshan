@@ -110,7 +110,7 @@ export async function registerAgents(server: FastifyInstance, db: pg.Pool) {
       `update agents set ping_status = 'pending' where id = $1`, [agents[0].id]
     );
 
-    broadcast({ type: "agent:ping_sent", data: { agentId: agents[0].id } });
+    broadcast("agent:ping_sent", { agentId: agents[0].id });
     return { ok: true, inbox_item: rows[0] };
   });
 
@@ -143,7 +143,7 @@ export async function registerAgents(server: FastifyInstance, db: pg.Pool) {
       [agents[0].id]
     );
 
-    broadcast({ type: "agent:ping_ack", data: { agentId: agents[0].id, response } });
+    broadcast("agent:ping_ack", { agentId: agents[0].id, response });
     return { ok: true };
   });
 
