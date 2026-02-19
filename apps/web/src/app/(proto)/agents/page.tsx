@@ -67,9 +67,9 @@ function OnboardOrgModal({ onDone, onClose }: {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <button className="absolute inset-0 bg-zinc-950/50 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative z-10 w-full max-w-md rounded-2xl bg-white shadow-xl ring-1 ring-zinc-200 dark:bg-[#16132A] dark:ring-[#2D2A45]">
+      <div className="relative z-10 flex w-full max-w-md flex-col rounded-2xl bg-white shadow-xl ring-1 ring-zinc-200 dark:bg-[#16132A] dark:ring-[#2D2A45] max-h-[90vh]">
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-zinc-200 px-5 py-4 dark:border-[#2D2A45]">
+        <div className="flex shrink-0 items-center justify-between border-b border-zinc-200 px-5 py-4 dark:border-[#2D2A45]">
           <div>
             <div className="font-display text-sm font-bold text-zinc-900 dark:text-white">Onboard Organisation</div>
             <div className="mt-0.5 text-xs text-zinc-500">Register a new org to onboard their agents</div>
@@ -79,7 +79,7 @@ function OnboardOrgModal({ onDone, onClose }: {
           </button>
         </div>
 
-        <div className="flex flex-col gap-4 p-5">
+        <div className="flex flex-col gap-4 p-5 flex-1 overflow-y-auto min-h-0">
           {/* Org type selector */}
           <div>
             <label className="mb-2 block text-xs font-semibold text-zinc-700 dark:text-zinc-300">Relationship type</label>
@@ -120,7 +120,7 @@ function OnboardOrgModal({ onDone, onClose }: {
           {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-600 dark:bg-red-500/10 dark:text-red-400">{error}</p>}
         </div>
 
-        <div className="flex justify-end gap-3 border-t border-zinc-200 px-5 py-4 dark:border-[#2D2A45]">
+        <div className="flex shrink-0 justify-end gap-3 border-t border-zinc-200 px-5 py-4 dark:border-[#2D2A45]">
           <Button variant="secondary" size="sm" onClick={onClose}>Cancel</Button>
           <Button variant="primary" size="sm" onClick={handleSave} disabled={!name || !slug || saving}>
             {saving ? "Creating…" : "Create Organisation"}
@@ -172,8 +172,8 @@ function OnboardAgentModal({ orgs, defaultOrgId, onDone, onClose }: {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <button className="absolute inset-0 bg-zinc-950/50 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative z-10 w-full max-w-md rounded-2xl bg-white shadow-xl ring-1 ring-zinc-200 dark:bg-[#16132A] dark:ring-[#2D2A45]">
-        <div className="flex items-center justify-between border-b border-zinc-200 px-5 py-4 dark:border-[#2D2A45]">
+      <div className="relative z-10 flex w-full max-w-md flex-col rounded-2xl bg-white shadow-xl ring-1 ring-zinc-200 dark:bg-[#16132A] dark:ring-[#2D2A45] max-h-[90vh]">
+        <div className="flex shrink-0 items-center justify-between border-b border-zinc-200 px-5 py-4 dark:border-[#2D2A45]">
           <div>
             <div className="font-display text-sm font-bold text-zinc-900 dark:text-white">Onboard Agent</div>
             <div className="mt-0.5 text-xs text-zinc-500">Register an AI agent under an organisation</div>
@@ -183,7 +183,7 @@ function OnboardAgentModal({ orgs, defaultOrgId, onDone, onClose }: {
           </button>
         </div>
 
-        <div className="flex flex-col gap-4 p-5 max-h-[70vh] overflow-y-auto">
+        <div className="flex flex-col gap-4 p-5 flex-1 overflow-y-auto min-h-0">
           {/* Org picker */}
           <div className="flex flex-col gap-1.5">
             <label className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">Organisation <span className="text-red-500">*</span></label>
@@ -255,7 +255,7 @@ function OnboardAgentModal({ orgs, defaultOrgId, onDone, onClose }: {
           {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-600 dark:bg-red-500/10 dark:text-red-400">{error}</p>}
         </div>
 
-        <div className="flex justify-end gap-3 border-t border-zinc-200 px-5 py-4 dark:border-[#2D2A45]">
+        <div className="flex shrink-0 justify-end gap-3 border-t border-zinc-200 px-5 py-4 dark:border-[#2D2A45]">
           <Button variant="secondary" size="sm" onClick={onClose}>Cancel</Button>
           <Button variant="primary" size="sm" onClick={handleSave} disabled={!name || !orgId || saving}>
             {saving ? "Onboarding…" : "Onboard Agent"}
