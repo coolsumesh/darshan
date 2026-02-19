@@ -358,7 +358,9 @@ export default function DashboardPage() {
 
       {/* ── Stats row ── */}
       <div className="flex flex-wrap gap-4 delay-100">
-        <StatCard icon={TrendingUp}   iconBg="bg-brand-600"   label="Total Projects"   value={projects.length}   sub="active workspaces"      />
+        <Link href="/projects" className="flex-1 min-w-[180px]">
+          <StatCard icon={TrendingUp}   iconBg="bg-brand-600"   label="Total Projects"   value={projects.length}   sub="active workspaces"      />
+        </Link>
         <StatCard icon={Users}        iconBg="bg-sky-500"     label="Active Agents"    value={totalAgents || "—"} sub="assigned"              />
         <StatCard icon={Zap}          iconBg="bg-amber-500"   label="Avg Progress"     value={`${avgProgress}%`} sub="across all"            />
         <StatCard icon={CheckCircle2} iconBg="bg-emerald-500" label="Completed Today"  value={0}                 sub="tasks in last 24h"     />
