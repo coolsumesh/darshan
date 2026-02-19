@@ -463,7 +463,7 @@ function SprintBoardTab({ projectId }: { projectId: string }) {
       <div className="overflow-x-auto pb-2">
         <div className="flex gap-4" style={{ minWidth: `${TASK_COLUMNS.length * 260}px` }}>
           {TASK_COLUMNS.map((col) => {
-            const colTasks = tasks.filter((t) => t.status === col.id);
+            const colTasks = tasks.filter((t) => t.status === col.id && !recentlyDeleted.current.has(t.id));
             const isOver   = dragOver === col.id;
 
             return (
