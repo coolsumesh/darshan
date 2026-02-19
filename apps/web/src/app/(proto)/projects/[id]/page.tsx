@@ -20,6 +20,7 @@ import {
   createTask, updateTask, deleteTask,
   addTeamMember, removeTeamMember,
   fetchArchitecture, fetchTechSpec,
+  pingAgent,
   type TeamMemberWithAgent,
 } from "@/lib/api";
 import { type Agent } from "@/lib/agents";
@@ -1099,8 +1100,9 @@ function AgentRegistryPanel({ agents, onAdd, onClose, alreadyAdded }: {
 
 function TeamTab({ projectId }: { projectId: string }) {
   const [team,         setTeam]         = React.useState<TeamMemberWithAgent[]>([]);
-  const [allAgents,    setAllAgents]    = React.useState<(TeamMemberWithAgent["agent"])[]>([]);
+  const [allAgents,    setAllAgents]    = React.useState<NonNullable<TeamMemberWithAgent["agent"]>[]>([]);
   const [showRegistry, setShowRegistry] = React.useState(false);
+  const [pingingIds,   setPingingIds]   = React.useState<Set<string>>(new Set());
 
   React.useEffect(() => {
     fetchTeam(projectId).then(setTeam);
@@ -1117,6 +1119,22 @@ function TeamTab({ projectId }: { projectId: string }) {
     await removeTeamMember(projectId, agentId);
     setTeam((prev) => prev.filter((m) => m.agentId !== agentId));
   }
+  async function handlePing(agentId: string) {
+    setPingingIds((s) => new Set(s).add(agentId));
+    await pingAgent(agentId);
+    // Poll for ack after a delay
+    setTimeout(() => {
+      fetchTeam(projectId).then(setTeam);
+      setPingingIds((s) => { const n = new Set(s); n.delete(agentId); return n; });
+    }, 8000);
+  }
+
+  const PING_STATUS_META: Record<string, { dot: string; label: string }> = {
+    ok:      { dot: "bg-emerald-400",              label: "Reachable"  },
+    pending: { dot: "bg-amber-400 animate-pulse",  label: "Pinging…"   },
+    timeout: { dot: "bg-red-400",                  label: "Timeout"    },
+    unknown: { dot: "bg-zinc-400",                 label: "Unknown"    },
+  };
 
   return (
     <>
@@ -1125,7 +1143,7 @@ function TeamTab({ projectId }: { projectId: string }) {
           <div>
             <CardTitle>Team</CardTitle>
             <div className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
-              {team.length} agent{team.length !== 1 ? "s" : ""} on this project
+              {team.length} agent{team.length !== 1 ? "s" : ""} · {team.filter(m => m.agent?.status === "online").length} online
             </div>
           </div>
           <Button variant="primary" size="sm" onClick={() => setShowRegistry(true)}>
@@ -1141,30 +1159,74 @@ function TeamTab({ projectId }: { projectId: string }) {
             </div>
           ) : (
             <div className="flex flex-col gap-2">
-              {team.map((m) => (
-                <div key={m.agentId} className="flex items-center gap-4 rounded-2xl bg-zinc-50 p-4 ring-1 ring-zinc-200 dark:bg-white/5 dark:ring-[#2D2A45]">
-                  <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-zinc-900 text-white dark:bg-zinc-700">
-                    <span className="text-xs font-semibold">{(m.agent?.name ?? m.agentId)[0]?.toUpperCase()}</span>
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{m.agent?.name ?? m.agentId}</span>
-                      <Badge tone={m.agent?.status === "online" ? "success" : "neutral"}>{m.agent?.status ?? "unknown"}</Badge>
+              {team.map((m) => {
+                const name       = m.agent?.name ?? m.agentId;
+                const ext        = m.agent as unknown as Record<string, unknown>;
+                const pingStatus = pingingIds.has(m.agentId) ? "pending" : (ext?.ping_status as string ?? "unknown");
+                const orgName    = ext?.org_name as string | undefined;
+                const caps       = (ext?.capabilities as string[]) ?? [];
+                const model      = ext?.model as string | undefined;
+                const lastSeen   = ext?.last_seen_at as string | undefined;
+                const ps         = PING_STATUS_META[pingStatus] ?? PING_STATUS_META.unknown;
+
+                return (
+                  <div key={m.agentId} className="flex items-center gap-4 rounded-2xl bg-zinc-50 p-4 ring-1 ring-zinc-200 dark:bg-white/5 dark:ring-[#2D2A45]">
+                    {/* Avatar with online dot */}
+                    <div className="relative grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-zinc-900 text-white dark:bg-zinc-700">
+                      <span className="text-xs font-semibold">{name[0]?.toUpperCase()}</span>
+                      <span className={cn(
+                        "absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full ring-2 ring-white dark:ring-[#0F0D1E]",
+                        m.agent?.status === "online" ? "bg-emerald-400" : "bg-zinc-400"
+                      )} />
                     </div>
-                    <div className="mt-0.5 text-xs text-zinc-500">{m.role}{m.agent?.desc && ` · ${m.agent.desc}`} · Joined {m.joinedAt}</div>
+                    {/* Info */}
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-display text-sm font-bold text-zinc-900 dark:text-white">{name}</span>
+                        {orgName && (
+                          <span className="rounded-full bg-brand-100 px-2 py-0.5 text-[11px] font-semibold text-brand-700 dark:bg-brand-500/10 dark:text-brand-300">{orgName}</span>
+                        )}
+                        {model && (
+                          <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-medium text-zinc-500 dark:bg-white/10">{model}</span>
+                        )}
+                      </div>
+                      <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                        <span className="flex items-center gap-1 text-[11px] text-zinc-500">
+                          <span className={cn("h-1.5 w-1.5 rounded-full", ps.dot)} />
+                          {ps.label}
+                          {lastSeen && <span className="text-zinc-400">· seen {new Date(lastSeen).toLocaleTimeString()}</span>}
+                        </span>
+                        {caps.slice(0, 5).map((c) => (
+                          <span key={c} className="rounded bg-zinc-100 px-1.5 py-0.5 text-[10px] font-medium text-zinc-500 dark:bg-white/10">{c}</span>
+                        ))}
+                      </div>
+                      <div className="mt-0.5 text-[11px] text-zinc-400">{m.role}{m.agent?.desc && ` · ${m.agent.desc}`}</div>
+                    </div>
+                    {/* Actions */}
+                    <div className="flex shrink-0 items-center gap-2">
+                      <Button size="sm" variant="secondary">Inspect</Button>
+                      <Button size="sm" variant="secondary"
+                        disabled={pingingIds.has(m.agentId)}
+                        onClick={() => handlePing(m.agentId)}>
+                        {pingingIds.has(m.agentId) ? "Pinging…" : "Ping"}
+                      </Button>
+                      <Button size="sm" variant="ghost" onClick={() => handleRemove(m.agentId)}>Remove</Button>
+                    </div>
                   </div>
-                  <div className="flex shrink-0 items-center gap-2">
-                    <Button size="sm" variant="secondary">Inspect</Button>
-                    <Button size="sm" variant="ghost">Ping</Button>
-                    <Button size="sm" variant="ghost" onClick={() => handleRemove(m.agentId)}>Remove</Button>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </CardContent>
       </Card>
-      {showRegistry && <AgentRegistryPanel agents={allAgents as NonNullable<TeamMemberWithAgent["agent"]>[]} onAdd={handleAdd} onClose={() => setShowRegistry(false)} alreadyAdded={addedIds} />}
+      {showRegistry && (
+        <AgentRegistryPanel
+          agents={allAgents}
+          onAdd={handleAdd}
+          onClose={() => setShowRegistry(false)}
+          alreadyAdded={addedIds}
+        />
+      )}
     </>
   );
 }

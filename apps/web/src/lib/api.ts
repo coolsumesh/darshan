@@ -122,7 +122,40 @@ export async function fetchAgents(): Promise<Agent[]> {
       desc: (a as unknown as { desc?: string }).desc ?? "",
       status: a.status,
       lastProfileUpdateAt: (a as unknown as { updated_at?: string }).updated_at ?? "",
+      // Extended fields
+      org_id:          (a as unknown as { org_id?: string }).org_id,
+      org_name:        (a as unknown as { org_name?: string }).org_name,
+      org_slug:        (a as unknown as { org_slug?: string }).org_slug,
+      agent_type:      (a as unknown as { agent_type?: string }).agent_type,
+      model:           (a as unknown as { model?: string }).model,
+      provider:        (a as unknown as { provider?: string }).provider,
+      capabilities:    (a as unknown as { capabilities?: string[] }).capabilities ?? [],
+      ping_status:     (a as unknown as { ping_status?: string }).ping_status ?? "unknown",
+      last_ping_at:    (a as unknown as { last_ping_at?: string }).last_ping_at,
+      last_seen_at:    (a as unknown as { last_seen_at?: string }).last_seen_at,
+      callback_token:  (a as unknown as { callback_token?: string }).callback_token,
     }));
   }
   return AGENTS;
+}
+
+export type Org = {
+  id: string; name: string; slug: string; description?: string;
+  type: "own" | "partner" | "client"; status: string;
+  agent_count?: number; project_count?: number;
+};
+
+export async function fetchOrgs(): Promise<Org[]> {
+  const data = await apiFetch<{ ok: boolean; orgs: Org[] }>("/api/v1/orgs");
+  return data?.ok ? data.orgs : [];
+}
+
+export async function pingAgent(agentId: string): Promise<boolean> {
+  const data = await apiFetch<{ ok: boolean }>(`/api/v1/agents/${agentId}/ping`, { method: "POST" });
+  return data?.ok ?? false;
+}
+
+export async function createOrg(payload: { name: string; slug: string; description?: string; type?: string }): Promise<Org | null> {
+  const data = await apiFetch<{ ok: boolean; org: Org }>("/api/v1/orgs", { method: "POST", body: JSON.stringify(payload) });
+  return data?.ok ? data.org : null;
 }

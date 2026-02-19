@@ -18,7 +18,6 @@ import {
   Plus,
   Search,
   Settings,
-  Sparkles,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { applyPrefsToDom, loadPrefs, useUIPreferences } from "@/components/proto/ui-preferences";
@@ -109,21 +108,6 @@ function Sidebar({
         collapsed ? "w-14" : "w-60"
       )}
     >
-      {/* Logo strip — matches topbar height */}
-      <div
-        className={cn(
-          "flex h-12 shrink-0 items-center border-b border-white/5",
-          collapsed ? "justify-center" : "gap-2 px-4"
-        )}
-      >
-        <div className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-brand-600">
-          <Sparkles className="h-4 w-4 text-white" />
-        </div>
-        {!collapsed && (
-          <span className="font-display text-sm font-semibold text-white">Darshan</span>
-        )}
-      </div>
-
       {/* Scrollable nav */}
       <nav
         className={cn("flex-1 overflow-y-auto py-3", collapsed ? "px-2" : "px-3")}
