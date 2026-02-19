@@ -343,6 +343,19 @@ export default function DashboardPage() {
   return (
     <div className="flex flex-col gap-8">
 
+      {/* ── Hero ── */}
+      <div className="animate-fade-up">
+        <p className="text-xs font-semibold uppercase tracking-widest text-zinc-400">
+          MithranLabs Ops Console
+        </p>
+        <h1 className="mt-1 text-[40px] leading-tight">
+          <CyclingText />
+        </h1>
+        <p className="mt-1 text-sm text-zinc-500">
+          {activeProjects.length} active project{activeProjects.length !== 1 ? "s" : ""} · {projects.length} total workspaces
+        </p>
+      </div>
+
       {/* ── Stats row ── */}
       <div className="flex flex-wrap gap-4 delay-100">
         <StatCard icon={TrendingUp}   iconBg="bg-brand-600"   label="Total Projects"   value={projects.length}   sub="active workspaces"      />
