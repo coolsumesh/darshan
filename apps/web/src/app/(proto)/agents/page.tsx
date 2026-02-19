@@ -193,8 +193,7 @@ function AgentDetailPanel({ agent, onClose, onPing, pinging }: {
             <div className="flex flex-col gap-1.5">
               {projects.map(p => (
                 <div key={p.id} className="flex items-center gap-3 rounded-xl bg-zinc-50 px-3 py-2 dark:bg-white/5">
-                  <div className="h-6 w-6 rounded-md shrink-0 flex items-center justify-center text-xs font-bold text-white"
-                    style={{ backgroundColor: p.color ?? "#6d28d9" }}>
+                  <div className="h-6 w-6 rounded-md shrink-0 flex items-center justify-center text-xs font-bold text-white bg-brand-700">
                     {p.name[0]?.toUpperCase()}
                   </div>
                   <div className="min-w-0 flex-1">

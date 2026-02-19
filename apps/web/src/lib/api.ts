@@ -178,7 +178,7 @@ export async function createOrgAgent(orgId: string, payload: {
 }
 
 export type AgentProject = {
-  id: string; name: string; slug: string; status: string; color?: string;
+  id: string; name: string; slug: string; status: string;
   role?: string; assigned_at?: string;
 };
 

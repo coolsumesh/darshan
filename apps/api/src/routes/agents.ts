@@ -185,7 +185,7 @@ export async function registerAgents(server: FastifyInstance, db: pg.Pool) {
     if (!agents.length) return reply.status(404).send({ ok: false, error: "agent not found" });
 
     const { rows } = await db.query(
-      `select p.id, p.name, p.slug, p.status, p.color,
+      `select p.id, p.name, p.slug, p.status,
               pt.role, pt.assigned_at
        from project_team pt
        join projects p on p.id = pt.project_id
