@@ -90,6 +90,22 @@ export async function registerAgents(server: FastifyInstance, db: pg.Pool) {
     return { ok: true, agent: rows[0] };
   });
 
+  // ── Delete / remove an agent ───────────────────────────────────────────────
+  server.delete<{ Params: { id: string } }>("/api/v1/agents/:id", async (req, reply) => {
+    const { rows } = await db.query(
+      `select id, name from agents where id::text = $1`, [req.params.id]
+    );
+    if (!rows.length) return reply.status(404).send({ ok: false, error: "agent not found" });
+
+    // Remove from project teams, clear inbox, then delete agent
+    await db.query(`delete from project_team where agent_id = $1`, [rows[0].id]);
+    await db.query(`delete from agent_inbox  where agent_id = $1`, [rows[0].id]);
+    await db.query(`delete from agents       where id = $1`,       [rows[0].id]);
+
+    broadcast("agent:removed", { agentId: rows[0].id, name: rows[0].name });
+    return { ok: true };
+  });
+
   // ── Ping an agent ───────────────────────────────────────────────────────────
   server.post<{ Params: { id: string } }>("/api/v1/agents/:id/ping", async (req, reply) => {
     // Find agent

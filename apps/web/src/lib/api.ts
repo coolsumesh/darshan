@@ -186,3 +186,8 @@ export async function fetchAgentProjects(agentId: string): Promise<AgentProject[
   const data = await apiFetch<{ ok: boolean; projects: AgentProject[] }>(`/api/v1/agents/${agentId}/projects`);
   return data?.ok ? data.projects : [];
 }
+
+export async function deleteAgent(agentId: string): Promise<boolean> {
+  const data = await apiFetch<{ ok: boolean }>(`/api/v1/agents/${agentId}`, { method: "DELETE" });
+  return data?.ok ?? false;
+}

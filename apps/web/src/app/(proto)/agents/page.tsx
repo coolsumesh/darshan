@@ -4,12 +4,12 @@ import * as React from "react";
 import {
   Building2, Bot, Check, ChevronDown, ExternalLink,
   LayoutGrid, List, Plus, Search, X, Zap, Users,
-  Activity, Clock,
+  Activity, Clock, Trash2,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { fetchAgents, fetchOrgs, createOrg, createOrgAgent, pingAgent, fetchAgentProjects, type Org, type AgentProject } from "@/lib/api";
+import { fetchAgents, fetchOrgs, createOrg, createOrgAgent, pingAgent, fetchAgentProjects, deleteAgent, type Org, type AgentProject } from "@/lib/api";
 import type { Agent } from "@/lib/agents";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -60,19 +60,27 @@ const POPULAR_MODELS = ["claude-sonnet-4-6", "claude-opus-4-6", "gpt-4o", "gpt-4
 const ORG_TYPES     = [{ value: "partner", label: "Partner" }, { value: "client", label: "Client" }, { value: "vendor", label: "Vendor" }];
 
 // ─── Agent Detail Panel ───────────────────────────────────────────────────────
-function AgentDetailPanel({ agent, onClose, onPing, pinging }: {
+function AgentDetailPanel({ agent, onClose, onPing, onRemove, pinging }: {
   agent: ExtAgent; onClose: () => void;
-  onPing: (id: string) => void; pinging: boolean;
+  onPing: (id: string) => void; onRemove: (id: string) => void; pinging: boolean;
 }) {
   const sm  = STATUS_META[agent.status] ?? STATUS_META.offline;
   const pingStatusKey = pinging ? "pending" : (agent.ping_status ?? "unknown");
   const pm  = PING_META[pingStatusKey] ?? PING_META.unknown;
   const isCoord = agent.agent_type === "ai_coordinator";
   const [projects, setProjects] = React.useState<AgentProject[]>([]);
+  const [confirmDelete, setConfirmDelete] = React.useState(false);
+  const [deleting, setDeleting] = React.useState(false);
 
   React.useEffect(() => {
     fetchAgentProjects(agent.id).then(setProjects);
   }, [agent.id]);
+
+  async function handleDelete() {
+    setDeleting(true);
+    await onRemove(agent.id);
+    setDeleting(false);
+  }
 
   return (
     <div className="flex h-full w-[400px] shrink-0 flex-col border-l border-zinc-200 bg-white dark:border-[#2D2A45] dark:bg-[#16132A] animate-slide-in-right">
@@ -81,11 +89,35 @@ function AgentDetailPanel({ agent, onClose, onPing, pinging }: {
         <button onClick={onClose} className="grid h-7 w-7 place-items-center rounded-lg text-zinc-400 hover:bg-zinc-100 dark:hover:bg-white/10">
           <X className="h-4 w-4" />
         </button>
-        <span className="font-display font-bold text-zinc-900 dark:text-white">{agent.name}</span>
+        <span className="flex-1 font-display font-bold text-zinc-900 dark:text-white">{agent.name}</span>
         {isCoord && (
           <span className="rounded-full bg-brand-100 px-2 py-0.5 text-[11px] font-semibold text-brand-700 dark:bg-brand-500/10 dark:text-brand-300">Coordinator</span>
         )}
+        <button
+          onClick={() => setConfirmDelete(true)}
+          className="grid h-7 w-7 place-items-center rounded-lg text-zinc-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-500/10 transition-colors"
+          title="Remove agent">
+          <Trash2 className="h-4 w-4" />
+        </button>
       </div>
+
+      {/* Confirm delete */}
+      {confirmDelete && (
+        <div className="shrink-0 mx-4 mt-3 rounded-xl border border-red-200 bg-red-50 p-4 dark:border-red-500/20 dark:bg-red-500/10">
+          <p className="text-sm font-semibold text-red-700 dark:text-red-400">Remove {agent.name}?</p>
+          <p className="mt-0.5 text-xs text-red-500">This will remove the agent from all projects and delete their record permanently.</p>
+          <div className="mt-3 flex gap-2">
+            <button onClick={handleDelete} disabled={deleting}
+              className="flex-1 rounded-lg bg-red-600 py-1.5 text-xs font-semibold text-white hover:bg-red-700 transition-colors disabled:opacity-60">
+              {deleting ? "Removing…" : "Yes, remove"}
+            </button>
+            <button onClick={() => setConfirmDelete(false)}
+              className="flex-1 rounded-lg bg-white py-1.5 text-xs font-semibold text-zinc-600 ring-1 ring-zinc-200 hover:bg-zinc-50 dark:bg-white/10 dark:text-zinc-300 dark:ring-white/10">
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-5">
         {/* Identity */}
@@ -685,6 +717,12 @@ export default function AgentsPage() {
     setTimeout(() => { reload(); setPingingIds(s => { const n = new Set(s); n.delete(agentId); return n; }); }, 8000);
   }
 
+  async function handleRemoveAgent(agentId: string) {
+    await deleteAgent(agentId);
+    setDetailAgent(null);
+    reload();
+  }
+
   function openAgentModal(orgId?: string) { setAgentModalOrgId(orgId); setShowAgentModal(true); }
 
   // Derived stats
@@ -877,6 +915,7 @@ export default function AgentsPage() {
           agent={detailAgent}
           onClose={() => setDetailAgent(null)}
           onPing={(id) => { handlePing(id); setDetailAgent(a => a ? { ...a, ping_status: "pending" } : null); }}
+          onRemove={handleRemoveAgent}
           pinging={pingingIds.has(detailAgent.id)}
         />
       )}
