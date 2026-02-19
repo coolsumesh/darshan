@@ -1,0 +1,902 @@
+"use client";
+
+import * as React from "react";
+import Link from "next/link";
+import {
+  Building2, Bot, Check, ChevronRight, ExternalLink,
+  LayoutGrid, List, Plus, Search, X, Zap, Users,
+  FolderKanban, Archive, Trash2, Save, AlertTriangle,
+} from "lucide-react";
+import { cn } from "@/lib/cn";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import {
+  fetchOrgs, createOrg, updateOrg, deleteOrg,
+  fetchOrgAgents, fetchOrgProjects,
+  fetchAgents,
+  type Org, type OrgDetail,
+} from "@/lib/api";
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+type OrgType = "own" | "partner" | "client" | "vendor";
+type OrgFilter = "all" | OrgType | "archived";
+type OrgView   = "grid" | "list";
+
+type ExtOrg = OrgDetail & {
+  agent_count?: number;
+  project_count?: number;
+  online_count?: number;
+};
+
+type OrgAgent = {
+  id: string; name: string; status: string; agent_type?: string;
+  model?: string; ping_status?: string;
+};
+type OrgProject = {
+  id: string; name: string; slug: string; status: string; progress?: number;
+};
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+const ORG_TYPE_META: Record<string, { label: string; dot: string; badge: string; accent: string }> = {
+  own:     { label: "Own workspace", dot: "bg-brand-500",   badge: "bg-brand-100 text-brand-700 dark:bg-brand-500/10 dark:text-brand-300",   accent: "border-brand-500"  },
+  partner: { label: "Partner",       dot: "bg-sky-500",     badge: "bg-sky-100 text-sky-700 dark:bg-sky-500/10 dark:text-sky-300",           accent: "border-sky-500"    },
+  client:  { label: "Client",        dot: "bg-emerald-500", badge: "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400", accent: "border-emerald-500" },
+  vendor:  { label: "Vendor",        dot: "bg-amber-500",   badge: "bg-amber-100 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400",   accent: "border-amber-500"  },
+};
+
+const AVATAR_COLORS = [
+  "#7C3AED", "#2563EB", "#0284C7", "#059669", "#D97706", "#DC2626",
+];
+
+function avatarColor(name: string, override?: string): string {
+  if (override) return override;
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+  return AVATAR_COLORS[h % AVATAR_COLORS.length];
+}
+
+function relativeTime(dateStr?: string): string {
+  if (!dateStr) return "—";
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const d = Math.floor(diff / 86400000);
+  if (d < 1)   return "today";
+  if (d < 7)   return `${d}d ago`;
+  const w = Math.floor(d / 7);
+  if (w < 5)   return `${w}w ago`;
+  const m = Math.floor(d / 30);
+  return m < 12 ? `${m}mo ago` : `${Math.floor(m / 12)}y ago`;
+}
+
+function formatDate(dateStr?: string): string {
+  if (!dateStr) return "—";
+  return new Date(dateStr).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+}
+
+function ProgressBar({ value }: { value?: number }) {
+  const pct = Math.min(100, Math.max(0, value ?? 0));
+  return (
+    <div className="h-1.5 w-full overflow-hidden rounded-full bg-zinc-100 dark:bg-white/10">
+      <div className="h-full rounded-full bg-brand-500 transition-all" style={{ width: `${pct}%` }} />
+    </div>
+  );
+}
+
+// ─── Org Detail Panel ─────────────────────────────────────────────────────────
+function OrgDetailPanel({ org, onClose, onUpdated, onDeleted }: {
+  org: ExtOrg;
+  onClose: () => void;
+  onUpdated: (updated: ExtOrg) => void;
+  onDeleted: (id: string) => void;
+}) {
+  const [agents,   setAgents]   = React.useState<OrgAgent[]>([]);
+  const [projects, setProjects] = React.useState<OrgProject[]>([]);
+  const [saving,   setSaving]   = React.useState(false);
+  const [deleting, setDeleting] = React.useState(false);
+  const [confirmDelete, setConfirmDelete] = React.useState(false);
+
+  // Edit state
+  const [name,    setName]    = React.useState(org.name);
+  const [slug,    setSlug]    = React.useState(org.slug);
+  const [desc,    setDesc]    = React.useState(org.description ?? "");
+  const [type,    setType]    = React.useState(org.type);
+  const [status,  setStatus]  = React.useState((org as unknown as { status?: string }).status ?? "active");
+  const [color,   setColor]   = React.useState(
+    (org as unknown as { avatar_color?: string }).avatar_color ?? avatarColor(org.name)
+  );
+  const [dirty,   setDirty]   = React.useState(false);
+
+  React.useEffect(() => {
+    fetchOrgAgents(org.id).then(a => setAgents(a as OrgAgent[]));
+    fetchOrgProjects(org.id).then(setProjects);
+  }, [org.id]);
+
+  function markDirty() { setDirty(true); }
+
+  async function handleSave() {
+    setSaving(true);
+    const updated = await updateOrg(org.id, {
+      name: name.trim(), slug: slug.trim(), description: desc.trim() || undefined,
+      type, status, avatar_color: color,
+    });
+    setSaving(false);
+    if (updated) { setDirty(false); onUpdated({ ...org, ...updated }); }
+  }
+
+  async function handleArchive() {
+    const updated = await updateOrg(org.id, { status: "archived" });
+    if (updated) onUpdated({ ...org, ...updated });
+  }
+
+  async function handleDelete() {
+    setDeleting(true);
+    const ok = await deleteOrg(org.id);
+    setDeleting(false);
+    if (ok) onDeleted(org.id);
+    else { setConfirmDelete(false); alert("Cannot delete org with agents assigned."); }
+  }
+
+  const isOwn    = org.type === "own";
+  const tm       = ORG_TYPE_META[org.type] ?? ORG_TYPE_META.partner;
+  const bgColor  = avatarColor(org.name, color);
+  const orgStatus = (org as unknown as { status?: string }).status ?? "active";
+  const isArchived = orgStatus === "archived";
+
+  const inp = "w-full rounded-xl border-0 bg-zinc-50 px-3 py-2 text-sm text-zinc-900 ring-1 ring-zinc-200 focus:outline-none focus:ring-2 focus:ring-brand-400/40 dark:bg-zinc-900 dark:text-zinc-100 dark:ring-zinc-700";
+
+  return (
+    <div className="flex h-full w-[480px] shrink-0 flex-col border-l border-zinc-200 bg-white dark:border-[#2D2A45] dark:bg-[#16132A] animate-slide-in-right">
+      {/* Header */}
+      <div className="flex shrink-0 items-center gap-2 border-b border-zinc-200 px-4 py-3 dark:border-[#2D2A45]">
+        <button onClick={onClose} className="grid h-7 w-7 place-items-center rounded-lg text-zinc-400 hover:bg-zinc-100 dark:hover:bg-white/10">
+          <X className="h-4 w-4" />
+        </button>
+        <span className="flex-1 font-display font-bold text-zinc-900 dark:text-white">{org.name}</span>
+        <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-semibold", tm.badge)}>{tm.label}</span>
+      </div>
+
+      <div className="flex-1 overflow-y-auto">
+        {/* Identity */}
+        <div className="p-5 pb-0">
+          <div className="flex items-start gap-4">
+            {/* Avatar */}
+            <div className="relative shrink-0">
+              <div className="grid h-16 w-16 place-items-center rounded-2xl text-2xl font-bold text-white"
+                style={{ backgroundColor: bgColor }}>
+                {org.name[0]?.toUpperCase()}
+              </div>
+              <span className={cn("absolute -bottom-1 -right-1 h-4 w-4 rounded-full ring-2 ring-white dark:ring-[#16132A]",
+                isArchived ? "bg-zinc-400" : "bg-emerald-400")} />
+            </div>
+            {/* Identity details */}
+            <div className="min-w-0 flex-1">
+              <h2 className="font-display text-xl font-extrabold text-zinc-900 dark:text-white">{org.name}</h2>
+              <div className="mt-0.5 flex flex-wrap items-center gap-2">
+                <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-semibold", tm.badge)}>{tm.label}</span>
+                <span className="font-mono text-xs text-zinc-400">@{org.slug}</span>
+                <span className={cn("rounded-full px-2 py-0.5 text-[10px] font-semibold",
+                  isArchived ? "bg-zinc-100 text-zinc-500" : "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400")}>
+                  {isArchived ? "Archived" : "Active"}
+                </span>
+              </div>
+              {org.description && <p className="mt-1.5 text-sm text-zinc-500">{org.description}</p>}
+            </div>
+          </div>
+
+          {/* Quick metrics */}
+          <div className="mt-4 flex gap-3">
+            {[
+              { label: `${org.agent_count ?? agents.length} agents`,   icon: Bot          },
+              { label: `${org.project_count ?? projects.length} projects`, icon: FolderKanban },
+              { label: `${org.online_count ?? 0} online`,              icon: Zap          },
+            ].map(({ label, icon: Icon }) => (
+              <div key={label} className="flex flex-1 items-center gap-2 rounded-xl bg-zinc-50 px-3 py-2 dark:bg-white/5">
+                <Icon className="h-3.5 w-3.5 text-zinc-400" />
+                <span className="text-xs font-semibold text-zinc-600 dark:text-zinc-400">{label}</span>
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-2 text-xs text-zinc-400">
+            Created {formatDate((org as unknown as { created_at?: string }).created_at)}
+            {(org as unknown as { updated_at?: string }).updated_at && ` · Updated ${relativeTime((org as unknown as { updated_at?: string }).updated_at)}`}
+          </div>
+        </div>
+
+        <div className="my-4 h-px bg-zinc-100 dark:bg-white/5" />
+
+        {/* Agents */}
+        <div className="px-5">
+          <div className="mb-3 flex items-center justify-between">
+            <p className="text-xs font-semibold uppercase tracking-wide text-zinc-400">
+              Agents {agents.length > 0 && `(${agents.length})`}
+            </p>
+            <Link href="/agents" className="flex items-center gap-1 text-xs text-brand-600 hover:underline">
+              <Plus className="h-3 w-3" /> Add agent
+            </Link>
+          </div>
+          {agents.length > 0 ? (
+            <div className="flex flex-col gap-1.5">
+              {agents.map(a => {
+                const isOnline = a.status === "online";
+                return (
+                  <div key={a.id} className="flex items-center gap-3 rounded-xl bg-zinc-50 px-3 py-2 dark:bg-white/5">
+                    <div className="relative grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-zinc-800 text-xs font-bold text-white">
+                      {a.name[0]?.toUpperCase()}
+                      <span className={cn("absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full ring-1 ring-white dark:ring-[#16132A]",
+                        isOnline ? "bg-emerald-400" : "bg-zinc-400")} />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-sm font-semibold text-zinc-800 dark:text-zinc-200">{a.name}</div>
+                      <div className="text-[11px] text-zinc-400">{a.agent_type?.replace("ai_", "") ?? "agent"} · {a.model ?? "—"}</div>
+                    </div>
+                    <span className={cn("text-[11px] font-semibold", isOnline ? "text-emerald-600" : "text-zinc-400")}>
+                      {isOnline ? "Online" : "Offline"}
+                    </span>
+                    <Link href="/agents" className="grid h-6 w-6 place-items-center rounded text-zinc-400 hover:text-brand-600">
+                      <ExternalLink className="h-3.5 w-3.5" />
+                    </Link>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="flex flex-col items-center py-6 text-center">
+              <Bot className="mb-2 h-6 w-6 text-zinc-300" />
+              <p className="text-sm text-zinc-400">No agents in this org</p>
+              <Link href="/agents" className="mt-1 text-xs text-brand-600 hover:underline">+ Onboard Agent</Link>
+            </div>
+          )}
+        </div>
+
+        <div className="my-4 h-px bg-zinc-100 dark:bg-white/5" />
+
+        {/* Projects */}
+        <div className="px-5">
+          <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-zinc-400">
+            Projects {projects.length > 0 && `(${projects.length})`}
+          </p>
+          {projects.length > 0 ? (
+            <div className="flex flex-col gap-2">
+              {projects.map(p => (
+                <Link key={p.id} href={`/projects/${p.slug}`}
+                  className="flex flex-col gap-1 rounded-xl bg-zinc-50 px-3 py-2.5 hover:bg-zinc-100 dark:bg-white/5 dark:hover:bg-white/10 transition-colors">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-semibold text-zinc-800 dark:text-zinc-200">{p.name}</span>
+                    <span className={cn("rounded-full px-2 py-0.5 text-[10px] font-semibold capitalize",
+                      p.status === "active"  ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400" :
+                      p.status === "planned" ? "bg-amber-100 text-amber-700" : "bg-zinc-100 text-zinc-500"
+                    )}>{p.status}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <ProgressBar value={p.progress} />
+                    <span className="w-8 shrink-0 text-right text-[11px] text-zinc-400">{p.progress ?? 0}%</span>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-zinc-400">No projects linked to this org.</p>
+          )}
+        </div>
+
+        <div className="my-4 h-px bg-zinc-100 dark:bg-white/5" />
+
+        {/* Settings */}
+        <div className="px-5 pb-4">
+          <p className="mb-4 text-xs font-semibold uppercase tracking-wide text-zinc-400">Settings</p>
+          <div className="flex flex-col gap-3">
+            <div>
+              <label className="mb-1.5 block text-xs font-semibold text-zinc-700 dark:text-zinc-300">Name</label>
+              <Input value={name} onChange={e => { setName(e.target.value); markDirty(); }} />
+            </div>
+            <div>
+              <label className="mb-1.5 block text-xs font-semibold text-zinc-700 dark:text-zinc-300">Slug</label>
+              <div className="flex overflow-hidden rounded-xl ring-1 ring-zinc-200 dark:ring-zinc-700">
+                <span className="shrink-0 bg-zinc-100 px-3 py-2 text-sm text-zinc-400 dark:bg-zinc-800">@</span>
+                <input value={slug} onChange={e => { setSlug(e.target.value); markDirty(); }}
+                  className="flex-1 border-0 bg-zinc-50 px-3 py-2 text-sm text-zinc-900 outline-none dark:bg-zinc-900 dark:text-zinc-100" />
+              </div>
+              {slug !== org.slug && (
+                <p className="mt-1 text-[11px] text-amber-600">⚠ Changing slug will break existing links</p>
+              )}
+            </div>
+            <div>
+              <label className="mb-1.5 block text-xs font-semibold text-zinc-700 dark:text-zinc-300">Description</label>
+              <textarea value={desc} onChange={e => { setDesc(e.target.value); markDirty(); }}
+                rows={2} placeholder="What does this org do?"
+                className={cn(inp, "resize-none")} />
+            </div>
+            {!isOwn && (
+              <div>
+                <label className="mb-1.5 block text-xs font-semibold text-zinc-700 dark:text-zinc-300">Type</label>
+                <div className="flex gap-2">
+                  {(["partner", "client", "vendor"] as const).map(t => (
+                    <button key={t} onClick={() => { setType(t as OrgType); markDirty(); }}
+                      className={cn("flex-1 rounded-xl py-2 text-sm font-semibold ring-1 transition-colors capitalize",
+                        type === t ? "bg-brand-600 text-white ring-brand-600" : "bg-zinc-50 text-zinc-600 ring-zinc-200 hover:bg-zinc-100 dark:bg-white/5 dark:text-zinc-400 dark:ring-white/10")}>
+                      {t}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            <div>
+              <label className="mb-1.5 block text-xs font-semibold text-zinc-700 dark:text-zinc-300">Avatar colour</label>
+              <div className="flex gap-2">
+                {AVATAR_COLORS.map(c => (
+                  <button key={c} onClick={() => { setColor(c); markDirty(); }}
+                    className={cn("h-7 w-7 rounded-full ring-2 ring-offset-1 transition-transform hover:scale-110",
+                      color === c ? "ring-zinc-800 dark:ring-white" : "ring-transparent")}
+                    style={{ backgroundColor: c }} />
+                ))}
+              </div>
+            </div>
+            {dirty && (
+              <button onClick={handleSave} disabled={saving}
+                className="flex items-center justify-center gap-2 rounded-xl bg-brand-600 py-2.5 text-sm font-semibold text-white hover:bg-brand-700 transition-colors disabled:opacity-60">
+                <Save className="h-4 w-4" />
+                {saving ? "Saving…" : "Save changes"}
+              </button>
+            )}
+          </div>
+
+          {/* Danger zone */}
+          <div className="mt-6 rounded-xl border border-red-200 p-4 dark:border-red-500/20">
+            <p className="mb-3 text-xs font-semibold text-red-600 dark:text-red-400">Danger zone</p>
+            <div className="flex flex-col gap-2">
+              {!isArchived && (
+                <button onClick={handleArchive}
+                  className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700 hover:bg-amber-100 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-400 transition-colors">
+                  <Archive className="h-3.5 w-3.5" /> Archive organisation
+                </button>
+              )}
+              {confirmDelete ? (
+                <div className="flex flex-col gap-2">
+                  <p className="text-xs text-red-600">Are you sure? This cannot be undone.</p>
+                  <div className="flex gap-2">
+                    <button onClick={handleDelete} disabled={deleting}
+                      className="flex-1 rounded-lg bg-red-600 py-1.5 text-xs font-semibold text-white hover:bg-red-700 disabled:opacity-60">
+                      {deleting ? "Deleting…" : "Yes, delete"}
+                    </button>
+                    <button onClick={() => setConfirmDelete(false)}
+                      className="flex-1 rounded-lg ring-1 ring-zinc-200 py-1.5 text-xs font-semibold text-zinc-600 dark:ring-white/10 dark:text-zinc-400">
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button onClick={() => setConfirmDelete(true)}
+                  className="flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-100 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-400 transition-colors">
+                  <Trash2 className="h-3.5 w-3.5" /> Delete organisation
+                  {(org.agent_count ?? 0) > 0 && <span className="ml-auto text-[10px] text-red-400">(remove agents first)</span>}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── New Org Panel ────────────────────────────────────────────────────────────
+function NewOrgPanel({ onDone, onClose }: {
+  onDone: (org: ExtOrg) => void;
+  onClose: () => void;
+}) {
+  const [name,  setName]   = React.useState("");
+  const [slug,  setSlug]   = React.useState("");
+  const [desc,  setDesc]   = React.useState("");
+  const [type,  setType]   = React.useState<OrgType>("partner");
+  const [color, setColor]  = React.useState(AVATAR_COLORS[0]);
+  const [saving, setSaving] = React.useState(false);
+  const [error,  setError]  = React.useState("");
+
+  function autoSlug(v: string) {
+    setName(v);
+    setColor(avatarColor(v));
+    setSlug(v.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, ""));
+  }
+
+  async function handleCreate() {
+    if (!name.trim() || !slug.trim()) { setError("Name and slug are required."); return; }
+    setSaving(true); setError("");
+    const org = await createOrg({ name: name.trim(), slug: slug.trim(), description: desc.trim() || undefined, type });
+    if (org) {
+      // patch avatar_color
+      const updated = await updateOrg(org.id, { avatar_color: color });
+      onDone(({ ...(updated ?? org), agent_count: 0, project_count: 0, online_count: 0 }) as ExtOrg);
+    } else {
+      setError("Failed to create org. Slug may already be taken.");
+      setSaving(false);
+    }
+  }
+
+  const previewColor = avatarColor(name || "O", color);
+  const typeMeta = ORG_TYPE_META[type] ?? ORG_TYPE_META.partner;
+
+  return (
+    <div className="flex h-full w-[440px] shrink-0 flex-col border-l border-zinc-200 bg-white dark:border-[#2D2A45] dark:bg-[#16132A] animate-slide-in-right">
+      <div className="flex shrink-0 items-center justify-between border-b border-zinc-200 px-5 py-4 dark:border-[#2D2A45]">
+        <div>
+          <div className="font-display text-sm font-bold text-zinc-900 dark:text-white">New Organisation</div>
+          <div className="mt-0.5 text-xs text-zinc-500">Register a partner, client, or vendor</div>
+        </div>
+        <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg text-zinc-400 hover:bg-zinc-100 dark:hover:bg-white/10">
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+
+      <div className="flex-1 overflow-y-auto p-5">
+        {/* Type toggle */}
+        <div className="mb-5">
+          <label className="mb-2 block text-xs font-semibold text-zinc-700 dark:text-zinc-300">Relationship type</label>
+          <div className="grid grid-cols-3 gap-2">
+            {([["partner", "🤝 Partner"], ["client", "👤 Client"], ["vendor", "📦 Vendor"]] as const).map(([v, l]) => (
+              <button key={v} onClick={() => setType(v)}
+                className={cn("rounded-xl py-2.5 text-sm font-semibold ring-1 transition-colors",
+                  type === v ? "bg-brand-600 text-white ring-brand-600" : "bg-zinc-50 text-zinc-600 ring-zinc-200 hover:bg-zinc-100 dark:bg-white/5 dark:text-zinc-400 dark:ring-white/10")}>
+                {l}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Name */}
+        <div className="mb-4">
+          <label className="mb-1.5 block text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+            Organisation name <span className="text-red-500">*</span>
+          </label>
+          <Input autoFocus placeholder="e.g. DesignCo, PartnerLabs…" value={name} onChange={e => autoSlug(e.target.value)} />
+        </div>
+
+        {/* Slug */}
+        <div className="mb-4">
+          <label className="mb-1.5 block text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+            Slug <span className="text-red-500">*</span>
+          </label>
+          <div className="flex overflow-hidden rounded-xl ring-1 ring-zinc-200 dark:ring-zinc-700">
+            <span className="shrink-0 bg-zinc-100 px-3 py-2.5 text-sm text-zinc-400 dark:bg-zinc-800">@</span>
+            <input value={slug} onChange={e => setSlug(e.target.value)}
+              className="flex-1 border-0 bg-zinc-50 px-3 py-2.5 text-sm text-zinc-900 outline-none dark:bg-zinc-900 dark:text-zinc-100" />
+          </div>
+        </div>
+
+        {/* Description */}
+        <div className="mb-4">
+          <label className="mb-1.5 block text-xs font-semibold text-zinc-700 dark:text-zinc-300">Description</label>
+          <textarea value={desc} onChange={e => setDesc(e.target.value)} rows={2}
+            placeholder="What does this org do?" className="w-full resize-none rounded-xl border-0 bg-zinc-50 px-3 py-2.5 text-sm text-zinc-900 ring-1 ring-zinc-200 focus:outline-none dark:bg-zinc-900 dark:text-zinc-100 dark:ring-zinc-700" />
+        </div>
+
+        {/* Avatar colour */}
+        <div className="mb-5">
+          <label className="mb-2 block text-xs font-semibold text-zinc-700 dark:text-zinc-300">Avatar colour</label>
+          <div className="flex gap-2.5">
+            {AVATAR_COLORS.map(c => (
+              <button key={c} onClick={() => setColor(c)}
+                className={cn("h-8 w-8 rounded-full ring-2 ring-offset-1 transition-transform hover:scale-110",
+                  color === c ? "ring-zinc-800 dark:ring-white" : "ring-transparent")}
+                style={{ backgroundColor: c }} />
+            ))}
+          </div>
+        </div>
+
+        {/* Live preview */}
+        {name && (
+          <div className="mb-4">
+            <label className="mb-2 block text-xs font-semibold text-zinc-400">Preview</label>
+            <div className={cn("flex items-center gap-3 rounded-xl border p-3", `border-t-4 ${typeMeta.accent}`, "border-zinc-200 bg-white dark:border-[#2D2A45] dark:bg-[#16132A]")}>
+              <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-sm font-bold text-white"
+                style={{ backgroundColor: previewColor }}>
+                {name[0]?.toUpperCase()}
+              </div>
+              <div>
+                <div className="font-semibold text-zinc-900 dark:text-white">{name}</div>
+                <div className="flex items-center gap-1.5 mt-0.5">
+                  <span className={cn("rounded-full px-2 py-0.5 text-[10px] font-semibold", typeMeta.badge)}>{typeMeta.label}</span>
+                  <span className="font-mono text-xs text-zinc-400">@{slug}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-600 dark:bg-red-500/10">{error}</p>}
+      </div>
+
+      <div className="flex shrink-0 justify-end gap-3 border-t border-zinc-200 px-5 py-4 dark:border-[#2D2A45]">
+        <Button variant="secondary" size="sm" onClick={onClose}>Cancel</Button>
+        <Button variant="primary" size="sm" onClick={handleCreate} disabled={!name || !slug || saving}>
+          {saving ? "Creating…" : "Create Organisation →"}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Own Org Featured Card ────────────────────────────────────────────────────
+function OwnOrgCard({ org, onView }: { org: ExtOrg; onView: () => void }) {
+  const bgColor = avatarColor(org.name, (org as unknown as { avatar_color?: string }).avatar_color);
+  const orgStatus = (org as unknown as { status?: string }).status ?? "active";
+
+  return (
+    <div className="relative mb-6 overflow-hidden rounded-2xl border border-brand-200 bg-brand-50/30 p-5 dark:border-brand-500/20 dark:bg-brand-500/5"
+      style={{ borderLeft: "4px solid #7C3AED" }}>
+      <div className="flex items-center gap-4">
+        <div className="grid h-14 w-14 shrink-0 place-items-center rounded-2xl text-xl font-bold text-white"
+          style={{ backgroundColor: bgColor }}>
+          {org.name[0]?.toUpperCase()}
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="font-display text-lg font-extrabold text-zinc-900 dark:text-white">{org.name}</h2>
+            <span className="rounded-full bg-brand-100 px-2 py-0.5 text-[11px] font-semibold text-brand-700 dark:bg-brand-500/10 dark:text-brand-300">Own workspace</span>
+            <span className="font-mono text-xs text-zinc-400">@{org.slug}</span>
+          </div>
+          {org.description && <p className="mt-0.5 text-sm text-zinc-500 truncate">{org.description}</p>}
+          <div className="mt-2 flex items-center gap-4 text-xs text-zinc-500">
+            <span className="flex items-center gap-1"><Bot className="h-3.5 w-3.5" />{org.agent_count ?? 0} agents</span>
+            <span className="flex items-center gap-1"><FolderKanban className="h-3.5 w-3.5" />{org.project_count ?? 0} projects</span>
+            {(org as unknown as { created_at?: string }).created_at && (
+              <span>Created {formatDate((org as unknown as { created_at?: string }).created_at)}</span>
+            )}
+          </div>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <span className={cn("rounded-full px-2.5 py-1 text-xs font-semibold",
+            orgStatus === "active" ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400" : "bg-zinc-100 text-zinc-500")}>
+            ● {orgStatus === "active" ? "Active" : orgStatus}
+          </span>
+          <button onClick={onView}
+            className="flex items-center gap-1.5 rounded-xl bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 transition-colors">
+            Manage <ChevronRight className="h-4 w-4" />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── External Org Card ────────────────────────────────────────────────────────
+function ExternalOrgCard({ org, onView }: { org: ExtOrg; onView: () => void }) {
+  const tm = ORG_TYPE_META[org.type] ?? ORG_TYPE_META.partner;
+  const bgColor = avatarColor(org.name, (org as unknown as { avatar_color?: string }).avatar_color);
+  const orgStatus = (org as unknown as { status?: string }).status ?? "active";
+  const isArchived = orgStatus === "archived";
+
+  return (
+    <div className={cn(
+      "flex flex-col rounded-2xl bg-white ring-1 ring-zinc-200 shadow-sm dark:bg-[#16132A] dark:ring-[#2D2A45]",
+      "overflow-hidden hover:shadow-md transition-all hover:-translate-y-0.5",
+      isArchived && "opacity-60"
+    )}>
+      {/* Top accent bar */}
+      <div className={cn("h-1", tm.dot.replace("bg-", "bg-"))} />
+      <div className="flex flex-col gap-3 p-4">
+        {/* Header */}
+        <div className="flex items-start gap-3">
+          <div className="grid h-11 w-11 shrink-0 place-items-center rounded-xl text-sm font-bold text-white"
+            style={{ backgroundColor: bgColor }}>
+            {org.name[0]?.toUpperCase()}
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="font-display font-bold text-zinc-900 dark:text-white truncate">{org.name}</div>
+            <div className="mt-0.5 flex items-center gap-1.5 flex-wrap">
+              <span className={cn("rounded-full px-1.5 py-0.5 text-[10px] font-semibold", tm.badge)}>{tm.label}</span>
+              <span className="font-mono text-[10px] text-zinc-400">@{org.slug}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Description */}
+        {org.description ? (
+          <p className="line-clamp-2 text-xs leading-relaxed text-zinc-500">{org.description}</p>
+        ) : (
+          <p className="text-xs text-zinc-300 dark:text-zinc-600 italic">No description</p>
+        )}
+
+        {/* Metrics */}
+        <div className="flex items-center gap-3 text-xs text-zinc-500">
+          <span className="flex items-center gap-1"><Bot className="h-3.5 w-3.5" />{org.agent_count ?? 0} agents</span>
+          <span className="flex items-center gap-1"><FolderKanban className="h-3.5 w-3.5" />{org.project_count ?? 0} projects</span>
+        </div>
+
+        {/* Status + date */}
+        <div className="flex items-center justify-between text-[11px] text-zinc-400">
+          <span className={cn("font-semibold", isArchived ? "text-zinc-400" : "text-emerald-600")}>
+            ● {isArchived ? "Archived" : "Active"}
+          </span>
+          {(org as unknown as { created_at?: string }).created_at && (
+            <span>Added {relativeTime((org as unknown as { created_at?: string }).created_at)}</span>
+          )}
+        </div>
+
+        {/* Actions */}
+        <div className="flex gap-2 border-t border-zinc-100 pt-3 dark:border-white/5">
+          <button onClick={onView}
+            className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-zinc-50 py-1.5 text-xs font-semibold text-zinc-700 ring-1 ring-zinc-200 hover:bg-zinc-100 dark:bg-white/5 dark:text-zinc-300 dark:ring-white/10 transition-colors">
+            <ExternalLink className="h-3 w-3" /> View
+          </button>
+          <button onClick={onView}
+            className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-brand-600 py-1.5 text-xs font-semibold text-white hover:bg-brand-700 transition-colors">
+            Edit
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── External Org List Row ────────────────────────────────────────────────────
+function ExternalOrgListRow({ org, onView }: { org: ExtOrg; onView: () => void }) {
+  const tm = ORG_TYPE_META[org.type] ?? ORG_TYPE_META.partner;
+  const bgColor = avatarColor(org.name, (org as unknown as { avatar_color?: string }).avatar_color);
+  const orgStatus = (org as unknown as { status?: string }).status ?? "active";
+  const isArchived = orgStatus === "archived";
+
+  return (
+    <div className={cn(
+      "group flex items-center gap-4 border-b border-zinc-100 px-2 py-3 dark:border-[#2D2A45]",
+      "hover:bg-zinc-50 dark:hover:bg-white/5 transition-colors",
+      isArchived && "opacity-60"
+    )}>
+      <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-xs font-bold text-white"
+        style={{ backgroundColor: bgColor }}>
+        {org.name[0]?.toUpperCase()}
+      </div>
+      <div className="w-40 shrink-0">
+        <div className="text-sm font-semibold text-zinc-900 dark:text-white truncate">{org.name}</div>
+        <div className="font-mono text-[10px] text-zinc-400">@{org.slug}</div>
+      </div>
+      <div className="w-24 shrink-0">
+        <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-semibold", tm.badge)}>{tm.label}</span>
+      </div>
+      <div className="w-20 shrink-0 text-xs font-semibold">
+        <span className={isArchived ? "text-zinc-400" : "text-emerald-600"}>● {isArchived ? "Archived" : "Active"}</span>
+      </div>
+      <div className="w-16 shrink-0 text-xs text-zinc-500">{org.agent_count ?? 0} agents</div>
+      <div className="w-20 shrink-0 text-xs text-zinc-500">{org.project_count ?? 0} projects</div>
+      <div className="min-w-0 flex-1 text-xs text-zinc-400 truncate">{org.description ?? "—"}</div>
+      <div className="w-20 shrink-0 text-xs text-zinc-400">
+        {(org as unknown as { created_at?: string }).created_at ? relativeTime((org as unknown as { created_at?: string }).created_at) : "—"}
+      </div>
+      <div className="flex shrink-0 gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+        <button onClick={onView}
+          className="flex items-center gap-1 rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-700 transition-colors">
+          View
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Page ─────────────────────────────────────────────────────────────────────
+export default function OrganisationsPage() {
+  const [orgs,       setOrgs]       = React.useState<ExtOrg[]>([]);
+  const [loading,    setLoading]    = React.useState(true);
+  const [filter,     setFilter]     = React.useState<OrgFilter>("all");
+  const [view,       setView]       = React.useState<OrgView>("grid");
+  const [query,      setQuery]      = React.useState("");
+  const [detailOrg,  setDetailOrg]  = React.useState<ExtOrg | null>(null);
+  const [showNew,    setShowNew]    = React.useState(false);
+
+  async function reload() {
+    const os = await fetchOrgs() as ExtOrg[];
+    setOrgs(os);
+    setLoading(false);
+  }
+  React.useEffect(() => { reload(); }, []);
+
+  // Derived
+  const ownOrgs      = orgs.filter(o => o.type === "own");
+  const externalOrgs = orgs.filter(o => o.type !== "own");
+  const totalAgents  = orgs.reduce((s, o) => s + (o.agent_count ?? 0), 0);
+
+  // Filter + search external orgs
+  const filteredExternal = externalOrgs.filter(o => {
+    const orgStatus = (o as unknown as { status?: string }).status ?? "active";
+    if (filter === "archived" && orgStatus !== "archived") return false;
+    if (filter !== "all" && filter !== "archived" && o.type !== filter) return false;
+    if (query) {
+      const q = query.toLowerCase();
+      if (![o.name, o.slug, o.description ?? ""].some(s => s.toLowerCase().includes(q))) return false;
+    }
+    return true;
+  });
+
+  const FILTER_TABS: { id: OrgFilter; label: string; count: number }[] = [
+    { id: "all",      label: "All",      count: orgs.length },
+    { id: "own",      label: "Own",      count: ownOrgs.length },
+    { id: "partner",  label: "Partner",  count: externalOrgs.filter(o => o.type === "partner").length },
+    { id: "client",   label: "Client",   count: externalOrgs.filter(o => o.type === "client").length },
+    { id: "vendor",   label: "Vendor",   count: externalOrgs.filter(o => o.type === "vendor").length },
+    { id: "archived", label: "Archived", count: orgs.filter(o => (o as unknown as { status?: string }).status === "archived").length },
+  ];
+
+  function handleNewOrg(org: ExtOrg) {
+    setOrgs(prev => [...prev, org]);
+    setShowNew(false);
+    setDetailOrg(org);
+  }
+
+  function handleUpdated(updated: ExtOrg) {
+    setOrgs(prev => prev.map(o => o.id === updated.id ? updated : o));
+    if (detailOrg?.id === updated.id) setDetailOrg(updated);
+  }
+
+  function handleDeleted(id: string) {
+    setOrgs(prev => prev.filter(o => o.id !== id));
+    setDetailOrg(null);
+  }
+
+  return (
+    <div className="flex min-h-0 flex-1 overflow-hidden">
+      {/* Main content */}
+      <div className="flex min-w-0 flex-1 flex-col overflow-y-auto">
+        <div className="flex flex-col gap-5">
+          {/* Page header */}
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="font-display text-2xl font-bold text-zinc-900 dark:text-white">Organisations</h1>
+              <p className="mt-0.5 text-sm text-zinc-500">
+                {orgs.length} orgs · {ownOrgs.length} own · {externalOrgs.length} partner{externalOrgs.length !== 1 ? "s" : ""} · {totalAgents} agents total
+              </p>
+            </div>
+            <button onClick={() => { setShowNew(true); setDetailOrg(null); }}
+              className="flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 transition-colors">
+              <Plus className="h-4 w-4" /> New Organisation
+            </button>
+          </div>
+
+          {/* Stats row */}
+          <div className="flex gap-4">
+            {[
+              { label: "Total Orgs",   value: orgs.length,              icon: Building2, cls: "bg-brand-600"   },
+              { label: "Own",          value: ownOrgs.length,           icon: Users,     cls: "bg-indigo-500"  },
+              { label: "External",     value: externalOrgs.length,      icon: Building2, cls: "bg-sky-500"     },
+              { label: "Agents total", value: totalAgents,              icon: Bot,       cls: "bg-emerald-500" },
+            ].map(({ label, value, icon: Icon, cls }) => (
+              <div key={label} className="flex flex-1 items-center gap-3 rounded-2xl bg-white p-4 ring-1 ring-zinc-200 shadow-sm dark:bg-[#16132A] dark:ring-[#2D2A45]">
+                <div className={cn("grid h-9 w-9 shrink-0 place-items-center rounded-xl", cls)}>
+                  <Icon className="h-4 w-4 text-white" />
+                </div>
+                <div>
+                  <div className="font-display text-2xl font-extrabold leading-none text-zinc-900 dark:text-white">{value}</div>
+                  <div className="mt-0.5 text-xs text-zinc-400">{label}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Filter tabs + search + view toggle */}
+          <div className="flex items-center gap-0 border-b border-zinc-200 dark:border-[#2D2A45]">
+            {FILTER_TABS.map(tab => (
+              <button key={tab.id} onClick={() => setFilter(tab.id)}
+                className={cn(
+                  "flex items-center gap-1.5 border-b-2 px-4 py-2.5 text-sm font-semibold transition-colors -mb-px",
+                  filter === tab.id
+                    ? "border-brand-600 text-zinc-900 dark:text-white"
+                    : "border-transparent text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
+                )}>
+                {tab.label}
+                <span className="rounded-full bg-zinc-100 px-1.5 py-0.5 text-[11px] text-zinc-500 dark:bg-white/10">{tab.count}</span>
+              </button>
+            ))}
+            <div className="ml-auto flex items-center gap-2 pb-2">
+              <div className="relative">
+                <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-400" />
+                <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search orgs…"
+                  className="w-44 rounded-lg bg-zinc-100 py-1.5 pl-8 pr-3 text-xs focus:outline-none focus:ring-2 focus:ring-brand-400/40 dark:bg-white/10 dark:text-white" />
+              </div>
+              <div className="flex rounded-lg bg-zinc-100 p-0.5 dark:bg-white/10">
+                {([["grid", LayoutGrid], ["list", List]] as const).map(([v, Icon]) => (
+                  <button key={v} onClick={() => setView(v)}
+                    className={cn("grid h-7 w-7 place-items-center rounded-md transition-colors",
+                      view === v ? "bg-white text-zinc-800 shadow-sm dark:bg-zinc-700 dark:text-white" : "text-zinc-400 hover:text-zinc-600")}>
+                    <Icon className="h-3.5 w-3.5" />
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Content */}
+          {loading ? (
+            <div className="py-16 text-center text-sm text-zinc-400">Loading…</div>
+          ) : (
+            <div>
+              {/* Own org section (always shown unless filtered to partner/client/vendor/archived) */}
+              {(filter === "all" || filter === "own") && ownOrgs.length > 0 && (
+                <div>
+                  <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-zinc-400">Your Workspace</p>
+                  {ownOrgs.map(o => (
+                    <OwnOrgCard key={o.id} org={o} onView={() => { setDetailOrg(o); setShowNew(false); }} />
+                  ))}
+                </div>
+              )}
+
+              {/* External orgs section */}
+              {(filter === "all" || !["own"].includes(filter)) && (
+                <div>
+                  {(filter === "all" || filter === "own") && externalOrgs.length > 0 && (
+                    <div className="mb-4 flex items-center gap-3">
+                      <div className="h-px flex-1 bg-zinc-200 dark:bg-white/10" />
+                      <span className="text-xs font-semibold uppercase tracking-widest text-zinc-400">External Organisations</span>
+                      <div className="h-px flex-1 bg-zinc-200 dark:bg-white/10" />
+                    </div>
+                  )}
+
+                  {filteredExternal.length === 0 ? (
+                    <div className="py-20 text-center">
+                      {query ? (
+                        <>
+                          <Search className="mx-auto mb-3 h-8 w-8 text-zinc-300" />
+                          <p className="font-display font-bold text-zinc-700 dark:text-zinc-200">No orgs match your search</p>
+                          <button onClick={() => setQuery("")} className="mt-2 text-sm text-brand-600 hover:underline">× Clear</button>
+                        </>
+                      ) : (
+                        <>
+                          <Building2 className="mx-auto mb-3 h-10 w-10 text-zinc-300" />
+                          <p className="font-display font-bold text-zinc-700 dark:text-zinc-200">No external organisations</p>
+                          <p className="mt-1 text-sm text-zinc-400">Add partner, client, or vendor organisations to manage external relationships.</p>
+                          <button onClick={() => setShowNew(true)}
+                            className="mt-4 flex items-center gap-2 rounded-xl bg-brand-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-brand-700 mx-auto transition-colors">
+                            <Plus className="h-4 w-4" /> Add Organisation
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  ) : view === "grid" ? (
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                      {filteredExternal.map(o => (
+                        <ExternalOrgCard key={o.id} org={o} onView={() => { setDetailOrg(o); setShowNew(false); }} />
+                      ))}
+                      {/* New org card */}
+                      {!query && (
+                        <button onClick={() => { setShowNew(true); setDetailOrg(null); }}
+                          className="flex min-h-[160px] flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-zinc-200 text-zinc-400 hover:border-brand-400 hover:bg-brand-50/30 hover:text-brand-600 dark:border-white/10 dark:hover:border-brand-500/50 transition-all">
+                          <Building2 className="h-8 w-8" />
+                          <span className="text-sm font-semibold">Add Organisation</span>
+                        </button>
+                      )}
+                    </div>
+                  ) : (
+                    /* List view */
+                    <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white dark:border-[#2D2A45] dark:bg-[#16132A]">
+                      <div className="flex items-center gap-4 border-b border-zinc-100 bg-zinc-50 px-2 py-2 dark:border-[#2D2A45] dark:bg-[#0F0D1E]">
+                        <div className="w-8 shrink-0" />
+                        {[["w-40","Organisation"],["w-24","Type"],["w-20","Status"],["w-16","Agents"],["w-20","Projects"],["flex-1","Description"],["w-20","Added"],["w-20",""]].map(([w,l]) => (
+                          <div key={l} className={cn("text-[11px] font-semibold uppercase tracking-wide text-zinc-400", w)}>{l}</div>
+                        ))}
+                      </div>
+                      {filteredExternal.map(o => (
+                        <ExternalOrgListRow key={o.id} org={o} onView={() => { setDetailOrg(o); setShowNew(false); }} />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Right panel — detail or new */}
+      {detailOrg && !showNew && (
+        <OrgDetailPanel
+          org={detailOrg}
+          onClose={() => setDetailOrg(null)}
+          onUpdated={handleUpdated}
+          onDeleted={handleDeleted}
+        />
+      )}
+      {showNew && (
+        <NewOrgPanel
+          onDone={handleNewOrg}
+          onClose={() => setShowNew(false)}
+        />
+      )}
+    </div>
+  );
+}

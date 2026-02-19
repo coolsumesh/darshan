@@ -7,6 +7,7 @@ import {
   Activity,
   Bell,
   Bot,
+  Building2,
   CalendarDays,
   ChevronDown,
   ChevronLeft,
@@ -25,11 +26,12 @@ import { applyPrefsToDom, loadPrefs, useUIPreferences } from "@/components/proto
 // ─── Nav config ───────────────────────────────────────────────────────────────
 
 const PRIMARY_NAV = [
-  { href: "/dashboard", label: "Dashboard",  icon: Activity         },
-  { href: "/projects",  label: "Projects",   icon: FolderKanban     },
-  { href: "/agents",    label: "Agents",     icon: Bot              },
-  { href: "/threads",   label: "Threads",    icon: MessageSquareText },
-  { href: "/calendar",  label: "Calendar",   icon: CalendarDays     },
+  { href: "/dashboard",     label: "Dashboard",      icon: Activity         },
+  { href: "/projects",      label: "Projects",       icon: FolderKanban     },
+  { href: "/agents",        label: "Agents",         icon: Bot              },
+  { href: "/organisations", label: "Organisations",  icon: Building2        },
+  { href: "/threads",       label: "Threads",        icon: MessageSquareText },
+  { href: "/calendar",      label: "Calendar",       icon: CalendarDays     },
 ] as const;
 
 const TOOL_NAV = [

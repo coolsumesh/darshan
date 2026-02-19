@@ -142,8 +142,9 @@ export async function fetchAgents(): Promise<Agent[]> {
 
 export type Org = {
   id: string; name: string; slug: string; description?: string;
-  type: "own" | "partner" | "client"; status: string;
+  type: "own" | "partner" | "client" | "vendor"; status: string;
   agent_count?: number; project_count?: number;
+  created_at?: string; updated_at?: string; avatar_color?: string;
 };
 
 export async function fetchOrgs(): Promise<Org[]> {
@@ -190,4 +191,45 @@ export async function fetchAgentProjects(agentId: string): Promise<AgentProject[
 export async function deleteAgent(agentId: string): Promise<boolean> {
   const data = await apiFetch<{ ok: boolean }>(`/api/v1/agents/${agentId}`, { method: "DELETE" });
   return data?.ok ?? false;
+}
+
+export type OrgDetail = Org & {
+  online_count?: number;
+  avatar_color?: string;
+  status?: string;
+  description?: string;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export async function fetchOrg(idOrSlug: string): Promise<OrgDetail | null> {
+  const data = await apiFetch<{ ok: boolean; org: OrgDetail }>(`/api/v1/orgs/${idOrSlug}`);
+  return data?.ok ? data.org : null;
+}
+
+export async function updateOrg(idOrSlug: string, payload: Partial<{
+  name: string; slug: string; description: string;
+  type: string; status: string; avatar_color: string;
+}>): Promise<OrgDetail | null> {
+  const data = await apiFetch<{ ok: boolean; org: OrgDetail }>(`/api/v1/orgs/${idOrSlug}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return data?.ok ? data.org : null;
+}
+
+export async function deleteOrg(idOrSlug: string): Promise<boolean> {
+  const data = await apiFetch<{ ok: boolean }>(`/api/v1/orgs/${idOrSlug}`, { method: "DELETE" });
+  return data?.ok ?? false;
+}
+
+export async function fetchOrgProjects(idOrSlug: string): Promise<{ id: string; name: string; slug: string; status: string; progress?: number }[]> {
+  const data = await apiFetch<{ ok: boolean; projects: { id: string; name: string; slug: string; status: string; progress?: number }[] }>(`/api/v1/orgs/${idOrSlug}/projects`);
+  return data?.ok ? data.projects : [];
+}
+
+export async function fetchOrgAgents(idOrSlug: string): Promise<Agent[]> {
+  const data = await apiFetch<{ ok: boolean; agents: Agent[] }>(`/api/v1/orgs/${idOrSlug}/agents`);
+  return data?.ok ? data.agents : [];
 }

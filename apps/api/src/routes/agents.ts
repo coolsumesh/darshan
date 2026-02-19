@@ -35,7 +35,8 @@ export async function registerAgents(server: FastifyInstance, db: pg.Pool) {
     const { rows: orgs } = await db.query(
       `select o.*,
               count(distinct a.id)::int as agent_count,
-              count(distinct p.id)::int as project_count
+              count(distinct p.id)::int as project_count,
+              count(distinct a.id) filter (where a.status = 'online')::int as online_count
        from organisations o
        left join agents   a on a.org_id = o.id
        left join projects p on p.org_id = o.id
@@ -59,6 +60,79 @@ export async function registerAgents(server: FastifyInstance, db: pg.Pool) {
       return { ok: true, org: rows[0] };
     }
   );
+
+  // ── Get single org with agents + projects ──────────────────────────────────
+  server.get<{ Params: { id: string } }>("/api/v1/orgs/:id", async (req, reply) => {
+    const { rows } = await db.query(
+      `select o.*,
+              count(distinct a.id)::int  as agent_count,
+              count(distinct p.id)::int  as project_count,
+              count(distinct a.id) filter (where a.status = 'online')::int as online_count
+       from organisations o
+       left join agents   a on a.org_id = o.id
+       left join projects p on p.org_id = o.id
+       where o.id::text = $1 or o.slug = $1
+       group by o.id`,
+      [req.params.id]
+    );
+    if (!rows.length) return reply.status(404).send({ ok: false, error: "org not found" });
+    return { ok: true, org: rows[0] };
+  });
+
+  // ── Update org ──────────────────────────────────────────────────────────────
+  server.patch<{
+    Params: { id: string };
+    Body: { name?: string; slug?: string; description?: string; type?: string; status?: string; avatar_color?: string };
+  }>("/api/v1/orgs/:id", async (req, reply) => {
+    const { name, slug, description, type, status, avatar_color } = req.body;
+    const { rows } = await db.query(
+      `update organisations set
+         name         = coalesce($2, name),
+         slug         = coalesce($3, slug),
+         description  = coalesce($4, description),
+         type         = coalesce($5, type),
+         status       = coalesce($6, status),
+         avatar_color = coalesce($7, avatar_color),
+         updated_at   = now()
+       where id::text = $1 or slug = $1
+       returning *`,
+      [req.params.id, name ?? null, slug ?? null, description ?? null, type ?? null, status ?? null, avatar_color ?? null]
+    );
+    if (!rows.length) return reply.status(404).send({ ok: false, error: "org not found" });
+    return { ok: true, org: rows[0] };
+  });
+
+  // ── Delete org (only if 0 agents) ──────────────────────────────────────────
+  server.delete<{ Params: { id: string } }>("/api/v1/orgs/:id", async (req, reply) => {
+    const { rows } = await db.query(
+      `select o.id, count(a.id)::int as agent_count
+       from organisations o left join agents a on a.org_id = o.id
+       where o.id::text = $1 or o.slug = $1 group by o.id`,
+      [req.params.id]
+    );
+    if (!rows.length) return reply.status(404).send({ ok: false, error: "org not found" });
+    if (rows[0].agent_count > 0) return reply.status(409).send({ ok: false, error: "Cannot delete org with agents assigned. Remove agents first." });
+    await db.query(`delete from organisations where id = $1`, [rows[0].id]);
+    return { ok: true };
+  });
+
+  // ── Projects linked to an org (via agents in project_team) ─────────────────
+  server.get<{ Params: { id: string } }>("/api/v1/orgs/:id/projects", async (req, reply) => {
+    const { rows: orgs } = await db.query(
+      `select id from organisations where id::text = $1 or slug = $1`, [req.params.id]
+    );
+    if (!orgs.length) return reply.status(404).send({ ok: false, error: "org not found" });
+    const { rows } = await db.query(
+      `select distinct p.id, p.name, p.slug, p.status, p.progress
+       from projects p
+       join project_team pt on pt.project_id = p.id
+       join agents a        on a.id = pt.agent_id
+       where a.org_id = $1
+       order by p.name asc`,
+      [orgs[0].id]
+    );
+    return { ok: true, projects: rows };
+  });
 
   // ── List agents for an org ──────────────────────────────────────────────────
   server.get<{ Params: { id: string } }>("/api/v1/orgs/:id/agents", async (req) => {
