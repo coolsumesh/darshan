@@ -150,6 +150,13 @@ function SprintBoardTab({ projectId }: { projectId: string }) {
     setActing(null);
   }
 
+  async function markDoneTask(taskId: string) {
+    setActing(taskId);
+    const updated = await updateTask(projectId, taskId, { status: "done" });
+    setTasks((prev) => prev.map((t) => t.id === taskId ? { ...t, status: updated?.status ?? "done" } : t));
+    setActing(null);
+  }
+
   return (
     <div className="overflow-x-auto pb-2">
       <div className="flex gap-4" style={{ minWidth: `${TASK_COLUMNS.length * 260}px` }}>
@@ -194,7 +201,7 @@ function SprintBoardTab({ projectId }: { projectId: string }) {
                       )}
                     </div>
                     {task.status === "proposed" && (
-                      <div className="mt-3 flex gap-2">
+                      <div className="mt-3 flex gap-1.5">
                         <button
                           disabled={acting === task.id}
                           onClick={() => approveTask(task.id)}
@@ -206,6 +213,18 @@ function SprintBoardTab({ projectId }: { projectId: string }) {
                           )}
                         >
                           ✓ Approve
+                        </button>
+                        <button
+                          disabled={acting === task.id}
+                          onClick={() => markDoneTask(task.id)}
+                          className={cn(
+                            "flex-1 rounded-lg py-1.5 text-xs font-semibold transition",
+                            "bg-blue-50 text-blue-700 ring-1 ring-blue-200 hover:bg-blue-100",
+                            "dark:bg-blue-500/10 dark:text-blue-400 dark:ring-blue-500/30 dark:hover:bg-blue-500/20",
+                            "disabled:opacity-50 disabled:cursor-not-allowed"
+                          )}
+                        >
+                          ✦ Mark Done
                         </button>
                         <button
                           disabled={acting === task.id}
