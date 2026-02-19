@@ -156,6 +156,22 @@ export async function pingAgent(agentId: string): Promise<boolean> {
 }
 
 export async function createOrg(payload: { name: string; slug: string; description?: string; type?: string }): Promise<Org | null> {
-  const data = await apiFetch<{ ok: boolean; org: Org }>("/api/v1/orgs", { method: "POST", body: JSON.stringify(payload) });
+  const data = await apiFetch<{ ok: boolean; org: Org }>("/api/v1/orgs", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
   return data?.ok ? data.org : null;
+}
+
+export async function createOrgAgent(orgId: string, payload: {
+  name: string; desc?: string; agent_type?: string;
+  model?: string; provider?: string; capabilities?: string[]; endpoint_type?: string;
+}): Promise<boolean> {
+  const data = await apiFetch<{ ok: boolean }>(`/api/v1/orgs/${orgId}/agents`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return data?.ok ?? false;
 }

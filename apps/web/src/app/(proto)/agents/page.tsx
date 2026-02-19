@@ -8,7 +8,7 @@ import {
 import { cn } from "@/lib/cn";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { fetchAgents, fetchOrgs, createOrg, pingAgent, type Org } from "@/lib/api";
+import { fetchAgents, fetchOrgs, createOrg, createOrgAgent, pingAgent, type Org } from "@/lib/api";
 import type { Agent } from "@/lib/agents";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -154,16 +154,17 @@ function OnboardAgentModal({ orgs, defaultOrgId, onDone, onClose }: {
   async function handleSave() {
     if (!name.trim() || !orgId) { setError("Name and organisation are required."); return; }
     setSaving(true); setError("");
-    try {
-      const res = await fetch(`/api/v1/orgs/${orgId}/agents`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: name.trim(), desc: desc.trim() || undefined, agent_type: agentType, model: model || undefined, provider, capabilities: caps, endpoint_type: endpointType }),
-      });
-      const data = await res.json();
-      if (data.ok) { onDone(); }
-      else { setError(data.error ?? "Failed to onboard agent."); setSaving(false); }
-    } catch { setError("Network error."); setSaving(false); }
+    const ok = await createOrgAgent(orgId, {
+      name: name.trim(),
+      desc: desc.trim() || undefined,
+      agent_type: agentType,
+      model: model || undefined,
+      provider,
+      capabilities: caps,
+      endpoint_type: endpointType,
+    });
+    if (ok) { onDone(); }
+    else { setError("Failed to onboard agent. Please try again."); setSaving(false); }
   }
 
   const sel = "w-full rounded-xl border-0 bg-zinc-50 px-3 py-2.5 text-sm text-zinc-900 ring-1 ring-zinc-200 focus:outline-none focus:ring-2 focus:ring-brand-400/40 dark:bg-zinc-900 dark:text-zinc-100 dark:ring-zinc-700";
