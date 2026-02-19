@@ -34,6 +34,18 @@ export async function fetchProject(id: string): Promise<Project | undefined> {
   return PROJECTS.find((p) => p.id === id);
 }
 
+// ── Docs (Architecture + Tech Spec) ──────────────────────────────────────────
+
+export async function fetchArchitecture(projectId: string): Promise<string | null> {
+  const data = await apiFetch<{ ok: boolean; content: string }>(`/api/v1/projects/${projectId}/architecture`);
+  return data?.ok ? data.content : null;
+}
+
+export async function fetchTechSpec(projectId: string): Promise<string | null> {
+  const data = await apiFetch<{ ok: boolean; content: string }>(`/api/v1/projects/${projectId}/tech-spec`);
+  return data?.ok ? data.content : null;
+}
+
 // ── Tasks ─────────────────────────────────────────────────────────────────────
 
 export async function fetchTasks(projectId: string): Promise<Task[]> {

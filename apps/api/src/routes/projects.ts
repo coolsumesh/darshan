@@ -79,6 +79,60 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
     }
   );
 
+  // ── Get architecture doc ───────────────────────────────────────────────────
+  server.get<{ Params: { id: string } }>(
+    "/api/v1/projects/:id/architecture",
+    async (req, reply) => {
+      const { rows } = await db.query(
+        `select architecture_doc as content from projects where id::text = $1 or lower(slug) = lower($1)`,
+        [req.params.id]
+      );
+      if (!rows[0]) return reply.status(404).send({ ok: false, error: "project not found" });
+      return { ok: true, content: rows[0].content };
+    }
+  );
+
+  // ── Update architecture doc ────────────────────────────────────────────────
+  server.patch<{ Params: { id: string }; Body: { content: string } }>(
+    "/api/v1/projects/:id/architecture",
+    async (req, reply) => {
+      const { rows } = await db.query(
+        `update projects set architecture_doc = $1, updated_at = now()
+         where id::text = $2 or lower(slug) = lower($2) returning id`,
+        [req.body.content, req.params.id]
+      );
+      if (!rows[0]) return reply.status(404).send({ ok: false, error: "project not found" });
+      return { ok: true };
+    }
+  );
+
+  // ── Get tech spec doc ──────────────────────────────────────────────────────
+  server.get<{ Params: { id: string } }>(
+    "/api/v1/projects/:id/tech-spec",
+    async (req, reply) => {
+      const { rows } = await db.query(
+        `select tech_spec_doc as content from projects where id::text = $1 or lower(slug) = lower($1)`,
+        [req.params.id]
+      );
+      if (!rows[0]) return reply.status(404).send({ ok: false, error: "project not found" });
+      return { ok: true, content: rows[0].content };
+    }
+  );
+
+  // ── Update tech spec doc ───────────────────────────────────────────────────
+  server.patch<{ Params: { id: string }; Body: { content: string } }>(
+    "/api/v1/projects/:id/tech-spec",
+    async (req, reply) => {
+      const { rows } = await db.query(
+        `update projects set tech_spec_doc = $1, updated_at = now()
+         where id::text = $2 or lower(slug) = lower($2) returning id`,
+        [req.body.content, req.params.id]
+      );
+      if (!rows[0]) return reply.status(404).send({ ok: false, error: "project not found" });
+      return { ok: true };
+    }
+  );
+
   // ── List tasks for project ─────────────────────────────────────────────────
   server.get<{ Params: { id: string }; Querystring: { status?: string } }>(
     "/api/v1/projects/:id/tasks",

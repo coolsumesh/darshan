@@ -24,7 +24,7 @@ import {
   type TaskStatus,
 } from "@/lib/projects";
 import { type Agent } from "@/lib/agents";
-import { fetchProject, fetchTasks, fetchTeam, fetchAgents, createTask, addTeamMember, removeTeamMember, type TeamMemberWithAgent } from "@/lib/api";
+import { fetchProject, fetchTasks, fetchTeam, fetchAgents, createTask, addTeamMember, removeTeamMember, fetchArchitecture, fetchTechSpec, type TeamMemberWithAgent } from "@/lib/api";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 type Tab = "architecture" | "tech-spec" | "sprint-board" | "team";
@@ -46,145 +46,72 @@ const TASK_COLUMNS: { id: TaskStatus; label: string }[] = [
 ];
 
 // ─── Architecture Tab ─────────────────────────────────────────────────────────
-function ArchitectureTab() {
+function ArchitectureTab({ projectId }: { projectId: string }) {
+  const [content, setContent] = React.useState<string | null>(null);
+  const [loading, setLoading] = React.useState(true);
+
+  React.useEffect(() => {
+    fetchArchitecture(projectId).then((c) => { setContent(c); setLoading(false); });
+  }, [projectId]);
+
+  if (loading) {
+    return <div className="py-10 text-center text-sm text-slate-500 dark:text-slate-400">Loading architecture…</div>;
+  }
+
+  if (!content) {
+    return (
+      <Card>
+        <CardContent className="py-10 text-center">
+          <p className="text-sm text-slate-500 dark:text-slate-400">No architecture documentation yet.</p>
+        </CardContent>
+      </Card>
+    );
+  }
+
   return (
-    <div className="flex flex-col gap-4">
-      <Card>
-        <CardHeader>
-          <CardTitle>System Overview</CardTitle>
-          <p className="text-sm text-slate-500 dark:text-slate-400">
-            Darshan Hub is a multi-agent project management platform built by MithranLabs. It enables teams of AI agents and human operators to coordinate work through structured projects, sprint boards, and real-time feedback.
-          </p>
-        </CardHeader>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Components</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid gap-3 sm:grid-cols-2">
-            {[
-              { name: "Web App", desc: "Next.js 14 + TypeScript + Tailwind — project dashboards, sprint boards, team management.", tag: "Frontend" },
-              { name: "API Server", desc: "REST API at /api/v1 — handles projects, tasks, agents, and team membership.", tag: "Backend" },
-              { name: "Agent Registry", desc: "Global registry of all available agents. Accessed inline via the Team tab per project.", tag: "Service" },
-              { name: "Database", desc: "Persistent store for projects, tasks, sprint data, and team rosters.", tag: "Infra" },
-            ].map((c) => (
-              <div
-                key={c.name}
-                className="rounded-2xl bg-slate-50 p-4 ring-1 ring-slate-200 dark:bg-slate-900/40 dark:ring-slate-800"
-              >
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">{c.name}</span>
-                  <Badge tone="neutral">{c.tag}</Badge>
-                </div>
-                <p className="mt-1 text-xs leading-relaxed text-slate-500 dark:text-slate-400">{c.desc}</p>
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Data Flow</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <ol className="flex flex-col gap-3">
-            {[
-              "User opens Dashboard → fetches all projects from GET /api/v1/projects.",
-              "Clicking a project navigates to /projects/:id → loads project detail, tasks, and team in parallel.",
-              "Sprint Board reads tasks via GET /api/v1/projects/:id/tasks, grouped by status column.",
-              "Team tab reads roster via GET /api/v1/projects/:id/team. Add Agent uses GET /api/v1/agents (registry) and POST /api/v1/projects/:id/team.",
-              "All mutations trigger a local state refresh to keep UI consistent without full page reload.",
-            ].map((step, i) => (
-              <li key={i} className="flex gap-3 text-sm text-slate-700 dark:text-slate-300">
-                <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-[rgb(var(--accent-600))] text-xs font-semibold text-white">
-                  {i + 1}
-                </span>
-                {step}
-              </li>
-            ))}
-          </ol>
-        </CardContent>
-      </Card>
-    </div>
+    <Card>
+      <CardHeader><CardTitle>Architecture</CardTitle></CardHeader>
+      <CardContent>
+        <pre className="whitespace-pre-wrap text-sm leading-relaxed text-slate-700 dark:text-slate-300 font-sans">
+          {content}
+        </pre>
+      </CardContent>
+    </Card>
   );
 }
 
 // ─── Tech Spec Tab ────────────────────────────────────────────────────────────
-function TechSpecTab() {
-  return (
-    <div className="flex flex-col gap-4">
-      <Card>
-        <CardHeader>
-          <CardTitle>Stack</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid gap-2 sm:grid-cols-2">
-            {[
-              { key: "Framework", val: "Next.js 14 (App Router)" },
-              { key: "Language", val: "TypeScript" },
-              { key: "Styling", val: "Tailwind CSS" },
-              { key: "Package manager", val: "pnpm (monorepo)" },
-              { key: "Deployment", val: "darshan.caringgems.in" },
-              { key: "Repo", val: "github.com/coolsumesh/darshan" },
-            ].map(({ key, val }) => (
-              <div
-                key={key}
-                className="flex items-start justify-between gap-2 rounded-xl bg-slate-50 px-4 py-3 ring-1 ring-slate-200 dark:bg-slate-900/40 dark:ring-slate-800"
-              >
-                <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">{key}</span>
-                <span className="text-right text-xs font-medium text-slate-900 dark:text-slate-100">{val}</span>
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
+function TechSpecTab({ projectId }: { projectId: string }) {
+  const [content, setContent] = React.useState<string | null>(null);
+  const [loading, setLoading] = React.useState(true);
 
+  React.useEffect(() => {
+    fetchTechSpec(projectId).then((c) => { setContent(c); setLoading(false); });
+  }, [projectId]);
+
+  if (loading) {
+    return <div className="py-10 text-center text-sm text-slate-500 dark:text-slate-400">Loading tech spec…</div>;
+  }
+
+  if (!content) {
+    return (
       <Card>
-        <CardHeader>
-          <CardTitle>API Endpoints</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="flex flex-col gap-2">
-            {[
-              { method: "GET", path: "/api/v1/projects", desc: "List all projects" },
-              { method: "GET", path: "/api/v1/projects/:id/architecture", desc: "Project architecture doc" },
-              { method: "GET", path: "/api/v1/projects/:id/tech-spec", desc: "Project tech spec" },
-              { method: "GET", path: "/api/v1/projects/:id/tasks", desc: "Tasks for project" },
-              { method: "POST", path: "/api/v1/projects/:id/tasks", desc: "Create new task" },
-              { method: "PATCH", path: "/api/v1/projects/:id/tasks/:taskId", desc: "Update task status" },
-              { method: "GET", path: "/api/v1/projects/:id/team", desc: "Team roster for project" },
-              { method: "POST", path: "/api/v1/projects/:id/team", desc: "Add agent to project" },
-              { method: "GET", path: "/api/v1/agents", desc: "Global agent registry" },
-            ].map(({ method, path, desc }) => (
-              <div
-                key={path}
-                className="flex flex-wrap items-center gap-3 rounded-xl bg-slate-50 px-4 py-2.5 ring-1 ring-slate-200 dark:bg-slate-900/40 dark:ring-slate-800"
-              >
-                <span
-                  className={cn(
-                    "shrink-0 rounded-lg px-2 py-0.5 text-xs font-bold",
-                    method === "GET"
-                      ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300"
-                      : method === "POST"
-                        ? "bg-brand-100 text-brand-700 dark:bg-brand-500/20 dark:text-brand-200"
-                        : "bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300"
-                  )}
-                >
-                  {method}
-                </span>
-                <code className="min-w-0 flex-1 truncate text-xs font-mono text-slate-800 dark:text-slate-200">
-                  {path}
-                </code>
-                <span className="text-xs text-slate-500 dark:text-slate-400">{desc}</span>
-              </div>
-            ))}
-          </div>
+        <CardContent className="py-10 text-center">
+          <p className="text-sm text-slate-500 dark:text-slate-400">No technical specification yet.</p>
         </CardContent>
       </Card>
-    </div>
+    );
+  }
+
+  return (
+    <Card>
+      <CardHeader><CardTitle>Technical Specification</CardTitle></CardHeader>
+      <CardContent>
+        <pre className="whitespace-pre-wrap text-sm leading-relaxed text-slate-700 dark:text-slate-300 font-sans">
+          {content}
+        </pre>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -605,8 +532,8 @@ export default function ProjectDetailPage(props: { params: Promise<{ id: string 
 
       {/* Tab content */}
       <div role="tabpanel">
-        {activeTab === "architecture" && <ArchitectureTab />}
-        {activeTab === "tech-spec" && <TechSpecTab />}
+        {activeTab === "architecture" && <ArchitectureTab projectId={project.slug ?? project.id} />}
+        {activeTab === "tech-spec" && <TechSpecTab projectId={project.slug ?? project.id} />}
         {activeTab === "sprint-board" && <SprintBoardTab projectId={project.id} />}
         {activeTab === "team" && <TeamTab projectId={project.id} />}
       </div>
