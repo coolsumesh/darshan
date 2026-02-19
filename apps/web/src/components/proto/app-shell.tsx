@@ -20,8 +20,6 @@ import {
   Sparkles,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
-import ThemeToggle from "@/components/proto/theme-toggle";
-import FontSizeToggle from "@/components/proto/font-size-toggle";
 import { applyPrefsToDom, loadPrefs, useUIPreferences } from "@/components/proto/ui-preferences";
 
 // ─── Nav config ───────────────────────────────────────────────────────────────
@@ -264,8 +262,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
         {/* Right */}
         <div className="flex items-center gap-2">
-          <FontSizeToggle />
-          <ThemeToggle />
           <button className="flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-white/15">
             <Plus className="h-3.5 w-3.5" />
             Invite
