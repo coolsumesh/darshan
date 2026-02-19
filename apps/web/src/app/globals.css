@@ -75,6 +75,15 @@ body {
   from { width: 0%; }
 }
 
+@keyframes slideInRight {
+  from { transform: translateX(100%); opacity: 0; }
+  to   { transform: translateX(0);    opacity: 1; }
+}
+
+.animate-slide-in-right {
+  animation: slideInRight 250ms ease-out both;
+}
+
 .animate-fade-up {
   animation: fadeUp 300ms ease-out both;
 }

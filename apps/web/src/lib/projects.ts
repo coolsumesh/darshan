@@ -12,6 +12,8 @@ export type Project = {
   progress: number; // 0-100
 };
 
+export type Priority = "urgent" | "high" | "medium" | "low";
+
 export type Task = {
   id: string;
   projectId: string;
@@ -22,6 +24,8 @@ export type Task = {
   assignee?: string;
   type?: string;
   estimated_sp?: number;
+  priority?: Priority;
+  due_date?: string; // ISO date "YYYY-MM-DD"
 };
 
 export type TeamMember = {
