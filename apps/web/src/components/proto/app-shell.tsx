@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import * as React from "react";
 import {
   Activity,
+  Bell,
   Bot,
   CalendarDays,
   ChevronDown,
@@ -233,8 +234,11 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       <div className="pointer-events-none fixed inset-0 bg-grid opacity-40" />
 
       {/* ── Topbar ─────────────────────────────────────────────── */}
-      <header className="relative z-40 flex h-12 shrink-0 items-center justify-between border-b border-white/5 bg-brand-950 px-4">
-        {/* Left */}
+      <header
+        className="relative z-40 flex h-14 shrink-0 items-center justify-between border-b border-white/8 px-4"
+        style={{ backgroundColor: "#1E0A3C" }}
+      >
+        {/* ── Left: logo + wordmark ── */}
         <div className="flex items-center gap-3">
           {/* Mobile hamburger */}
           <button
@@ -245,30 +249,72 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             <Menu className="h-5 w-5" />
           </button>
 
-          {/* Logo (desktop) */}
-          <div className="hidden lg:flex items-center gap-2">
-            <div className="grid h-7 w-7 place-items-center rounded-lg bg-brand-600">
-              <Sparkles className="h-4 w-4 text-white" />
+          {/* Logo mark */}
+          <div className="flex items-center gap-2.5">
+            {/* Geometric logo placeholder */}
+            <div className="relative grid h-8 w-8 place-items-center overflow-hidden rounded-xl" style={{ background: "linear-gradient(135deg,#7C3AED 0%,#4F46E5 100%)" }}>
+              {/* Abstract "D" glyph */}
+              <svg viewBox="0 0 24 24" className="h-5 w-5 text-white" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M5 5h6a6 6 0 0 1 0 12H5V5z" />
+              </svg>
+              {/* Shimmer overlay */}
+              <div className="absolute inset-0 rounded-xl" style={{ background: "linear-gradient(135deg,rgba(255,255,255,0.18) 0%,transparent 60%)" }} />
             </div>
-            <span className="font-display text-sm font-semibold text-white">Darshan</span>
-          </div>
-
-          {/* Breadcrumb */}
-          <div className="hidden lg:flex items-center gap-1.5 text-white/40">
-            <ChevronDown className="h-3.5 w-3.5 -rotate-90" />
-            <span className="text-xs font-medium text-white/60">MithranLabs</span>
+            <div className="hidden sm:flex flex-col leading-tight">
+              <span className="font-display text-[15px] font-bold tracking-tight text-white">Darshan</span>
+              <span className="text-[10px] font-medium text-white/40 uppercase tracking-widest">by MithranLabs</span>
+            </div>
           </div>
         </div>
 
-        {/* Right */}
-        <div className="flex items-center gap-2">
-          <button className="flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-white/15">
-            <Plus className="h-3.5 w-3.5" />
-            Invite
+        {/* ── Centre: global search ── */}
+        <div className="hidden md:flex flex-1 max-w-md mx-6">
+          <button
+            className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-sm text-white/40 transition-colors hover:bg-white/10 hover:text-white/70"
+            style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.08)" }}
+          >
+            <Search className="h-3.5 w-3.5 shrink-0" />
+            <span>Search everything…</span>
+            <kbd className="ml-auto rounded px-1.5 py-0.5 text-[10px] font-medium text-white/30" style={{ background: "rgba(255,255,255,0.08)" }}>⌘K</kbd>
           </button>
-          <div className="grid h-7 w-7 place-items-center rounded-full bg-brand-700 text-xs font-bold text-white">
-            S
-          </div>
+        </div>
+
+        {/* ── Right: actions + avatar ── */}
+        <div className="flex items-center gap-1">
+          {/* Search (mobile) */}
+          <button className="md:hidden grid h-8 w-8 place-items-center rounded-lg text-white/50 hover:bg-white/10 hover:text-white transition-colors">
+            <Search className="h-4 w-4" />
+          </button>
+
+          {/* Notifications */}
+          <button className="relative grid h-8 w-8 place-items-center rounded-lg text-white/50 hover:bg-white/10 hover:text-white transition-colors">
+            <Bell className="h-4 w-4" />
+            {/* Unread dot */}
+            <span className="absolute top-1.5 right-1.5 h-1.5 w-1.5 rounded-full bg-brand-400" />
+          </button>
+
+          {/* Help */}
+          <button className="grid h-8 w-8 place-items-center rounded-lg text-white/50 hover:bg-white/10 hover:text-white transition-colors">
+            <HelpCircle className="h-4 w-4" />
+          </button>
+
+          {/* Divider */}
+          <div className="mx-2 h-5 w-px bg-white/10" />
+
+          {/* User avatar */}
+          <button className="flex items-center gap-2 rounded-lg px-2 py-1 transition-colors hover:bg-white/10">
+            <div
+              className="grid h-7 w-7 place-items-center rounded-full text-xs font-bold text-white"
+              style={{ background: "linear-gradient(135deg,#7C3AED,#6366F1)" }}
+            >
+              S
+            </div>
+            <div className="hidden sm:flex flex-col items-start leading-tight">
+              <span className="text-xs font-semibold text-white">Sumesh</span>
+              <span className="text-[10px] text-white/40">Admin</span>
+            </div>
+            <ChevronDown className="hidden sm:block h-3 w-3 text-white/30" />
+          </button>
         </div>
       </header>
 
