@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import type pg from "pg";
+import { broadcast } from "../broadcast.js";
 
 export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
 
@@ -172,6 +173,7 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
          values ($1, $2, $3, $4, $5, $6) returning *`,
         [project[0].id, title, description, proposer ?? null, assignee ?? null, status]
       );
+      broadcast("task:created", { task: rows[0] });
       return reply.status(201).send({ ok: true, task: rows[0] });
     }
   );
@@ -185,6 +187,7 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
         [req.params.taskId]
       );
       if (!rowCount) return reply.status(404).send({ ok: false, error: "task not found" });
+      broadcast("task:deleted", { taskId: req.params.taskId });
       return { ok: true };
     }
   );
@@ -210,6 +213,7 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
         vals
       );
       if (!rows[0]) return reply.status(404).send({ ok: false, error: "task not found" });
+      broadcast("task:updated", { task: rows[0] });
       return { ok: true, task: rows[0] };
     }
   );
