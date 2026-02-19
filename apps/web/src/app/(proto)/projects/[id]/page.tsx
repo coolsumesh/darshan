@@ -24,7 +24,7 @@ import {
   type TaskStatus,
 } from "@/lib/projects";
 import { type Agent } from "@/lib/agents";
-import { fetchProject, fetchTasks, fetchTeam, fetchAgents, createTask, addTeamMember, removeTeamMember, fetchArchitecture, fetchTechSpec, type TeamMemberWithAgent } from "@/lib/api";
+import { fetchProject, fetchTasks, fetchTeam, fetchAgents, createTask, updateTask, deleteTask, addTeamMember, removeTeamMember, fetchArchitecture, fetchTechSpec, type TeamMemberWithAgent } from "@/lib/api";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 type Tab = "architecture" | "tech-spec" | "sprint-board" | "team";
@@ -120,6 +120,7 @@ function SprintBoardTab({ projectId }: { projectId: string }) {
   const [tasks, setTasks] = React.useState<Task[]>([]);
   const [addingIn, setAddingIn] = React.useState<TaskStatus | null>(null);
   const [newTitle, setNewTitle] = React.useState("");
+  const [acting, setActing] = React.useState<string | null>(null); // taskId being acted on
 
   React.useEffect(() => {
     fetchTasks(projectId).then(setTasks);
@@ -133,6 +134,20 @@ function SprintBoardTab({ projectId }: { projectId: string }) {
     setTasks((prev) => [...prev, task]);
     setNewTitle("");
     setAddingIn(null);
+  }
+
+  async function approveTask(taskId: string) {
+    setActing(taskId);
+    const updated = await updateTask(projectId, taskId, { status: "approved" });
+    setTasks((prev) => prev.map((t) => t.id === taskId ? { ...t, status: updated?.status ?? "approved" } : t));
+    setActing(null);
+  }
+
+  async function rejectTask(taskId: string) {
+    setActing(taskId);
+    await deleteTask(projectId, taskId);
+    setTasks((prev) => prev.filter((t) => t.id !== taskId));
+    setActing(null);
   }
 
   return (
@@ -178,6 +193,34 @@ function SprintBoardTab({ projectId }: { projectId: string }) {
                         </>
                       )}
                     </div>
+                    {task.status === "proposed" && (
+                      <div className="mt-3 flex gap-2">
+                        <button
+                          disabled={acting === task.id}
+                          onClick={() => approveTask(task.id)}
+                          className={cn(
+                            "flex-1 rounded-lg py-1.5 text-xs font-semibold transition",
+                            "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200 hover:bg-emerald-100",
+                            "dark:bg-emerald-500/10 dark:text-emerald-400 dark:ring-emerald-500/30 dark:hover:bg-emerald-500/20",
+                            "disabled:opacity-50 disabled:cursor-not-allowed"
+                          )}
+                        >
+                          ✓ Approve
+                        </button>
+                        <button
+                          disabled={acting === task.id}
+                          onClick={() => rejectTask(task.id)}
+                          className={cn(
+                            "flex-1 rounded-lg py-1.5 text-xs font-semibold transition",
+                            "bg-red-50 text-red-600 ring-1 ring-red-200 hover:bg-red-100",
+                            "dark:bg-red-500/10 dark:text-red-400 dark:ring-red-500/30 dark:hover:bg-red-500/20",
+                            "disabled:opacity-50 disabled:cursor-not-allowed"
+                          )}
+                        >
+                          ✕ Reject
+                        </button>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>

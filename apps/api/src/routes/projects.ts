@@ -176,6 +176,19 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
     }
   );
 
+  // ── Delete task ────────────────────────────────────────────────────────────
+  server.delete<{ Params: { id: string; taskId: string } }>(
+    "/api/v1/projects/:id/tasks/:taskId",
+    async (req, reply) => {
+      const { rowCount } = await db.query(
+        `delete from tasks where id = $1 returning id`,
+        [req.params.taskId]
+      );
+      if (!rowCount) return reply.status(404).send({ ok: false, error: "task not found" });
+      return { ok: true };
+    }
+  );
+
   // ── Update task status ─────────────────────────────────────────────────────
   server.patch<{ Params: { id: string; taskId: string }; Body: Record<string, unknown> }>(
     "/api/v1/projects/:id/tasks/:taskId",

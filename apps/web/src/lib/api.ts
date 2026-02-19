@@ -70,6 +70,13 @@ export async function updateTask(projectId: string, taskId: string, patch: Parti
   return data?.task ?? null;
 }
 
+export async function deleteTask(projectId: string, taskId: string): Promise<boolean> {
+  const data = await apiFetch<{ ok: boolean }>(`/api/v1/projects/${projectId}/tasks/${taskId}`, {
+    method: "DELETE",
+  });
+  return data?.ok ?? false;
+}
+
 // ── Team ──────────────────────────────────────────────────────────────────────
 
 export type TeamMemberWithAgent = TeamMember & { agent?: Agent };
