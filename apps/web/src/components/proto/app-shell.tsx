@@ -296,7 +296,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
         {/* Main content area */}
         <main className="flex min-w-0 flex-1 flex-col overflow-y-auto" role="main">
-          <div className="flex-1 p-6">
+          <div className="flex-1 px-6 pt-4 pb-6">
             {children}
           </div>
         </main>
