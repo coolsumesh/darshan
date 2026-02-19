@@ -52,11 +52,12 @@ function statusTone(status: string): "brand" | "warning" | "success" | "neutral"
 }
 
 const TASK_COLUMNS: { id: TaskStatus; label: string; color: string }[] = [
-  { id: "proposed",    label: "Proposed",    color: "border-t-slate-400" },
-  { id: "approved",    label: "Approved",    color: "border-t-amber-400" },
-  { id: "in-progress", label: "In Progress", color: "border-t-brand-500" },
+  { id: "proposed",    label: "Proposed",    color: "border-t-slate-400"   },
+  { id: "approved",    label: "Approved",    color: "border-t-amber-400"   },
+  { id: "in-progress", label: "In Progress", color: "border-t-brand-500"   },
   { id: "done",        label: "Done",        color: "border-t-emerald-500" },
 ];
+
 
 // Normalise DB snake_case rows and frontend camelCase Task objects
 function taskId(t: Task): string { return t.id; }
@@ -343,13 +344,16 @@ function TaskCard({
   );
 }
 
-// ─── Sprint Board Tab ─────────────────────────────────────────────────────────
+// ─── Task Board Tab ─────────────────────────────────────────────────────────
 function SprintBoardTab({ projectId }: { projectId: string }) {
-  const [tasks,   setTasks]   = React.useState<Task[]>([]);
-  const [team,    setTeam]    = React.useState<TeamMemberWithAgent[]>([]);
-  const [acting,  setActing]  = React.useState<string | null>(null);
+  const [tasks,    setTasks]    = React.useState<Task[]>([]);
+  const [team,     setTeam]     = React.useState<TeamMemberWithAgent[]>([]);
+  const [acting,   setActing]   = React.useState<string | null>(null);
   const [dragOver, setDragOver] = React.useState<TaskStatus | null>(null);
   const [createIn, setCreateIn] = React.useState<TaskStatus | null>(null);
+
+  // Track IDs we've deleted so WS task:created can't re-add them
+  const recentlyDeleted = React.useRef(new Set<string>());
 
   // Initial load
   React.useEffect(() => {
@@ -375,8 +379,12 @@ function SprintBoardTab({ projectId }: { projectId: string }) {
           if (msg.type === "task:created") {
             const task = (msg.data as { task: Task }).task;
             const pid = taskProjectId(task);
+            const tid = taskId(task);
             if (!pid || pid === projectId) {
-              setTasks((prev) => prev.some((t) => taskId(t) === taskId(task)) ? prev : [...prev, task]);
+              // Don't re-add tasks we've explicitly deleted
+              if (!recentlyDeleted.current.has(tid)) {
+                setTasks((prev) => prev.some((t) => taskId(t) === tid) ? prev : [...prev, task]);
+              }
             }
           } else if (msg.type === "task:updated") {
             const task = (msg.data as { task: Task }).task;
@@ -411,8 +419,14 @@ function SprintBoardTab({ projectId }: { projectId: string }) {
 
   async function removeTask(id: string) {
     setActing(id);
-    await deleteTask(projectId, id);
-    setTasks((prev) => prev.filter((t) => t.id !== id));
+    recentlyDeleted.current.add(id);
+    const ok = await deleteTask(projectId, id);
+    if (ok) {
+      setTasks((prev) => prev.filter((t) => t.id !== id));
+    } else {
+      // API failed — restore task visibility
+      recentlyDeleted.current.delete(id);
+    }
     setActing(null);
   }
 
@@ -665,7 +679,7 @@ function TeamTab({ projectId }: { projectId: string }) {
 const TABS: { id: Tab; label: string; icon: React.ElementType }[] = [
   { id: "architecture",  label: "Architecture",           icon: BookOpen  },
   { id: "tech-spec",     label: "Technical Specification", icon: FileCode2 },
-  { id: "sprint-board",  label: "Sprint Board",            icon: Kanban    },
+  { id: "sprint-board",  label: "Task Board",            icon: Kanban    },
   { id: "team",          label: "Team",                   icon: Users     },
 ];
 
