@@ -269,7 +269,7 @@ function TaskCard({
     );
   }
 
-  const canDelete = task.status === "proposed";
+  const canDelete = true; // delete available on all columns
 
   return (
     <div
@@ -325,20 +325,18 @@ function TaskCard({
               {a.label}
             </button>
           ))}
-          {canDelete && (
-            <button
-              disabled={acting}
-              onClick={onDelete}
-              className={cn(
-                "flex-1 rounded-lg py-1.5 text-xs font-semibold ring-1 transition",
-                "bg-red-50 text-red-600 ring-red-200 hover:bg-red-100",
-                "dark:bg-red-500/10 dark:text-red-400 dark:ring-red-500/30 dark:hover:bg-red-500/20",
-                "disabled:opacity-50 disabled:cursor-not-allowed"
-              )}
-            >
-              ✕ Reject
-            </button>
-          )}
+          <button
+            disabled={acting}
+            onClick={onDelete}
+            className={cn(
+              "flex-1 rounded-lg py-1.5 text-xs font-semibold ring-1 transition",
+              "bg-red-50 text-red-600 ring-red-200 hover:bg-red-100",
+              "dark:bg-red-500/10 dark:text-red-400 dark:ring-red-500/30 dark:hover:bg-red-500/20",
+              "disabled:opacity-50 disabled:cursor-not-allowed"
+            )}
+          >
+            {task.status === "proposed" ? "✕ Reject" : "✕ Remove"}
+          </button>
         </div>
       )}
     </div>
