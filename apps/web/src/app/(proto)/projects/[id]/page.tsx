@@ -1,7 +1,9 @@
 "use client";
 
 import * as React from "react";
-import Markdown from "react-markdown";
+import dynamic from "next/dynamic";
+
+const Markdown = dynamic(() => import("react-markdown"), { ssr: false });
 import Link from "next/link";
 import {
   ArrowLeft,
