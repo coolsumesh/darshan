@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import Markdown from "react-markdown";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -45,6 +46,62 @@ const TASK_COLUMNS: { id: TaskStatus; label: string }[] = [
   { id: "done", label: "Done" },
 ];
 
+// ─── Markdown Renderer ───────────────────────────────────────────────────────
+function MarkdownContent({ content }: { content: string }) {
+  return (
+    <Markdown
+      components={{
+        h1: ({ children }) => (
+          <h1 className="mb-4 mt-6 text-lg font-semibold text-slate-900 dark:text-slate-100 first:mt-0">{children}</h1>
+        ),
+        h2: ({ children }) => (
+          <h2 className="mb-3 mt-5 text-base font-semibold text-slate-800 dark:text-slate-200 first:mt-0">{children}</h2>
+        ),
+        h3: ({ children }) => (
+          <h3 className="mb-2 mt-4 text-sm font-semibold text-slate-700 dark:text-slate-300 first:mt-0">{children}</h3>
+        ),
+        p: ({ children }) => (
+          <p className="mb-3 text-sm leading-relaxed text-slate-600 dark:text-slate-400">{children}</p>
+        ),
+        ul: ({ children }) => (
+          <ul className="mb-3 ml-4 list-disc space-y-1 text-sm text-slate-600 dark:text-slate-400">{children}</ul>
+        ),
+        ol: ({ children }) => (
+          <ol className="mb-3 ml-4 list-decimal space-y-1 text-sm text-slate-600 dark:text-slate-400">{children}</ol>
+        ),
+        li: ({ children }) => <li className="leading-relaxed">{children}</li>,
+        code: ({ children, className }) => {
+          const isBlock = className?.includes("language-");
+          return isBlock ? (
+            <code className="block w-full overflow-x-auto rounded-xl bg-slate-100 px-4 py-3 text-xs font-mono text-slate-800 dark:bg-slate-900 dark:text-slate-200">
+              {children}
+            </code>
+          ) : (
+            <code className="rounded-md bg-slate-100 px-1.5 py-0.5 text-xs font-mono text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+              {children}
+            </code>
+          );
+        },
+        pre: ({ children }) => (
+          <pre className="mb-3 overflow-x-auto rounded-xl bg-slate-100 p-4 dark:bg-slate-900">{children}</pre>
+        ),
+        strong: ({ children }) => (
+          <strong className="font-semibold text-slate-800 dark:text-slate-200">{children}</strong>
+        ),
+        hr: () => <hr className="my-4 border-slate-200 dark:border-slate-800" />,
+        a: ({ children, href }) => (
+          <a href={href} target="_blank" rel="noopener noreferrer"
+            className="text-[rgb(var(--accent-600))] underline underline-offset-2 hover:opacity-80">
+            {children}
+          </a>
+        ),
+      }}
+    >
+      {content}
+    </Markdown>
+  );
+}
+
 // ─── Architecture Tab ─────────────────────────────────────────────────────────
 function ArchitectureTab({ projectId }: { projectId: string }) {
   const [content, setContent] = React.useState<string | null>(null);
@@ -72,9 +129,7 @@ function ArchitectureTab({ projectId }: { projectId: string }) {
     <Card>
       <CardHeader><CardTitle>Architecture</CardTitle></CardHeader>
       <CardContent>
-        <pre className="whitespace-pre-wrap text-sm leading-relaxed text-slate-700 dark:text-slate-300 font-sans">
-          {content}
-        </pre>
+        <MarkdownContent content={content} />
       </CardContent>
     </Card>
   );
@@ -107,9 +162,7 @@ function TechSpecTab({ projectId }: { projectId: string }) {
     <Card>
       <CardHeader><CardTitle>Technical Specification</CardTitle></CardHeader>
       <CardContent>
-        <pre className="whitespace-pre-wrap text-sm leading-relaxed text-slate-700 dark:text-slate-300 font-sans">
-          {content}
-        </pre>
+        <MarkdownContent content={content} />
       </CardContent>
     </Card>
   );
