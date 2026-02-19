@@ -196,7 +196,7 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
   server.patch<{ Params: { id: string; taskId: string }; Body: Record<string, unknown> }>(
     "/api/v1/projects/:id/tasks/:taskId",
     async (req, reply) => {
-      const allowed = ["title", "description", "status", "assignee", "proposer"];
+      const allowed = ["title", "description", "status", "assignee", "proposer", "type", "estimated_sp"];
       const sets: string[] = [];
       const vals: unknown[] = [];
       for (const key of allowed) {

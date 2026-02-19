@@ -20,6 +20,8 @@ export type Task = {
   status: TaskStatus;
   proposer?: string;
   assignee?: string;
+  type?: string;
+  estimated_sp?: number;
 };
 
 export type TeamMember = {

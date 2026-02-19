@@ -8,9 +8,12 @@ import Link from "next/link";
 import {
   ArrowLeft,
   BookOpen,
+  ChevronDown,
   FileCode2,
   GripVertical,
   Kanban,
+  LayoutList,
+  MoreHorizontal,
   Plus,
   Search,
   UserPlus,
@@ -66,6 +69,319 @@ function taskProjectId(t: Task): string {
   return t.projectId ?? (t as unknown as { project_id: string }).project_id ?? "";
 }
 
+// ─── Monday-style status & type badges ───────────────────────────────────────
+
+const STATUS_META: Record<TaskStatus, { label: string; bg: string; text: string; dot: string }> = {
+  proposed:    { label: "Backlog",      bg: "bg-zinc-100",    text: "text-zinc-600",    dot: "bg-zinc-400"    },
+  approved:    { label: "To Do",        bg: "bg-amber-100",   text: "text-amber-700",   dot: "bg-amber-400"   },
+  "in-progress":{ label: "In Progress", bg: "bg-brand-100",   text: "text-brand-700",   dot: "bg-brand-500"   },
+  review:      { label: "Review",       bg: "bg-sky-100",     text: "text-sky-700",     dot: "bg-sky-400"     },
+  done:        { label: "Done",         bg: "bg-emerald-100", text: "text-emerald-700", dot: "bg-emerald-500" },
+};
+
+const TYPE_META: Record<string, { bg: string; text: string }> = {
+  Task:           { bg: "bg-zinc-100",    text: "text-zinc-600"    },
+  Feature:        { bg: "bg-green-100",   text: "text-green-700"   },
+  Bug:            { bg: "bg-red-100",     text: "text-red-600"     },
+  Quality:        { bg: "bg-purple-100",  text: "text-purple-700"  },
+  Infrastructure: { bg: "bg-blue-100",    text: "text-blue-700"    },
+};
+
+function StatusPill({ status }: { status: TaskStatus }) {
+  const m = STATUS_META[status] ?? STATUS_META.proposed;
+  return (
+    <span className={cn("inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-semibold", m.bg, m.text)}>
+      <span className={cn("h-1.5 w-1.5 rounded-full shrink-0", m.dot)} />
+      {m.label}
+    </span>
+  );
+}
+
+function TypePill({ type }: { type?: string }) {
+  const t = type ?? "Task";
+  const m = TYPE_META[t] ?? TYPE_META.Task;
+  return (
+    <span className={cn("inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold", m.bg, m.text)}>
+      {t}
+    </span>
+  );
+}
+
+// ─── Table section color bar ──────────────────────────────────────────────────
+
+function SectionColorBar({ tasks }: { tasks: Task[] }) {
+  const total = tasks.length;
+  if (!total) return null;
+  const counts: Record<TaskStatus, number> = { proposed: 0, approved: 0, "in-progress": 0, review: 0, done: 0 };
+  for (const t of tasks) counts[t.status] = (counts[t.status] ?? 0) + 1;
+  return (
+    <div className="flex h-1 w-full overflow-hidden rounded-full mt-2">
+      {(Object.entries(counts) as [TaskStatus, number][]).map(([s, n]) => n > 0 && (
+        <div key={s} className={cn("transition-all", STATUS_META[s].dot)} style={{ width: `${(n / total) * 100}%` }} />
+      ))}
+    </div>
+  );
+}
+
+// ─── Main Table view ──────────────────────────────────────────────────────────
+
+const TABLE_SECTIONS: { status: TaskStatus; label: string; accent: string }[] = [
+  { status: "proposed",     label: "Backlog",      accent: "bg-zinc-400"    },
+  { status: "approved",     label: "To Do",        accent: "bg-amber-400"   },
+  { status: "in-progress",  label: "In Progress",  accent: "bg-brand-500"   },
+  { status: "review",       label: "Review",       accent: "bg-sky-400"     },
+  { status: "done",         label: "Done",         accent: "bg-emerald-500" },
+];
+
+const COL_HEADERS = [
+  { label: "Task",         cls: "flex-1 min-w-0"  },
+  { label: "Owner",        cls: "w-28 shrink-0"   },
+  { label: "Status",       cls: "w-36 shrink-0"   },
+  { label: "Type",         cls: "w-32 shrink-0"   },
+  { label: "Task ID",      cls: "w-24 shrink-0"   },
+  { label: "SP",           cls: "w-12 shrink-0 text-right" },
+  { label: "",             cls: "w-8  shrink-0"   },
+];
+
+function TableRow({
+  task,
+  taskNumber,
+  acting,
+  onMove,
+  onDelete,
+}: {
+  task: Task;
+  taskNumber: number;
+  acting: boolean;
+  onMove: (s: TaskStatus) => void;
+  onDelete: () => void;
+}) {
+  const taskIdStr = `DSH-${String(taskNumber).padStart(3, "0")}`;
+
+  return (
+    <div
+      className={cn(
+        "group flex items-center gap-0 border-b border-zinc-100 dark:border-[#2D2A45] transition-colors",
+        "hover:bg-zinc-50 dark:hover:bg-white/5 min-h-[40px]",
+        acting && "opacity-50 pointer-events-none"
+      )}
+    >
+      {/* Checkbox */}
+      <div className="flex w-8 shrink-0 items-center justify-center">
+        <input
+          type="checkbox"
+          className="h-3.5 w-3.5 rounded border-zinc-300 text-brand-600 opacity-0 group-hover:opacity-100 transition-opacity"
+          onClick={(e) => e.stopPropagation()}
+        />
+      </div>
+
+      {/* Drag indicator */}
+      <div className="w-5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+        <GripVertical className="h-4 w-4 text-zinc-400" />
+      </div>
+
+      {/* Task name */}
+      <div className="flex min-w-0 flex-1 items-center gap-2 px-3 py-2">
+        <span className="font-display truncate text-sm font-medium text-zinc-900 dark:text-white">
+          {task.title}
+        </span>
+      </div>
+
+      {/* Owner */}
+      <div className="flex w-28 shrink-0 items-center px-3">
+        {task.assignee ? (
+          <div className="flex items-center gap-1.5">
+            <div className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-brand-600 text-[10px] font-bold text-white">
+              {task.assignee[0]?.toUpperCase()}
+            </div>
+            <span className="truncate text-xs text-zinc-600 dark:text-zinc-400">{task.assignee}</span>
+          </div>
+        ) : (
+          <span className="text-xs text-zinc-300 dark:text-zinc-700">—</span>
+        )}
+      </div>
+
+      {/* Status */}
+      <div className="flex w-36 shrink-0 items-center px-3">
+        <StatusPill status={task.status} />
+      </div>
+
+      {/* Type */}
+      <div className="flex w-32 shrink-0 items-center px-3">
+        <TypePill type={task.type} />
+      </div>
+
+      {/* Task ID */}
+      <div className="w-24 shrink-0 px-3">
+        <span className="font-mono text-xs text-zinc-400">{taskIdStr}</span>
+      </div>
+
+      {/* SP */}
+      <div className="w-12 shrink-0 px-3 text-right">
+        <span className="text-sm text-zinc-600 dark:text-zinc-400">
+          {task.estimated_sp ?? 0}
+        </span>
+      </div>
+
+      {/* Row actions (hover) */}
+      <div className="flex w-8 shrink-0 items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+        <button
+          onClick={onDelete}
+          className="rounded p-1 text-zinc-400 hover:bg-zinc-100 hover:text-red-500 dark:hover:bg-white/10"
+          title="Remove"
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function TableSection({
+  section,
+  tasks,
+  startIndex,
+  acting,
+  onMove,
+  onDelete,
+  onAddTask,
+}: {
+  section: typeof TABLE_SECTIONS[number];
+  tasks: Task[];
+  startIndex: number;
+  acting: string | null;
+  onMove: (id: string, s: TaskStatus) => void;
+  onDelete: (id: string) => void;
+  onAddTask: () => void;
+}) {
+  const [collapsed, setCollapsed] = React.useState(false);
+  const spTotal = tasks.reduce((s, t) => s + (t.estimated_sp ?? 0), 0);
+
+  return (
+    <div className="mb-4">
+      {/* Section header */}
+      <button
+        onClick={() => setCollapsed((c) => !c)}
+        className="group/sh flex w-full items-center gap-2 px-2 py-2 text-left hover:bg-zinc-50 dark:hover:bg-white/5 rounded-lg transition-colors"
+      >
+        <div className={cn("h-4 w-1 shrink-0 rounded-full", section.accent)} />
+        <ChevronDown className={cn("h-4 w-4 shrink-0 text-zinc-400 transition-transform duration-150", collapsed && "-rotate-90")} />
+        <span className="font-display font-bold text-zinc-900 dark:text-white text-sm">{section.label}</span>
+        <span className="grid h-5 min-w-5 place-items-center rounded-full bg-zinc-100 px-1.5 text-[11px] font-semibold text-zinc-500 dark:bg-white/10 dark:text-zinc-400">
+          {tasks.length}
+        </span>
+        <button
+          className="ml-2 flex items-center gap-1 text-xs text-zinc-400 opacity-0 group-hover/sh:opacity-100 transition-opacity hover:text-zinc-600"
+          onClick={(e) => { e.stopPropagation(); onAddTask(); }}
+        >
+          <Plus className="h-3 w-3" /> Add task
+        </button>
+        {spTotal > 0 && (
+          <span className="ml-auto text-xs text-zinc-400">{spTotal} SP</span>
+        )}
+      </button>
+
+      {!collapsed && (
+        <div className="mt-1 overflow-hidden rounded-xl border border-zinc-200 bg-white dark:border-[#2D2A45] dark:bg-[#16132A]">
+          {/* Column headers */}
+          <div className="flex items-center gap-0 border-b border-zinc-100 bg-zinc-50 px-0 dark:border-[#2D2A45] dark:bg-[#0F0D1E]">
+            <div className="w-8 shrink-0" />
+            <div className="w-5 shrink-0" />
+            {COL_HEADERS.map((h) => (
+              <div key={h.label} className={cn("px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-zinc-400", h.cls)}>
+                {h.label}
+              </div>
+            ))}
+          </div>
+
+          {/* Rows */}
+          {tasks.length === 0 ? (
+            <div className="px-8 py-6 text-center text-sm text-zinc-400">No tasks in this column.</div>
+          ) : (
+            tasks.map((task, i) => (
+              <TableRow
+                key={task.id}
+                task={task}
+                taskNumber={startIndex + i + 1}
+                acting={acting === task.id}
+                onMove={(s) => onMove(task.id, s)}
+                onDelete={() => onDelete(task.id)}
+              />
+            ))
+          )}
+
+          {/* Add task row */}
+          <button
+            onClick={onAddTask}
+            className="flex w-full items-center gap-2 border-t border-dashed border-zinc-200 px-8 py-2.5 text-xs text-zinc-400 transition-colors hover:bg-zinc-50 hover:text-zinc-600 dark:border-[#2D2A45] dark:hover:bg-white/5"
+          >
+            <Plus className="h-3.5 w-3.5" /> Add task
+          </button>
+
+          {/* SP sum row */}
+          {spTotal > 0 && (
+            <div className="flex items-center border-t border-zinc-100 bg-zinc-50 dark:border-[#2D2A45] dark:bg-[#0F0D1E]">
+              <div className="w-8 shrink-0" /><div className="w-5 shrink-0" />
+              <div className="flex-1 px-3 py-2 text-xs text-zinc-400">Sum</div>
+              <div className="w-28 shrink-0" /><div className="w-36 shrink-0" /><div className="w-32 shrink-0" /><div className="w-24 shrink-0" />
+              <div className="w-12 shrink-0 px-3 py-2 text-right text-xs font-semibold text-zinc-600 dark:text-zinc-400">
+                {spTotal} SP
+              </div>
+              <div className="w-8 shrink-0" />
+            </div>
+          )}
+        </div>
+      )}
+
+      <SectionColorBar tasks={tasks} />
+    </div>
+  );
+}
+
+function MainTableView({
+  tasks,
+  acting,
+  onMove,
+  onDelete,
+  onAddTask,
+}: {
+  tasks: Task[];
+  acting: string | null;
+  onMove: (id: string, s: TaskStatus) => void;
+  onDelete: (id: string) => void;
+  onAddTask: (status: TaskStatus) => void;
+}) {
+  let counter = 0;
+  return (
+    <div className="flex flex-col">
+      {TABLE_SECTIONS.map((section) => {
+        const sectionTasks = tasks.filter((t) => t.status === section.status);
+        const startIdx = counter;
+        counter += sectionTasks.length;
+        return (
+          <TableSection
+            key={section.status}
+            section={section}
+            tasks={sectionTasks}
+            startIndex={startIdx}
+            acting={acting}
+            onMove={onMove}
+            onDelete={onDelete}
+            onAddTask={() => onAddTask(section.status)}
+          />
+        );
+      })}
+
+      <button
+        onClick={() => {}}
+        className="mt-2 flex items-center gap-2 rounded-lg px-3 py-2 text-xs text-zinc-400 hover:bg-zinc-50 hover:text-zinc-600 dark:hover:bg-white/5"
+      >
+        <Plus className="h-3.5 w-3.5" /> Add new group
+      </button>
+    </div>
+  );
+}
+
 // ─── Markdown Renderer ────────────────────────────────────────────────────────
 function MarkdownContent({ content }: { content: string }) {
   return (
@@ -116,6 +432,8 @@ function TechSpecTab({ projectId }: { projectId: string }) {
 }
 
 // ─── Create Task Modal ────────────────────────────────────────────────────────
+const TASK_TYPES = ["Task", "Feature", "Bug", "Quality", "Infrastructure"];
+
 function CreateTaskModal({
   defaultStatus,
   team,
@@ -124,19 +442,21 @@ function CreateTaskModal({
 }: {
   defaultStatus: TaskStatus;
   team: TeamMemberWithAgent[];
-  onSave: (payload: { title: string; description: string; assignee: string; status: TaskStatus }) => Promise<void>;
+  onSave: (payload: { title: string; description: string; assignee: string; status: TaskStatus; type: string; estimated_sp: number }) => Promise<void>;
   onClose: () => void;
 }) {
-  const [title,       setTitle]       = React.useState("");
-  const [description, setDescription] = React.useState("");
-  const [assignee,    setAssignee]    = React.useState("");
-  const [status,      setStatus]      = React.useState<TaskStatus>(defaultStatus);
-  const [saving,      setSaving]      = React.useState(false);
+  const [title,        setTitle]        = React.useState("");
+  const [description,  setDescription]  = React.useState("");
+  const [assignee,     setAssignee]     = React.useState("");
+  const [status,       setStatus]       = React.useState<TaskStatus>(defaultStatus);
+  const [type,         setType]         = React.useState("Task");
+  const [estimatedSp,  setEstimatedSp]  = React.useState(0);
+  const [saving,       setSaving]       = React.useState(false);
 
   async function handleSave() {
     if (!title.trim()) return;
     setSaving(true);
-    await onSave({ title: title.trim(), description: description.trim(), assignee, status });
+    await onSave({ title: title.trim(), description: description.trim(), assignee, status, type, estimated_sp: estimatedSp });
     setSaving(false);
   }
 
@@ -184,41 +504,34 @@ function CreateTaskModal({
 
           {/* Assignee + Status row */}
           <div className="grid grid-cols-2 gap-3">
+            {[
+              { label: "Assignee", value: assignee, onChange: setAssignee, options: [{ value: "", label: "Unassigned" }, ...team.map(m => ({ value: m.agent?.name ?? m.agentId, label: m.agent?.name ?? m.agentId }))] },
+              { label: "Column",   value: status,   onChange: (v: string) => setStatus(v as TaskStatus), options: TASK_COLUMNS.map(c => ({ value: c.id, label: c.label })) },
+            ].map(({ label, value, onChange, options }) => (
+              <div key={label} className="flex flex-col gap-1.5">
+                <label className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">{label}</label>
+                <select value={value} onChange={(e) => onChange(e.target.value)}
+                  className="w-full rounded-xl border-0 bg-zinc-50 px-3 py-2.5 text-sm text-zinc-900 ring-1 ring-zinc-200 focus:outline-none focus:ring-2 focus:ring-[rgb(var(--accent-500)/0.45)] dark:bg-zinc-900 dark:text-zinc-100 dark:ring-zinc-700">
+                  {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
+              </div>
+            ))}
+          </div>
+
+          {/* Type + SP row */}
+          <div className="grid grid-cols-2 gap-3">
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">Assignee</label>
-              <select
-                value={assignee}
-                onChange={(e) => setAssignee(e.target.value)}
-                className={cn(
-                  "w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 text-sm text-slate-900 ring-1 ring-line",
-                  "focus:outline-none focus:ring-2 focus:ring-[rgb(var(--accent-500)/0.45)]",
-                  "dark:bg-slate-900 dark:text-slate-100 dark:ring-slate-700"
-                )}
-              >
-                <option value="">Unassigned</option>
-                {team.map((m) => (
-                  <option key={m.agentId} value={m.agent?.name ?? m.agentId}>
-                    {m.agent?.name ?? m.agentId}
-                  </option>
-                ))}
+              <label className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">Type</label>
+              <select value={type} onChange={(e) => setType(e.target.value)}
+                className="w-full rounded-xl border-0 bg-zinc-50 px-3 py-2.5 text-sm text-zinc-900 ring-1 ring-zinc-200 focus:outline-none focus:ring-2 focus:ring-[rgb(var(--accent-500)/0.45)] dark:bg-zinc-900 dark:text-zinc-100 dark:ring-zinc-700">
+                {TASK_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
               </select>
             </div>
-
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">Column</label>
-              <select
-                value={status}
-                onChange={(e) => setStatus(e.target.value as TaskStatus)}
-                className={cn(
-                  "w-full rounded-xl border-0 bg-slate-50 px-3 py-2.5 text-sm text-slate-900 ring-1 ring-line",
-                  "focus:outline-none focus:ring-2 focus:ring-[rgb(var(--accent-500)/0.45)]",
-                  "dark:bg-slate-900 dark:text-slate-100 dark:ring-slate-700"
-                )}
-              >
-                {TASK_COLUMNS.map((c) => (
-                  <option key={c.id} value={c.id}>{c.label}</option>
-                ))}
-              </select>
+              <label className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">Story Points</label>
+              <Input type="number" min={0} max={100} value={estimatedSp}
+                onChange={(e) => setEstimatedSp(Number(e.target.value))}
+                placeholder="0" />
             </div>
           </div>
         </div>
@@ -353,12 +666,15 @@ function TaskCard({
 }
 
 // ─── Task Board Tab ─────────────────────────────────────────────────────────
+type BoardView = "table" | "kanban";
+
 function SprintBoardTab({ projectId }: { projectId: string }) {
   const [tasks,    setTasks]    = React.useState<Task[]>([]);
   const [team,     setTeam]     = React.useState<TeamMemberWithAgent[]>([]);
   const [acting,   setActing]   = React.useState<string | null>(null);
   const [dragOver, setDragOver] = React.useState<TaskStatus | null>(null);
   const [createIn, setCreateIn] = React.useState<TaskStatus | null>(null);
+  const [boardView, setBoardView] = React.useState<BoardView>("table");
 
   // Track IDs we've deleted so WS task:created can't re-add them
   const recentlyDeleted = React.useRef(new Set<string>());
@@ -438,7 +754,7 @@ function SprintBoardTab({ projectId }: { projectId: string }) {
     setActing(null);
   }
 
-  async function handleCreate(payload: { title: string; description: string; assignee: string; status: TaskStatus }) {
+  async function handleCreate(payload: { title: string; description: string; assignee: string; status: TaskStatus; type: string; estimated_sp: number }) {
     const created = await createTask(projectId, { ...payload, proposer: "Mithran ⚡" });
     if (created) setTasks((prev) => [...prev, created]);
     setCreateIn(null);
@@ -468,7 +784,52 @@ function SprintBoardTab({ projectId }: { projectId: string }) {
 
   return (
     <>
-      <div className="overflow-x-auto pb-2">
+      {/* ── View toggle (Main table / Kanban) ── */}
+      <div className="mb-4 flex items-center gap-1 border-b border-zinc-200 dark:border-[#2D2A45]">
+        {([["table", "Main table", LayoutList], ["kanban", "Kanban", Kanban]] as const).map(([id, label, Icon]) => (
+          <button
+            key={id}
+            onClick={() => setBoardView(id)}
+            className={cn(
+              "flex items-center gap-2 border-b-2 px-4 py-2.5 text-sm font-semibold transition-colors -mb-px",
+              boardView === id
+                ? "border-brand-600 text-zinc-900 dark:text-white"
+                : "border-transparent text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
+            )}
+          >
+            <Icon className="h-4 w-4" />
+            {label}
+          </button>
+        ))}
+        <button className="ml-1 px-2 py-2.5 text-zinc-400 hover:text-zinc-600 -mb-px border-b-2 border-transparent">
+          <Plus className="h-4 w-4" />
+        </button>
+        <div className="ml-auto flex items-center gap-2 pb-2">
+          <button className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-zinc-600 hover:bg-zinc-100 dark:hover:bg-white/10 transition-colors">
+            <Search className="h-3.5 w-3.5" /> Search
+          </button>
+          <button className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-zinc-600 hover:bg-zinc-100 dark:hover:bg-white/10 transition-colors">
+            <MoreHorizontal className="h-3.5 w-3.5" /> Filter
+          </button>
+          <Button variant="primary" size="sm" onClick={() => setCreateIn("proposed")}>
+            <Plus className="mr-1.5 h-3.5 w-3.5" /> New task
+          </Button>
+        </div>
+      </div>
+
+      {/* ── Main Table view ── */}
+      {boardView === "table" && (
+        <MainTableView
+          tasks={tasks.filter((t) => !recentlyDeleted.current.has(t.id))}
+          acting={acting}
+          onMove={(id, s) => moveTask(id, s)}
+          onDelete={(id) => removeTask(id)}
+          onAddTask={(status) => setCreateIn(status)}
+        />
+      )}
+
+      {/* ── Kanban view ── */}
+      {boardView === "kanban" && <div className="overflow-x-auto pb-2">
         <div className="flex gap-3" style={{ minWidth: `${TASK_COLUMNS.length * 256}px` }}>
           {TASK_COLUMNS.map((col) => {
             const colTasks = tasks.filter((t) => t.status === col.id && !recentlyDeleted.current.has(t.id));
@@ -529,7 +890,7 @@ function SprintBoardTab({ projectId }: { projectId: string }) {
             );
           })}
         </div>
-      </div>
+      </div>}
 
       {/* Create task modal */}
       {createIn && (
