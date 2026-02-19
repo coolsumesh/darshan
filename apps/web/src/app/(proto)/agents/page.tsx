@@ -9,7 +9,7 @@ import {
 import { cn } from "@/lib/cn";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { fetchAgents, fetchOrgs, createOrg, createOrgAgent, pingAgent, type Org } from "@/lib/api";
+import { fetchAgents, fetchOrgs, createOrg, createOrgAgent, pingAgent, fetchAgentProjects, type Org, type AgentProject } from "@/lib/api";
 import type { Agent } from "@/lib/agents";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -18,6 +18,7 @@ type ExtAgent = Agent & {
   agent_type?: string; model?: string; provider?: string;
   capabilities?: string[]; ping_status?: string;
   last_ping_at?: string; last_seen_at?: string; callback_token?: string;
+  last_ping_ms?: number;
 };
 type AgentView   = "grid" | "list";
 type StatusFilter = "all" | "online" | "offline" | "coordinator" | "human";
@@ -41,11 +42,16 @@ const STATUS_META: Record<string, { dot: string; label: string; text: string }> 
 };
 
 const PING_META: Record<string, { dot: string; label: string; cls: string }> = {
-  ok:      { dot: "bg-emerald-400",             label: "Reachable", cls: "text-emerald-600" },
+  ok:      { dot: "bg-emerald-400",             label: "OK",        cls: "text-emerald-600" },
   pending: { dot: "bg-amber-400 animate-pulse",  label: "Pinging…", cls: "text-amber-600"  },
   timeout: { dot: "bg-red-400",                  label: "Timeout",  cls: "text-red-600"    },
   unknown: { dot: "bg-zinc-400",                 label: "Unknown",  cls: "text-zinc-500"   },
 };
+
+function pingLabel(status: string, ms?: number): string {
+  if (status === "ok") return ms != null ? `OK · ${ms}ms` : "OK";
+  return PING_META[status]?.label ?? "Unknown";
+}
 
 const AGENT_TYPES   = ["ai_agent", "ai_coordinator", "human", "system"];
 const PROVIDERS     = ["anthropic", "openai", "google", "mistral", "other"];
@@ -59,8 +65,14 @@ function AgentDetailPanel({ agent, onClose, onPing, pinging }: {
   onPing: (id: string) => void; pinging: boolean;
 }) {
   const sm  = STATUS_META[agent.status] ?? STATUS_META.offline;
-  const pm  = PING_META[pinging ? "pending" : (agent.ping_status ?? "unknown")] ?? PING_META.unknown;
+  const pingStatusKey = pinging ? "pending" : (agent.ping_status ?? "unknown");
+  const pm  = PING_META[pingStatusKey] ?? PING_META.unknown;
   const isCoord = agent.agent_type === "ai_coordinator";
+  const [projects, setProjects] = React.useState<AgentProject[]>([]);
+
+  React.useEffect(() => {
+    fetchAgentProjects(agent.id).then(setProjects);
+  }, [agent.id]);
 
   return (
     <div className="flex h-full w-[400px] shrink-0 flex-col border-l border-zinc-200 bg-white dark:border-[#2D2A45] dark:bg-[#16132A] animate-slide-in-right">
@@ -139,9 +151,11 @@ function AgentDetailPanel({ agent, onClose, onPing, pinging }: {
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2 text-sm">
               <span className={cn("h-2 w-2 rounded-full", pm.dot)} />
-              <span className={cn("font-semibold", pm.cls)}>{pm.label}</span>
+              <span className={cn("font-semibold", pm.cls)}>
+                {pingLabel(pingStatusKey, agent.last_ping_ms)}
+              </span>
               {agent.last_ping_at && (
-                <span className="text-zinc-400">· last ping {relativeTime(agent.last_ping_at)}</span>
+                <span className="text-zinc-400">· {relativeTime(agent.last_ping_at)}</span>
               )}
             </div>
             <button
@@ -168,6 +182,37 @@ function AgentDetailPanel({ agent, onClose, onPing, pinging }: {
               {(agent as unknown as { endpoint_type?: string }).endpoint_type ?? "openclaw_poll"}
             </span>
           </div>
+        </div>
+
+        {/* Assigned Projects */}
+        <div>
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-400">
+            Assigned Projects {projects.length > 0 && <span className="normal-case font-normal text-zinc-300">({projects.length})</span>}
+          </p>
+          {projects.length > 0 ? (
+            <div className="flex flex-col gap-1.5">
+              {projects.map(p => (
+                <div key={p.id} className="flex items-center gap-3 rounded-xl bg-zinc-50 px-3 py-2 dark:bg-white/5">
+                  <div className="h-6 w-6 rounded-md shrink-0 flex items-center justify-center text-xs font-bold text-white"
+                    style={{ backgroundColor: p.color ?? "#6d28d9" }}>
+                    {p.name[0]?.toUpperCase()}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-semibold text-zinc-800 dark:text-zinc-200 truncate">{p.name}</div>
+                    {p.role && <div className="text-[11px] text-zinc-400">{p.role}</div>}
+                  </div>
+                  <span className={cn(
+                    "rounded-full px-2 py-0.5 text-[10px] font-semibold capitalize",
+                    p.status === "active" ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400" :
+                    p.status === "planned" ? "bg-amber-100 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400" :
+                    "bg-zinc-100 text-zinc-500"
+                  )}>{p.status}</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-zinc-400">Not assigned to any projects</p>
+          )}
         </div>
 
         {/* Activity feed (placeholder) */}
@@ -259,7 +304,7 @@ function AgentCard({ agent, onPing, onInspect, pinging }: {
         </span>
         <span className={cn("flex items-center gap-1", pm.cls)}>
           <span className={cn("h-1.5 w-1.5 rounded-full", pm.dot)} />
-          {pm.label}
+          {pingLabel(pingStatus, agent.last_ping_ms)}
         </span>
       </div>
 

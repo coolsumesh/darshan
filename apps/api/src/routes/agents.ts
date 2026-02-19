@@ -128,23 +128,29 @@ export async function registerAgents(server: FastifyInstance, db: pg.Pool) {
     );
     if (!agents.length) return reply.status(401).send({ ok: false, error: "invalid token" });
 
-    // Mark inbox item as acked
-    await db.query(
+    // Get inbox item created_at to compute latency
+    const { rows: inboxRows } = await db.query(
       `update agent_inbox set status = 'ack', acked_at = now(),
               payload = payload || $1::jsonb
-       where id = $2 and agent_id = $3`,
+       where id = $2 and agent_id = $3 returning created_at`,
       [JSON.stringify({ response: response ?? "ok" }), inbox_id, agents[0].id]
     );
 
-    // Update agent status
+    // Compute round-trip latency in ms (time between ping write and ack)
+    const pingMs = inboxRows[0]?.created_at
+      ? Math.round(Date.now() - new Date(inboxRows[0].created_at).getTime())
+      : null;
+
+    // Update agent status with latency
     await db.query(
-      `update agents set ping_status = 'ok', last_ping_at = now(), last_seen_at = now(), status = 'online'
+      `update agents set ping_status = 'ok', last_ping_at = now(), last_seen_at = now(),
+              status = 'online', last_ping_ms = $2
        where id = $1`,
-      [agents[0].id]
+      [agents[0].id, pingMs]
     );
 
-    broadcast("agent:ping_ack", { agentId: agents[0].id, response });
-    return { ok: true };
+    broadcast("agent:ping_ack", { agentId: agents[0].id, response, pingMs });
+    return { ok: true, ping_ms: pingMs };
   });
 
   // ── Agent polls its inbox ───────────────────────────────────────────────────
@@ -169,5 +175,24 @@ export async function registerAgents(server: FastifyInstance, db: pg.Pool) {
       [agents[0].id, status]
     );
     return { ok: true, items: rows };
+  });
+
+  // ── Projects assigned to an agent ──────────────────────────────────────────
+  server.get<{ Params: { id: string } }>("/api/v1/agents/:id/projects", async (req, reply) => {
+    const { rows: agents } = await db.query(
+      `select id from agents where id::text = $1`, [req.params.id]
+    );
+    if (!agents.length) return reply.status(404).send({ ok: false, error: "agent not found" });
+
+    const { rows } = await db.query(
+      `select p.id, p.name, p.slug, p.status, p.color,
+              pt.role, pt.assigned_at
+       from project_team pt
+       join projects p on p.id = pt.project_id
+       where pt.agent_id = $1
+       order by pt.assigned_at desc nulls last`,
+      [agents[0].id]
+    );
+    return { ok: true, projects: rows };
   });
 }

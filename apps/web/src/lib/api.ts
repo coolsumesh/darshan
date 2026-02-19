@@ -134,6 +134,7 @@ export async function fetchAgents(): Promise<Agent[]> {
       last_ping_at:    (a as unknown as { last_ping_at?: string }).last_ping_at,
       last_seen_at:    (a as unknown as { last_seen_at?: string }).last_seen_at,
       callback_token:  (a as unknown as { callback_token?: string }).callback_token,
+      last_ping_ms:    (a as unknown as { last_ping_ms?: number }).last_ping_ms,
     }));
   }
   return AGENTS;
@@ -174,4 +175,14 @@ export async function createOrgAgent(orgId: string, payload: {
     body: JSON.stringify(payload),
   });
   return data?.ok ?? false;
+}
+
+export type AgentProject = {
+  id: string; name: string; slug: string; status: string; color?: string;
+  role?: string; assigned_at?: string;
+};
+
+export async function fetchAgentProjects(agentId: string): Promise<AgentProject[]> {
+  const data = await apiFetch<{ ok: boolean; projects: AgentProject[] }>(`/api/v1/agents/${agentId}/projects`);
+  return data?.ok ? data.projects : [];
 }
