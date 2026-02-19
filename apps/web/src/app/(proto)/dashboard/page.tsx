@@ -5,11 +5,12 @@ import Link from "next/link";
 import {
   ArrowRight,
   CheckCircle2,
-  Circle,
+  ChevronDown,
   Clock,
-  FolderKanban,
-  Layers,
+  LayoutGrid,
+  List,
   Plus,
+  TrendingUp,
   Users,
   Zap,
 } from "lucide-react";
@@ -19,7 +20,7 @@ import { fetchProjects } from "@/lib/api";
 import { type Project, type ProjectStatus } from "@/lib/projects";
 import { cn } from "@/lib/cn";
 
-/* ─── helpers ──────────────────────────────────────────── */
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function statusTone(s: ProjectStatus): "brand" | "warning" | "neutral" {
   if (s === "active") return "brand";
@@ -27,7 +28,7 @@ function statusTone(s: ProjectStatus): "brand" | "warning" | "neutral" {
   return "neutral";
 }
 
-function statusLabel(s: ProjectStatus): string {
+function statusLabel(s: ProjectStatus) {
   if (s === "active") return "Active";
   if (s === "review") return "Review";
   return "Planned";
@@ -46,148 +47,177 @@ function relativeTime(iso: string | null | undefined): string {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
-function greeting(): string {
-  const h = new Date().getUTCHours();
-  if (h < 12) return "Good morning";
-  if (h < 17) return "Good afternoon";
-  return "Good evening";
+// ─── Cycling hero text ────────────────────────────────────────────────────────
+
+const PHRASES = ["Manage launches", "Track sprints", "Ship faster", "Coordinate agents"];
+
+function CyclingText() {
+  const [idx,     setIdx]     = React.useState(0);
+  const [visible, setVisible] = React.useState(true);
+
+  React.useEffect(() => {
+    const timer = setInterval(() => {
+      setVisible(false);
+      setTimeout(() => {
+        setIdx((i) => (i + 1) % PHRASES.length);
+        setVisible(true);
+      }, 350);
+    }, 3000);
+    return () => clearInterval(timer);
+  }, []);
+
+  return (
+    <span
+      className="font-display font-extrabold text-zinc-900 dark:text-white"
+      style={{ transition: "opacity 350ms ease-in-out", opacity: visible ? 1 : 0 }}
+    >
+      {PHRASES[idx]}
+    </span>
+  );
 }
 
-function todayLabel(): string {
-  return new Date().toLocaleDateString("en-US", {
-    weekday: "long",
-    month: "long",
-    day: "numeric",
-    timeZone: "UTC",
-  });
-}
+// ─── Stat card ────────────────────────────────────────────────────────────────
 
-/* ─── mock activity feed ────────────────────────────────── */
-
-const ACTIVITY = [
-  {
-    id: 1,
-    actor: "Komal 🌸",
-    action: "approved",
-    target: "Add markdown rendering",
-    project: "Darshan",
-    time: "8m ago",
-    done: true,
-  },
-  {
-    id: 2,
-    actor: "Mithran ⚡",
-    action: "updated architecture doc",
-    target: "",
-    project: "Alpha Analytics",
-    time: "31m ago",
-    done: false,
-  },
-  {
-    id: 3,
-    actor: "Komal 🌸",
-    action: "moved to In Progress",
-    target: "Assignee picker",
-    project: "Darshan",
-    time: "1h ago",
-    done: false,
-  },
-  {
-    id: 4,
-    actor: "Mithran ⚡",
-    action: "created project",
-    target: "Beta Platform",
-    project: "Beta",
-    time: "2h ago",
-    done: false,
-  },
-  {
-    id: 5,
-    actor: "Komal 🌸",
-    action: "completed",
-    target: "Approve/Reject sprint actions",
-    project: "Darshan",
-    time: "3h ago",
-    done: true,
-  },
-];
-
-/* ─── sub-components ────────────────────────────────────── */
-
-function StatPill({
+function StatCard({
   icon: Icon,
+  iconBg,
   label,
   value,
+  sub,
 }: {
   icon: React.ElementType;
+  iconBg: string;
   label: string;
   value: string | number;
+  sub?: string;
 }) {
   return (
-    <div className="flex items-center gap-2.5 rounded-xl bg-white px-4 py-3 ring-1 ring-line shadow-softSm dark:bg-slate-950 dark:ring-slate-800">
-      <Icon className="h-4 w-4 shrink-0 text-brand-600 dark:text-brand-400" />
-      <span className="text-sm font-bold text-slate-900 dark:text-slate-100">{value}</span>
-      <span className="text-xs text-slate-500 dark:text-slate-400">{label}</span>
+    <div className={cn(
+      "flex min-h-[96px] flex-1 items-center gap-4 rounded-2xl bg-white p-5",
+      "border border-zinc-200 shadow-softSm",
+      "dark:bg-[#16132A] dark:border-[#2D2A45]",
+      "animate-fade-up"
+    )}>
+      <div className={cn("grid h-10 w-10 shrink-0 place-items-center rounded-xl", iconBg)}>
+        <Icon className="h-5 w-5 text-white" />
+      </div>
+      <div className="min-w-0">
+        <p className="text-[11px] font-semibold uppercase tracking-wider text-zinc-400">{label}</p>
+        <p className="font-display text-[40px] font-extrabold leading-none text-zinc-900 dark:text-white">{value}</p>
+        {sub && <p className="mt-0.5 text-xs text-zinc-400">{sub}</p>}
+      </div>
     </div>
   );
 }
 
-function ProjectCard({ project }: { project: Project }) {
-  const accentClass =
-    project.status === "active"
-      ? "bg-brand-600"
-      : project.status === "review"
-        ? "bg-amber-400"
-        : "bg-slate-300 dark:bg-slate-700";
+// ─── Color bar (Monday-style section status strip) ────────────────────────────
 
+function ColorBar({ projects }: { projects: Project[] }) {
+  const total    = projects.length;
+  if (!total) return null;
+  const active   = projects.filter(p => p.status === "active").length;
+  const review   = projects.filter(p => p.status === "review").length;
+  const planned  = projects.filter(p => p.status === "planned").length;
+  return (
+    <div className="flex h-1 w-full overflow-hidden rounded-full">
+      <div className="bg-brand-500 transition-all" style={{ width: `${(active  / total) * 100}%` }} />
+      <div className="bg-amber-400 transition-all"  style={{ width: `${(review  / total) * 100}%` }} />
+      <div className="bg-zinc-300 transition-all"   style={{ width: `${(planned / total) * 100}%` }} />
+    </div>
+  );
+}
+
+// ─── Section group header ─────────────────────────────────────────────────────
+
+function SectionHeader({
+  label,
+  count,
+  accentClass,
+  collapsed,
+  onToggle,
+}: {
+  label: string;
+  count: number;
+  accentClass: string;
+  collapsed: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      onClick={onToggle}
+      className={cn(
+        "group flex w-full items-center gap-2.5 border-b border-zinc-200 py-2.5 text-left transition-colors",
+        "hover:bg-zinc-50 dark:border-[#2D2A45] dark:hover:bg-white/5"
+      )}
+    >
+      <div className={cn("h-4 w-1 shrink-0 rounded-full", accentClass)} />
+      <ChevronDown
+        className={cn("h-4 w-4 shrink-0 text-zinc-400 transition-transform duration-200",
+          collapsed && "-rotate-90"
+        )}
+      />
+      <span className="font-display text-sm font-bold text-zinc-900 dark:text-white">{label}</span>
+      <span className="grid h-5 min-w-5 place-items-center rounded-full bg-zinc-100 px-1.5 text-[11px] font-semibold text-zinc-600 dark:bg-white/10 dark:text-zinc-300">
+        {count}
+      </span>
+      <span className="ml-auto flex items-center gap-1.5 text-xs text-zinc-400 opacity-0 transition-opacity group-hover:opacity-100">
+        <Plus className="h-3.5 w-3.5" /> Add project
+      </span>
+    </button>
+  );
+}
+
+// ─── Project card ─────────────────────────────────────────────────────────────
+
+function ProjectCard({ project, index }: { project: Project; index: number }) {
   return (
     <Link
       href={`/projects/${project.slug ?? project.id}`}
       className={cn(
-        "group flex flex-col rounded-2xl bg-white ring-1 ring-line shadow-softSm overflow-hidden",
-        "transition-all hover:shadow-soft hover:-translate-y-0.5",
-        "focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgb(var(--accent-500)/0.45)]",
-        "dark:bg-slate-950 dark:ring-slate-800 dark:hover:bg-slate-900/40"
+        "group relative flex flex-col overflow-hidden rounded-2xl bg-white",
+        "border border-zinc-200 shadow-softSm",
+        "transition-all duration-150 hover:-translate-y-0.5 hover:shadow-md-soft",
+        "focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/50",
+        "dark:bg-[#16132A] dark:border-[#2D2A45]",
+        "animate-fade-up"
       )}
+      style={{ animationDelay: `${index * 50}ms` }}
     >
-      {/* colour bar */}
-      <div className={cn("h-1 w-full", accentClass)} />
+      {/* Top colour strip */}
+      <div className={cn("h-[3px] w-full",
+        project.status === "active"  ? "bg-brand-500" :
+        project.status === "review"  ? "bg-amber-400"  : "bg-zinc-200"
+      )} />
 
       <div className="flex flex-1 flex-col gap-4 p-5">
-        {/* title */}
+        {/* Title row */}
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-                {project.name}
-              </span>
+              <span className="font-display text-sm font-semibold text-zinc-900 dark:text-white">{project.name}</span>
               <Badge tone={statusTone(project.status)}>{statusLabel(project.status)}</Badge>
             </div>
-            <p className="mt-1.5 line-clamp-2 text-sm leading-snug text-slate-500 dark:text-slate-400">
-              {project.description}
-            </p>
+            <p className="mt-1.5 line-clamp-2 text-sm leading-snug text-zinc-500">{project.description}</p>
           </div>
-          <ArrowRight className="mt-0.5 h-4 w-4 shrink-0 text-slate-300 transition group-hover:translate-x-0.5 group-hover:text-slate-500 dark:text-slate-600 dark:group-hover:text-slate-400" />
+          <ArrowRight className="mt-0.5 h-4 w-4 shrink-0 text-zinc-300 transition group-hover:translate-x-0.5 group-hover:text-zinc-500" />
         </div>
 
-        {/* progress */}
+        {/* Progress */}
         <div>
-          <div className="mb-2 flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
+          <div className="mb-2 flex items-center justify-between text-xs text-zinc-500">
             <span>Progress</span>
-            <span className="font-bold text-slate-800 dark:text-slate-200">
-              {project.progress ?? 0}%
-            </span>
+            <span className="font-bold text-zinc-700 dark:text-zinc-200">{project.progress ?? 0}%</span>
           </div>
-          <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
+          <div className="h-1.5 w-full overflow-hidden rounded-full bg-zinc-100 dark:bg-white/10">
             <div
-              className="h-1.5 rounded-full bg-[rgb(var(--accent-600))] transition-all"
+              className="h-1.5 rounded-full bg-brand-500 transition-all"
               style={{ width: `${project.progress ?? 0}%` }}
             />
           </div>
         </div>
 
-        {/* footer */}
-        <div className="flex items-center justify-between border-t border-line pt-3 text-xs text-slate-500 dark:border-slate-800 dark:text-slate-400">
+        {/* Footer */}
+        <div className="flex items-center justify-between border-t border-zinc-100 pt-3 text-xs text-zinc-500 dark:border-white/5">
           <span className="flex items-center gap-1.5">
             <Users className="h-3.5 w-3.5" />
             {project.teamSize ?? 0} agents
@@ -202,154 +232,173 @@ function ProjectCard({ project }: { project: Project }) {
   );
 }
 
-function ActivityFeed() {
+// ─── Project table row ────────────────────────────────────────────────────────
+
+function ProjectRow({ project, index }: { project: Project; index: number }) {
   return (
-    <div className="flex flex-col gap-2">
-      {ACTIVITY.map((item) => (
-        <div
-          key={item.id}
-          className="flex items-start gap-3 rounded-xl px-3 py-2.5 transition hover:bg-slate-50 dark:hover:bg-slate-900/40"
-        >
-          <div className="mt-0.5 shrink-0">
-            {item.done ? (
-              <CheckCircle2 className="h-4 w-4 text-brand-600 dark:text-brand-400" />
-            ) : (
-              <Circle className="h-4 w-4 text-slate-300 dark:text-slate-600" />
-            )}
+    <Link
+      href={`/projects/${project.slug ?? project.id}`}
+      className={cn(
+        "group flex items-center gap-4 border-b border-zinc-100 px-4 py-3 text-sm transition-colors",
+        "hover:bg-zinc-50 dark:border-[#2D2A45] dark:hover:bg-white/5",
+        "animate-fade-up"
+      )}
+      style={{ animationDelay: `${index * 30}ms` }}
+    >
+      <div className={cn("h-2 w-2 shrink-0 rounded-full",
+        project.status === "active" ? "bg-brand-500" :
+        project.status === "review" ? "bg-amber-400" : "bg-zinc-300"
+      )} />
+      <span className="font-display min-w-0 flex-1 truncate font-semibold text-zinc-900 dark:text-white">{project.name}</span>
+      <Badge tone={statusTone(project.status)}>{statusLabel(project.status)}</Badge>
+      <div className="hidden w-32 sm:block">
+        <div className="flex items-center gap-2">
+          <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-zinc-100 dark:bg-white/10">
+            <div className="h-1.5 rounded-full bg-brand-500" style={{ width: `${project.progress ?? 0}%` }} />
           </div>
-          <div className="min-w-0 flex-1">
-            <p className="text-sm leading-snug text-slate-700 dark:text-slate-300">
-              <span className="font-semibold text-slate-900 dark:text-slate-100">
-                {item.actor}
-              </span>{" "}
-              {item.action}
-              {item.target && (
-                <>
-                  {" "}
-                  <span className="font-medium text-slate-800 dark:text-slate-200">
-                    &ldquo;{item.target}&rdquo;
-                  </span>
-                </>
-              )}
-            </p>
-            <div className="mt-0.5 flex items-center gap-2 text-xs text-slate-400">
-              <span>{item.project}</span>
-              <span>·</span>
-              <span>{item.time}</span>
+          <span className="text-xs font-semibold text-zinc-500">{project.progress ?? 0}%</span>
+        </div>
+      </div>
+      <span className="hidden text-xs text-zinc-400 sm:block">{relativeTime(project.lastActivity)}</span>
+      <ArrowRight className="h-4 w-4 shrink-0 text-zinc-300 transition group-hover:translate-x-0.5 group-hover:text-zinc-500" />
+    </Link>
+  );
+}
+
+// ─── Section group ────────────────────────────────────────────────────────────
+
+const STATUS_SECTIONS: {
+  key: "active" | "review" | "planned";
+  label: string;
+  accent: string;
+}[] = [
+  { key: "active",  label: "Active Projects",  accent: "bg-brand-500" },
+  { key: "review",  label: "Review",           accent: "bg-amber-400"  },
+  { key: "planned", label: "Planned",          accent: "bg-zinc-300"   },
+];
+
+type ViewMode = "board" | "table";
+
+function SectionGroup({
+  section,
+  projects,
+  view,
+}: {
+  section: typeof STATUS_SECTIONS[number];
+  projects: Project[];
+  view: ViewMode;
+}) {
+  const [collapsed, setCollapsed] = React.useState(false);
+
+  if (!projects.length) return null;
+
+  return (
+    <div>
+      <SectionHeader
+        label={section.label}
+        count={projects.length}
+        accentClass={section.accent}
+        collapsed={collapsed}
+        onToggle={() => setCollapsed((c) => !c)}
+      />
+
+      {!collapsed && (
+        <div className="py-4">
+          {view === "board" ? (
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+              {projects.map((p, i) => <ProjectCard key={p.id} project={p} index={i} />)}
             </div>
+          ) : (
+            <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white dark:border-[#2D2A45] dark:bg-[#16132A]">
+              {projects.map((p, i) => <ProjectRow key={p.id} project={p} index={i} />)}
+            </div>
+          )}
+
+          {/* Monday-style color strip */}
+          <div className="mt-3">
+            <ColorBar projects={projects} />
           </div>
         </div>
-      ))}
+      )}
     </div>
   );
 }
 
-/* ─── page ──────────────────────────────────────────────── */
+// ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function DashboardPage() {
   const [projects, setProjects] = React.useState<Project[]>([]);
+  const [view,     setView]     = React.useState<ViewMode>("board");
 
   React.useEffect(() => {
     fetchProjects().then(setProjects);
   }, []);
 
-  const activeCount = projects.filter((p) => p.status === "active").length;
-  const avgProgress =
-    projects.length > 0
-      ? Math.round(projects.reduce((s, p) => s + (p.progress ?? 0), 0) / projects.length)
-      : 0;
-  const totalAgents = projects.reduce((s, p) => s + (p.teamSize ?? 0), 0);
+  const activeProjects  = projects.filter((p) => p.status === "active");
+  const avgProgress     = projects.length
+    ? Math.round(projects.reduce((s, p) => s + (p.progress ?? 0), 0) / projects.length)
+    : 0;
+  const totalAgents     = projects.reduce((s, p) => s + (p.teamSize ?? 0), 0);
 
   return (
-    <div className="flex h-full flex-col gap-5">
+    <div className="flex flex-col gap-8">
 
-      {/* ── Hero banner ── */}
-      <div className="relative overflow-hidden rounded-2xl bg-brand-600 px-8 py-7 text-white shadow-soft">
-        <div className="pointer-events-none absolute inset-0 opacity-10 bg-grid" />
-        <div className="relative flex flex-col gap-1">
-          <p className="text-xs font-semibold uppercase tracking-widest text-brand-200">
-            {todayLabel()} · MithranLabs
-          </p>
-          <h1 className="text-2xl font-bold">
-            {greeting()}, Sumesh 👋
-          </h1>
-          <p className="mt-1 text-sm text-brand-100">
-            {activeCount} active project{activeCount !== 1 ? "s" : ""} · {avgProgress}% average
-            progress across the team.
-          </p>
-        </div>
+      {/* ── Hero ── */}
+      <div className="animate-fade-up">
+        <p className="text-xs font-semibold uppercase tracking-widest text-zinc-400">
+          MithranLabs Ops Console
+        </p>
+        <h1 className="mt-1 text-[40px] leading-tight">
+          <CyclingText />
+        </h1>
+        <p className="mt-1 text-sm text-zinc-500">
+          {activeProjects.length} active project{activeProjects.length !== 1 ? "s" : ""} · {projects.length} total workspaces
+        </p>
+      </div>
 
-        <div className="relative mt-5 flex flex-wrap gap-2">
-          <StatPill icon={Layers} label="projects" value={projects.length} />
-          <StatPill icon={Zap} label="avg progress" value={`${avgProgress}%`} />
-          <StatPill icon={Users} label="agents deployed" value={totalAgents || "—"} />
+      {/* ── Stats row ── */}
+      <div className="flex flex-wrap gap-4 delay-100">
+        <StatCard icon={TrendingUp}   iconBg="bg-brand-600"   label="Total Projects"   value={projects.length}   sub="active workspaces"      />
+        <StatCard icon={Users}        iconBg="bg-sky-500"     label="Active Agents"    value={totalAgents || "—"} sub="assigned"              />
+        <StatCard icon={Zap}          iconBg="bg-amber-500"   label="Avg Progress"     value={`${avgProgress}%`} sub="across all"            />
+        <StatCard icon={CheckCircle2} iconBg="bg-emerald-500" label="Completed Today"  value={0}                 sub="tasks in last 24h"     />
+      </div>
+
+      {/* ── View tabs ── */}
+      <div className="flex items-center gap-1 border-b border-zinc-200 dark:border-[#2D2A45] animate-fade-up delay-200">
+        {([["board", "Board", LayoutGrid], ["table", "Table", List]] as const).map(([id, label, Icon]) => (
+          <button
+            key={id}
+            onClick={() => setView(id as ViewMode)}
+            className={cn(
+              "flex items-center gap-2 border-b-2 px-4 py-2.5 text-sm font-semibold transition-colors",
+              view === id
+                ? "border-brand-600 text-zinc-900 dark:text-white"
+                : "border-transparent text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
+            )}
+          >
+            <Icon className="h-4 w-4" />
+            {label}
+          </button>
+        ))}
+        <div className="ml-auto pb-2">
+          <Button variant="primary" size="sm">
+            <Plus className="mr-1.5 h-3.5 w-3.5" />
+            New Project
+          </Button>
         </div>
       </div>
 
-      {/* ── Two-column body ── */}
-      <div className="flex min-h-0 flex-1 gap-5">
-
-        {/* Left — project grid */}
-        <div className="flex min-w-0 flex-1 flex-col gap-4">
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-300">
-              Projects
-            </h2>
-            <Button variant="primary" size="sm">
-              <Plus className="mr-1.5 h-3.5 w-3.5" />
-              New Project
-            </Button>
-          </div>
-
-          <div className="grid flex-1 grid-cols-1 gap-4 md:grid-cols-2 auto-rows-fr">
-            {projects.map((p) => (
-              <ProjectCard key={p.id} project={p} />
-            ))}
-          </div>
-        </div>
-
-        {/* Right — activity + quick actions */}
-        <div className="flex w-[300px] shrink-0 flex-col gap-4">
-
-          {/* Quick actions */}
-          <div className="rounded-2xl bg-white p-5 ring-1 ring-line shadow-softSm dark:bg-slate-950 dark:ring-slate-800">
-            <h2 className="mb-3 text-sm font-semibold text-slate-700 dark:text-slate-300">
-              Quick actions
-            </h2>
-            <div className="flex flex-col gap-1">
-              {[
-                { icon: Plus, label: "New task", href: "#" },
-                { icon: FolderKanban, label: "Open sprint board", href: "/projects/darshan" },
-                { icon: Users, label: "Manage team", href: "/projects/darshan" },
-              ].map(({ icon: Icon, label, href }) => (
-                <Link
-                  key={label}
-                  href={href}
-                  className={cn(
-                    "flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-slate-700 transition",
-                    "hover:bg-slate-50 hover:text-slate-900",
-                    "dark:text-slate-300 dark:hover:bg-slate-900/40 dark:hover:text-slate-100"
-                  )}
-                >
-                  <Icon className="h-4 w-4 text-brand-600 dark:text-brand-400" />
-                  {label}
-                  <ArrowRight className="ml-auto h-3.5 w-3.5 text-slate-300 dark:text-slate-600" />
-                </Link>
-              ))}
-            </div>
-          </div>
-
-          {/* Activity feed */}
-          <div className="flex min-h-0 flex-1 flex-col rounded-2xl bg-white p-5 ring-1 ring-line shadow-softSm dark:bg-slate-950 dark:ring-slate-800">
-            <h2 className="mb-3 text-sm font-semibold text-slate-700 dark:text-slate-300">
-              Recent activity
-            </h2>
-            <div className="min-h-0 flex-1 overflow-y-auto">
-              <ActivityFeed />
-            </div>
-          </div>
-
-        </div>
+      {/* ── Section groups ── */}
+      <div className="flex flex-col gap-2 animate-fade-up delay-300">
+        {STATUS_SECTIONS.map((section) => (
+          <SectionGroup
+            key={section.key}
+            section={section}
+            projects={projects.filter((p) => p.status === section.key)}
+            view={view}
+          />
+        ))}
       </div>
     </div>
   );

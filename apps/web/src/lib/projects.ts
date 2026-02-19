@@ -1,5 +1,5 @@
 export type ProjectStatus = "active" | "review" | "planned";
-export type TaskStatus = "proposed" | "approved" | "in-progress" | "done";
+export type TaskStatus = "proposed" | "approved" | "in-progress" | "review" | "done";
 
 export type Project = {
   id: string;

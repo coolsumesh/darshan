@@ -51,11 +51,12 @@ function statusTone(status: string): "brand" | "warning" | "success" | "neutral"
   return "neutral";
 }
 
-const TASK_COLUMNS: { id: TaskStatus; label: string; color: string }[] = [
-  { id: "proposed",    label: "Proposed",    color: "border-t-slate-400"   },
-  { id: "approved",    label: "Approved",    color: "border-t-amber-400"   },
-  { id: "in-progress", label: "In Progress", color: "border-t-brand-500"   },
-  { id: "done",        label: "Done",        color: "border-t-emerald-500" },
+const TASK_COLUMNS: { id: TaskStatus; label: string; color: string; dot: string }[] = [
+  { id: "proposed",    label: "Backlog",     color: "border-t-zinc-400",    dot: "bg-zinc-400"    },
+  { id: "approved",    label: "To Do",       color: "border-t-amber-400",   dot: "bg-amber-400"   },
+  { id: "in-progress", label: "In Progress", color: "border-t-brand-500",   dot: "bg-brand-500"   },
+  { id: "review",      label: "Review",      color: "border-t-sky-400",     dot: "bg-sky-400"     },
+  { id: "done",        label: "Done",        color: "border-t-emerald-500", dot: "bg-emerald-500" },
 ];
 
 
@@ -250,46 +251,53 @@ function TaskCard({
 }) {
   const nextActions: { label: string; status: TaskStatus; style: string }[] = [];
 
+  // Monday.com-style transitions
   if (task.status === "proposed") {
     nextActions.push(
-      { label: "✓ Approve",   status: "approved",    style: "bg-emerald-50 text-emerald-700 ring-emerald-200 hover:bg-emerald-100 dark:bg-emerald-500/10 dark:text-emerald-400 dark:ring-emerald-500/30" },
-      { label: "✦ Mark Done", status: "done",        style: "bg-blue-50 text-blue-700 ring-blue-200 hover:bg-blue-100 dark:bg-blue-500/10 dark:text-blue-400 dark:ring-blue-500/30" },
+      { label: "→ To Do",      status: "approved",    style: "bg-amber-50 text-amber-700 ring-amber-200 hover:bg-amber-100 dark:bg-amber-500/10 dark:text-amber-400 dark:ring-amber-500/30" },
+      { label: "✓ Done",       status: "done",        style: "bg-emerald-50 text-emerald-700 ring-emerald-200 hover:bg-emerald-100 dark:bg-emerald-500/10 dark:text-emerald-400 dark:ring-emerald-500/30" },
     );
   } else if (task.status === "approved") {
     nextActions.push(
-      { label: "▶ Start",     status: "in-progress", style: "bg-brand-50 text-brand-700 ring-brand-200 hover:bg-brand-100 dark:bg-brand-500/10 dark:text-brand-400 dark:ring-brand-500/30" },
-      { label: "✦ Mark Done", status: "done",        style: "bg-blue-50 text-blue-700 ring-blue-200 hover:bg-blue-100 dark:bg-blue-500/10 dark:text-blue-400 dark:ring-blue-500/30" },
+      { label: "▶ Start",      status: "in-progress", style: "bg-brand-50 text-brand-700 ring-brand-200 hover:bg-brand-100 dark:bg-brand-500/10 dark:text-brand-400 dark:ring-brand-500/30" },
+      { label: "✓ Done",       status: "done",        style: "bg-emerald-50 text-emerald-700 ring-emerald-200 hover:bg-emerald-100 dark:bg-emerald-500/10 dark:text-emerald-400 dark:ring-emerald-500/30" },
     );
   } else if (task.status === "in-progress") {
     nextActions.push(
-      { label: "✓ Complete",  status: "done",        style: "bg-emerald-50 text-emerald-700 ring-emerald-200 hover:bg-emerald-100 dark:bg-emerald-500/10 dark:text-emerald-400 dark:ring-emerald-500/30" },
+      { label: "⬆ Review",     status: "review",      style: "bg-sky-50 text-sky-700 ring-sky-200 hover:bg-sky-100 dark:bg-sky-500/10 dark:text-sky-400 dark:ring-sky-500/30" },
+      { label: "✓ Done",       status: "done",        style: "bg-emerald-50 text-emerald-700 ring-emerald-200 hover:bg-emerald-100 dark:bg-emerald-500/10 dark:text-emerald-400 dark:ring-emerald-500/30" },
+    );
+  } else if (task.status === "review") {
+    nextActions.push(
+      { label: "✓ Approve",    status: "done",        style: "bg-emerald-50 text-emerald-700 ring-emerald-200 hover:bg-emerald-100 dark:bg-emerald-500/10 dark:text-emerald-400 dark:ring-emerald-500/30" },
+      { label: "↩ Rework",     status: "in-progress", style: "bg-brand-50 text-brand-700 ring-brand-200 hover:bg-brand-100 dark:bg-brand-500/10 dark:text-brand-400 dark:ring-brand-500/30" },
     );
   } else if (task.status === "done") {
     nextActions.push(
-      { label: "↩ Reopen",   status: "proposed",    style: "bg-slate-50 text-slate-600 ring-slate-200 hover:bg-slate-100 dark:bg-slate-800 dark:text-slate-300 dark:ring-slate-700" },
+      { label: "↩ Reopen",     status: "proposed",    style: "bg-zinc-50 text-zinc-600 ring-zinc-200 hover:bg-zinc-100 dark:bg-zinc-800 dark:text-zinc-300 dark:ring-zinc-700" },
     );
   }
 
-  const canDelete = true; // delete available on all columns
+  const canDelete = true;
 
   return (
     <div
       draggable
       onDragStart={onDragStart}
       className={cn(
-        "group rounded-xl bg-white p-3 ring-1 ring-line shadow-softSm",
-        "dark:bg-slate-950 dark:ring-slate-800",
+        "group rounded-xl bg-white p-3 ring-1 ring-zinc-200 shadow-softSm",
+        "dark:bg-[#16132A] dark:ring-[#2D2A45]",
         "cursor-grab active:cursor-grabbing active:shadow-soft active:scale-[0.98] transition-all",
         acting && "opacity-60 pointer-events-none"
       )}
     >
       {/* Drag handle + title */}
       <div className="flex items-start gap-2">
-        <GripVertical className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-300 dark:text-slate-700 group-hover:text-slate-400" />
+        <GripVertical className="mt-0.5 h-3.5 w-3.5 shrink-0 text-zinc-300 dark:text-zinc-700 group-hover:text-zinc-400" />
         <div className="min-w-0 flex-1">
-          <div className="text-sm font-medium text-slate-900 dark:text-slate-100">{task.title}</div>
+          <div className="font-display text-sm font-semibold text-zinc-900 dark:text-white">{task.title}</div>
           {task.description && (
-            <p className="mt-1 line-clamp-2 text-xs leading-snug text-slate-500 dark:text-slate-400">
+            <p className="mt-1 line-clamp-2 text-xs leading-snug text-zinc-500 dark:text-zinc-400">
               {task.description}
             </p>
           )}
@@ -297,12 +305,12 @@ function TaskCard({
       </div>
 
       {/* Meta row */}
-      <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500 dark:text-slate-400">
+      <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px] text-zinc-500 dark:text-zinc-400">
         {task.proposer && <span>by {task.proposer}</span>}
         {task.assignee && (
           <>
             <span>·</span>
-            <span className="rounded-full bg-brand-50 px-2 py-0.5 font-semibold text-brand-700 dark:bg-brand-500/10 dark:text-brand-300">
+            <span className="rounded-full bg-brand-100 px-2 py-0.5 font-semibold text-brand-700 dark:bg-brand-500/10 dark:text-brand-300">
               {task.assignee}
             </span>
           </>
@@ -461,7 +469,7 @@ function SprintBoardTab({ projectId }: { projectId: string }) {
   return (
     <>
       <div className="overflow-x-auto pb-2">
-        <div className="flex gap-4" style={{ minWidth: `${TASK_COLUMNS.length * 260}px` }}>
+        <div className="flex gap-3" style={{ minWidth: `${TASK_COLUMNS.length * 256}px` }}>
           {TASK_COLUMNS.map((col) => {
             const colTasks = tasks.filter((t) => t.status === col.id && !recentlyDeleted.current.has(t.id));
             const isOver   = dragOver === col.id;
@@ -470,19 +478,23 @@ function SprintBoardTab({ projectId }: { projectId: string }) {
               <div
                 key={col.id}
                 className={cn(
-                  "flex flex-1 flex-col gap-3 rounded-2xl p-4 ring-1 transition-colors",
-                  "bg-slate-50 ring-slate-200 dark:bg-slate-900/40 dark:ring-slate-800",
-                  isOver && "bg-brand-50 ring-brand-300 dark:bg-brand-500/10 dark:ring-brand-500/30"
+                  "flex flex-1 flex-col gap-3 rounded-2xl p-4 transition-colors",
+                  "bg-zinc-50 ring-1 ring-zinc-200",
+                  "dark:bg-[#0F0D1E] dark:ring-[#2D2A45]",
+                  isOver && "bg-brand-50 ring-brand-300 dark:bg-brand-950/40 dark:ring-brand-500/30"
                 )}
-                style={{ minWidth: 240 }}
+                style={{ minWidth: 232 }}
                 onDragOver={(e) => onDragOver(e, col.id)}
                 onDragLeave={() => setDragOver(null)}
                 onDrop={(e) => onDrop(e, col.id)}
               >
-                {/* Column header */}
-                <div className={cn("flex items-center justify-between border-t-2 pt-2", col.color)}>
-                  <span className="text-xs font-semibold text-slate-700 dark:text-slate-200">{col.label}</span>
-                  <span className="grid h-5 min-w-5 place-items-center rounded-full bg-slate-200 px-1.5 text-[11px] font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                {/* Column header — Monday-style top border strip + dot */}
+                <div className={cn("flex items-center gap-2 border-t-[3px] pt-3", col.color)}>
+                  <div className={cn("h-2 w-2 shrink-0 rounded-full", col.dot)} />
+                  <span className="font-display flex-1 text-xs font-bold text-zinc-700 dark:text-zinc-200 uppercase tracking-wide">
+                    {col.label}
+                  </span>
+                  <span className="grid h-5 min-w-5 place-items-center rounded-full bg-zinc-200 px-1.5 text-[11px] font-semibold text-zinc-600 dark:bg-white/10 dark:text-zinc-300">
                     {colTasks.length}
                   </span>
                 </div>
@@ -505,9 +517,9 @@ function SprintBoardTab({ projectId }: { projectId: string }) {
                 <button
                   onClick={() => setCreateIn(col.id)}
                   className={cn(
-                    "mt-auto flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-medium text-slate-500 transition",
-                    "hover:bg-white hover:text-slate-700 hover:ring-1 hover:ring-line",
-                    "dark:hover:bg-slate-950 dark:hover:text-slate-200 dark:hover:ring-slate-800",
+                    "mt-auto flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-medium text-zinc-500 transition",
+                    "hover:bg-white hover:text-zinc-700 hover:ring-1 hover:ring-zinc-200",
+                    "dark:hover:bg-white/5 dark:hover:text-zinc-200",
                     "focus:outline-none"
                   )}
                 >
