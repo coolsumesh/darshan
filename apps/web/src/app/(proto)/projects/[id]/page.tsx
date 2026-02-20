@@ -774,9 +774,11 @@ function CreateTaskModal({
   const [estimatedSp, setEstimatedSp] = React.useState(0);
   const [priority,    setPriority]    = React.useState<Priority>("medium");
   const [saving,      setSaving]      = React.useState(false);
+  const [titleError,  setTitleError]  = React.useState(false);
 
   async function handleSave() {
-    if (!title.trim()) return;
+    if (!title.trim()) { setTitleError(true); return; }
+    setTitleError(false);
     setSaving(true);
     await onSave({ title: title.trim(), description: description.trim(), assignee, status, type, estimated_sp: estimatedSp, priority });
     setSaving(false);
@@ -799,8 +801,10 @@ function CreateTaskModal({
           <div className="flex flex-col gap-1.5">
             <label className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">Title <span className="text-red-500">*</span></label>
             <Input autoFocus placeholder="What needs to be done?" value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) handleSave(); if (e.key === "Escape") onClose(); }} />
+              onChange={(e) => { setTitle(e.target.value); if (e.target.value.trim()) setTitleError(false); }}
+              onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) handleSave(); if (e.key === "Escape") onClose(); }}
+              className={titleError ? "ring-red-400 focus:ring-red-400" : ""} />
+            {titleError && <p className="text-xs text-red-500">Title is required</p>}
           </div>
 
           <div className="flex flex-col gap-1.5">
@@ -843,11 +847,15 @@ function CreateTaskModal({
           </div>
         </div>
 
-        <div className="flex shrink-0 justify-end gap-3 border-t border-zinc-200 px-5 py-4 dark:border-[#2D2A45]">
+        <div className="flex shrink-0 items-center justify-end gap-3 border-t border-zinc-200 px-5 py-4 dark:border-[#2D2A45]">
           <Button variant="secondary" size="sm" onClick={onClose}>Cancel</Button>
-          <Button variant="primary" size="sm" onClick={handleSave} disabled={!title.trim() || saving}>
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="inline-flex h-9 items-center justify-center gap-2 rounded-xl bg-brand-600 px-4 text-sm font-medium text-white transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
             {saving ? "Creating…" : "Create task"}
-          </Button>
+          </button>
         </div>
       </div>
     </div>
