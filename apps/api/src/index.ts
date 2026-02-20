@@ -2,6 +2,13 @@ import "dotenv/config";
 import Fastify from "fastify";
 import cors from "@fastify/cors";
 import websocket from "@fastify/websocket";
+import multipart from "@fastify/multipart";
+import fastifyStatic from "@fastify/static";
+import { fileURLToPath } from "url";
+import { dirname, join } from "path";
+import { mkdirSync } from "fs";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 import { APP_NAME, type HealthResponse } from "@darshan/shared";
 import { getDb } from "./db.js";
 import { runMigrations } from "./migrations.js";
@@ -21,8 +28,18 @@ const HOST = process.env.HOST ?? "0.0.0.0";
 
 const server = Fastify({ logger: true });
 
+// Ensure uploads directory exists
+const uploadsDir = join(__dirname, "..", "uploads", "logos");
+mkdirSync(uploadsDir, { recursive: true });
+
 await server.register(cors, { origin: true });
 await server.register(websocket);
+await server.register(multipart, { limits: { fileSize: 2 * 1024 * 1024 } }); // 2MB
+await server.register(fastifyStatic, {
+  root: join(__dirname, "..", "uploads"),
+  prefix: "/uploads/",
+  decorateReply: false,
+});
 
 server.get("/health", async (): Promise<HealthResponse> => {
   return { ok: true, service: `${APP_NAME}-api`, time: new Date().toISOString() };

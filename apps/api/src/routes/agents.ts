@@ -1,6 +1,11 @@
 import type { FastifyInstance } from "fastify";
 import type pg from "pg";
 import { broadcast } from "../broadcast.js";
+import { writeFileSync, unlinkSync, existsSync } from "fs";
+import { fileURLToPath } from "url";
+import { dirname, join, extname } from "path";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 export async function registerAgents(server: FastifyInstance, db: pg.Pool) {
 
@@ -265,6 +270,53 @@ export async function registerAgents(server: FastifyInstance, db: pg.Pool) {
       [agents[0].id, status]
     );
     return { ok: true, items: rows };
+  });
+
+  // ── Upload org logo ────────────────────────────────────────────────────────
+  server.post<{ Params: { id: string } }>("/api/v1/orgs/:id/logo", async (req, reply) => {
+    const { rows } = await db.query(
+      `select id, slug, avatar_url from organisations where id::text = $1 or slug = $1`, [req.params.id]
+    );
+    if (!rows.length) return reply.status(404).send({ ok: false, error: "org not found" });
+
+    const data = await req.file();
+    if (!data) return reply.status(400).send({ ok: false, error: "no file uploaded" });
+
+    const allowed = ["image/jpeg", "image/png", "image/svg+xml", "image/webp"];
+    if (!allowed.includes(data.mimetype)) {
+      return reply.status(400).send({ ok: false, error: "file must be PNG, JPG, SVG, or WEBP" });
+    }
+
+    const ext = data.mimetype === "image/svg+xml" ? ".svg"
+      : data.mimetype === "image/webp" ? ".webp"
+      : data.mimetype === "image/png"  ? ".png" : ".jpg";
+
+    const filename = `${rows[0].id}${ext}`;
+    const uploadsDir = join(__dirname, "..", "..", "uploads", "logos");
+    const filePath   = join(uploadsDir, filename);
+
+    const buf = await data.toBuffer();
+    writeFileSync(filePath, buf);
+
+    const avatar_url = `/uploads/logos/${filename}`;
+    await db.query(`update organisations set avatar_url = $1, updated_at = now() where id = $2`, [avatar_url, rows[0].id]);
+
+    return { ok: true, avatar_url };
+  });
+
+  // ── Delete org logo ─────────────────────────────────────────────────────────
+  server.delete<{ Params: { id: string } }>("/api/v1/orgs/:id/logo", async (req, reply) => {
+    const { rows } = await db.query(
+      `select id, avatar_url from organisations where id::text = $1 or slug = $1`, [req.params.id]
+    );
+    if (!rows.length) return reply.status(404).send({ ok: false, error: "org not found" });
+
+    if (rows[0].avatar_url) {
+      const filePath = join(__dirname, "..", "..", rows[0].avatar_url);
+      if (existsSync(filePath)) unlinkSync(filePath);
+    }
+    await db.query(`update organisations set avatar_url = null, updated_at = now() where id = $1`, [rows[0].id]);
+    return { ok: true };
   });
 
   // ── Projects assigned to an agent ──────────────────────────────────────────

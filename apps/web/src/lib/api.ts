@@ -144,7 +144,8 @@ export type Org = {
   id: string; name: string; slug: string; description?: string;
   type: "own" | "partner" | "client" | "vendor"; status: string;
   agent_count?: number; project_count?: number;
-  created_at?: string; updated_at?: string; avatar_color?: string;
+  created_at?: string; updated_at?: string;
+  avatar_color?: string; avatar_url?: string;
 };
 
 export async function fetchOrgs(): Promise<Org[]> {
@@ -232,4 +233,19 @@ export async function fetchOrgProjects(idOrSlug: string): Promise<{ id: string; 
 export async function fetchOrgAgents(idOrSlug: string): Promise<Agent[]> {
   const data = await apiFetch<{ ok: boolean; agents: Agent[] }>(`/api/v1/orgs/${idOrSlug}/agents`);
   return data?.ok ? data.agents : [];
+}
+
+export async function uploadOrgLogo(idOrSlug: string, file: File): Promise<string | null> {
+  const form = new FormData();
+  form.append("file", file);
+  try {
+    const res = await fetch(`/api/backend/api/v1/orgs/${idOrSlug}/logo`, { method: "POST", body: form });
+    const data = await res.json() as { ok: boolean; avatar_url?: string };
+    return data?.ok ? data.avatar_url ?? null : null;
+  } catch { return null; }
+}
+
+export async function deleteOrgLogo(idOrSlug: string): Promise<boolean> {
+  const data = await apiFetch<{ ok: boolean }>(`/api/v1/orgs/${idOrSlug}/logo`, { method: "DELETE" });
+  return data?.ok ?? false;
 }
