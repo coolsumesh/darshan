@@ -6,6 +6,7 @@ import * as React from "react";
 import {
   Activity,
   Bell,
+  BookOpen,
   Bot,
   Building2,
   CalendarDays,
