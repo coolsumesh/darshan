@@ -157,8 +157,35 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
     }
   );
 
+  // ── Helper: write task_assigned to agent inbox by agent name ───────────────
+  async function notifyAgentInbox(agentName: string, task: Record<string, unknown>) {
+    if (!agentName) return;
+    const { rows: agents } = await db.query(
+      `select id from agents where name ILIKE $1 limit 1`,
+      [agentName]
+    );
+    if (!agents[0]) return;
+    await db.query(
+      `insert into agent_inbox (agent_id, type, payload)
+       values ($1, 'task_assigned', $2)`,
+      [
+        agents[0].id,
+        JSON.stringify({
+          task_id:     task.id,
+          project_id:  task.project_id,
+          title:       task.title,
+          description: task.description,
+          priority:    task.priority,
+          status:      task.status,
+          due_date:    task.due_date ?? null,
+          assigned_to: agentName,
+        }),
+      ]
+    );
+  }
+
   // ── Create task ────────────────────────────────────────────────────────────
-  server.post<{ Params: { id: string }; Body: { title: string; description?: string; proposer?: string; assignee?: string; status?: string } }>(
+  server.post<{ Params: { id: string }; Body: { title: string; description?: string; proposer?: string; assignee?: string; status?: string; priority?: string; type?: string; estimated_sp?: number; due_date?: string } }>(
     "/api/v1/projects/:id/tasks",
     async (req, reply) => {
       const { rows: project } = await db.query(
@@ -174,6 +201,8 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
         [project[0].id, title, description, proposer ?? null, assignee ?? null, status]
       );
       broadcast("task:created", { task: rows[0] });
+      // Notify assigned agent's inbox
+      if (assignee) await notifyAgentInbox(assignee, rows[0]);
       return reply.status(201).send({ ok: true, task: rows[0] });
     }
   );
@@ -214,6 +243,8 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
       );
       if (!rows[0]) return reply.status(404).send({ ok: false, error: "task not found" });
       broadcast("task:updated", { task: rows[0] });
+      // Notify agent if assignee was explicitly set in this patch
+      if (req.body.assignee) await notifyAgentInbox(req.body.assignee as string, rows[0]);
       return { ok: true, task: rows[0] };
     }
   );
