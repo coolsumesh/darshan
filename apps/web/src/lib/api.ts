@@ -91,10 +91,26 @@ export async function fetchTeam(projectId: string): Promise<TeamMemberWithAgent[
   const data = await apiFetch<{ ok: boolean; team: (TeamMember & Agent)[] }>(`/api/v1/projects/${projectId}/team`);
   if (data?.ok && data.team) {
     return data.team.map((m) => ({
-      agentId: m.agentId ?? (m as unknown as { agent_id: string }).agent_id,
+      agentId: (m as unknown as { agent_id: string }).agent_id ?? m.agentId,
       role: m.role,
-      joinedAt: m.joinedAt ?? (m as unknown as { joined_at: string }).joined_at,
-      agent: { id: m.id, name: m.name, desc: (m as unknown as { desc?: string }).desc ?? "", status: m.status, lastProfileUpdateAt: "" },
+      joinedAt: (m as unknown as { joined_at: string }).joined_at ?? m.joinedAt,
+      agent: {
+        id:                   (m as unknown as { agent_id: string }).agent_id ?? m.id,
+        name:                 m.name,
+        desc:                 (m as unknown as { description?: string }).description ?? "",
+        status:               m.status,
+        lastProfileUpdateAt:  "",
+        // Extended fields
+        agent_type:    (m as unknown as { agent_type?: string }).agent_type,
+        model:         (m as unknown as { model?: string }).model,
+        provider:      (m as unknown as { provider?: string }).provider,
+        capabilities:  (m as unknown as { capabilities?: string[] }).capabilities,
+        ping_status:   (m as unknown as { ping_status?: string }).ping_status,
+        last_ping_ms:  (m as unknown as { last_ping_ms?: number }).last_ping_ms,
+        last_seen_at:  (m as unknown as { last_seen_at?: string }).last_seen_at,
+        org_name:      (m as unknown as { org_name?: string }).org_name,
+        org_slug:      (m as unknown as { org_slug?: string }).org_slug,
+      },
     }));
   }
   // fallback

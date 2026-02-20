@@ -1180,35 +1180,85 @@ function TechSpecTab({ projectId }: { projectId: string }) {
 }
 
 // ─── Team Tab ──────────────────────────────────────────────────────────────────
+const TEAM_ROLES = ["Member", "Coordinator", "Developer", "Reviewer", "Observer"];
+
 function AgentRegistryPanel({ agents, onAdd, onClose, alreadyAdded }: {
-  agents: TeamMemberWithAgent["agent"][]; onAdd: (id: string) => void; onClose: () => void; alreadyAdded: Set<string>;
+  agents: TeamMemberWithAgent["agent"][]; onAdd: (id: string, role: string) => void; onClose: () => void; alreadyAdded: Set<string>;
 }) {
-  const [q, setQ] = React.useState("");
-  const filtered = (agents ?? []).filter((a): a is NonNullable<typeof a> => !!a && (!q || a.name.toLowerCase().includes(q.toLowerCase())));
+  const [q,           setQ]           = React.useState("");
+  const [role,        setRole]        = React.useState("Member");
+  const [justAdded,   setJustAdded]   = React.useState<string | null>(null);
+
+  const filtered = (agents ?? []).filter((a): a is NonNullable<typeof a> =>
+    !!a && (!q || a.name.toLowerCase().includes(q.toLowerCase()))
+  );
+
+  async function handleAdd(agentId: string) {
+    await onAdd(agentId, role);
+    setJustAdded(agentId);
+    setTimeout(() => onClose(), 800);
+  }
+
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-end p-4">
       <button className="absolute inset-0 bg-zinc-950/40 backdrop-blur-[2px]" onClick={onClose} />
-      <div className="relative z-10 flex w-80 flex-col gap-4 rounded-2xl bg-white p-5 shadow-soft ring-1 ring-zinc-200 dark:bg-[#16132A] dark:ring-[#2D2A45]">
+      <div className="relative z-10 flex w-80 flex-col gap-3 rounded-2xl bg-white p-5 shadow-soft ring-1 ring-zinc-200 dark:bg-[#16132A] dark:ring-[#2D2A45]">
         <div className="flex items-center justify-between">
-          <h3 className="font-display text-sm font-semibold text-zinc-900 dark:text-white">Agent Registry</h3>
+          <h3 className="font-display text-sm font-semibold text-zinc-900 dark:text-white">Add Agent to Team</h3>
           <button onClick={onClose} className="grid h-7 w-7 place-items-center rounded-lg text-zinc-400 hover:bg-zinc-100 dark:hover:bg-white/10"><X className="h-4 w-4" /></button>
         </div>
+
+        {/* Role selector */}
+        <div>
+          <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-zinc-400">Role</label>
+          <select
+            value={role} onChange={e => setRole(e.target.value)}
+            className="w-full rounded-xl border-0 bg-zinc-50 px-3 py-2 text-sm text-zinc-900 ring-1 ring-zinc-200 focus:outline-none dark:bg-zinc-900 dark:text-zinc-100 dark:ring-zinc-700">
+            {TEAM_ROLES.map(r => <option key={r}>{r}</option>)}
+          </select>
+        </div>
+
         <Input placeholder="Search agents…" value={q} onChange={(e) => setQ(e.target.value)} />
-        <div className="flex flex-col gap-2 overflow-y-auto max-h-80">
-          {filtered.map((a) => (
-            <div key={a.id} className="flex items-center gap-3 rounded-xl bg-zinc-50 p-3 dark:bg-white/5">
-              <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-zinc-900 text-xs font-semibold text-white dark:bg-zinc-700">
-                {a.name[0]?.toUpperCase()}
+
+        <div className="flex flex-col gap-2 overflow-y-auto max-h-72">
+          {filtered.length === 0 && (
+            <p className="py-6 text-center text-sm text-zinc-400">No agents found</p>
+          )}
+          {filtered.map((a) => {
+            const isAdded   = alreadyAdded.has(a.id);
+            const isSuccess = justAdded === a.id;
+            const ext = a as unknown as Record<string, unknown>;
+            return (
+              <div key={a.id} className="flex items-center gap-3 rounded-xl bg-zinc-50 p-3 dark:bg-white/5">
+                <div className={cn(
+                  "grid h-8 w-8 shrink-0 place-items-center rounded-lg text-xs font-semibold text-white",
+                  ext.agent_type === "human" ? "bg-sky-700" : "bg-zinc-800 dark:bg-zinc-700"
+                )}>
+                  {a.name[0]?.toUpperCase()}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-semibold text-zinc-900 dark:text-white">{a.name}</p>
+                  <p className="truncate text-xs text-zinc-500">
+                    {(ext.org_name as string) ?? (ext.model as string) ?? a.desc ?? ""}
+                  </p>
+                </div>
+                <button
+                  disabled={isAdded}
+                  onClick={() => !isAdded && handleAdd(a.id)}
+                  className={cn(
+                    "shrink-0 rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors",
+                    isSuccess
+                      ? "bg-emerald-500 text-white"
+                      : isAdded
+                      ? "bg-zinc-100 text-zinc-400 cursor-not-allowed dark:bg-white/10"
+                      : "text-white"
+                  )}
+                  style={!isAdded && !isSuccess ? { backgroundColor: "#7C3AED" } : undefined}>
+                  {isSuccess ? "✓ Added" : isAdded ? "In team" : "Add"}
+                </button>
               </div>
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-semibold text-zinc-900 dark:text-white truncate">{a.name}</p>
-                <p className="text-xs text-zinc-500 truncate">{a.desc}</p>
-              </div>
-              <Button size="sm" variant={alreadyAdded.has(a.id) ? "secondary" : "primary"} disabled={alreadyAdded.has(a.id)} onClick={() => onAdd(a.id)}>
-                {alreadyAdded.has(a.id) ? "Added" : "Add"}
-              </Button>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     </div>
@@ -1228,8 +1278,8 @@ function TeamTab({ projectId }: { projectId: string }) {
 
   const addedIds = new Set(team.map((m) => m.agentId));
 
-  async function handleAdd(agentId: string) {
-    await addTeamMember(projectId, agentId, "member");
+  async function handleAdd(agentId: string, role = "Member") {
+    await addTeamMember(projectId, agentId, role);
     fetchTeam(projectId).then(setTeam);
   }
   async function handleRemove(agentId: string) {
