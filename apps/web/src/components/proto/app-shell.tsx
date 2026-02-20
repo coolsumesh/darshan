@@ -32,6 +32,8 @@ const PRIMARY_NAV = [
   { href: "/organisations", label: "Organisations",  icon: Building2        },
   { href: "/threads",       label: "Threads",        icon: MessageSquareText },
   { href: "/calendar",      label: "Calendar",       icon: CalendarDays     },
+  { href: "/how-it-works",  label: "How it Works",   icon: BookOpen         },
+  { href: "/help",          label: "Help",           icon: HelpCircle       },
 ] as const;
 
 const TOOL_NAV = [
