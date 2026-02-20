@@ -216,12 +216,19 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
         [req.params.taskId]
       );
       if (!rowCount) return reply.status(404).send({ ok: false, error: "task not found" });
+      // Remove all inbox items for this task so agents don't act on deleted tasks
+      await db.query(
+        `delete from agent_inbox
+         where type = 'task_assigned'
+           and payload->>'task_id' = $1`,
+        [req.params.taskId]
+      );
       broadcast("task:deleted", { taskId: req.params.taskId });
       return { ok: true };
     }
   );
 
-  // ── Update task status ─────────────────────────────────────────────────────
+  // ── Update task ────────────────────────────────────────────────────────────
   server.patch<{ Params: { id: string; taskId: string }; Body: Record<string, unknown> }>(
     "/api/v1/projects/:id/tasks/:taskId",
     async (req, reply) => {
@@ -235,6 +242,13 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
         }
       }
       if (!sets.length) return reply.status(400).send({ ok: false, error: "nothing to update" });
+
+      // Fetch old task so we can detect assignee changes
+      const { rows: before } = await db.query(
+        `select assignee from tasks where id = $1`, [req.params.taskId]
+      );
+      const oldAssignee: string | null = before[0]?.assignee ?? null;
+
       vals.push(req.params.taskId);
       const { rows } = await db.query(
         `update tasks set ${sets.join(", ")}, updated_at = now()
@@ -243,8 +257,23 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
       );
       if (!rows[0]) return reply.status(404).send({ ok: false, error: "task not found" });
       broadcast("task:updated", { task: rows[0] });
-      // Notify agent if assignee was explicitly set in this patch
-      if (req.body.assignee) await notifyAgentInbox(req.body.assignee as string, rows[0]);
+
+      // Handle assignee change
+      const newAssignee = req.body.assignee as string | undefined;
+      if (newAssignee !== undefined) {
+        // Remove old agent's pending inbox item for this task (if any)
+        if (oldAssignee) {
+          await db.query(
+            `delete from agent_inbox
+             where type = 'task_assigned'
+               and payload->>'task_id' = $1
+               and agent_id = (select id from agents where name ILIKE $2 limit 1)`,
+            [req.params.taskId, oldAssignee]
+          );
+        }
+        // Notify new agent (if set)
+        if (newAssignee) await notifyAgentInbox(newAssignee, rows[0]);
+      }
       return { ok: true, task: rows[0] };
     }
   );

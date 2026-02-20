@@ -34,7 +34,6 @@ const PRIMARY_NAV = [
   { href: "/threads",       label: "Threads",        icon: MessageSquareText },
   { href: "/calendar",      label: "Calendar",       icon: CalendarDays     },
   { href: "/how-it-works",  label: "How it Works",   icon: BookOpen         },
-  { href: "/help",          label: "Help",           icon: HelpCircle       },
 ] as const;
 
 const TOOL_NAV = [
@@ -43,6 +42,10 @@ const TOOL_NAV = [
 
 const SETTINGS_NAV = [
   { href: "/settings", label: "Settings",    icon: Settings         },
+] as const;
+
+const HELP_NAV = [
+  { href: "/help/faq", label: "FAQ",         icon: HelpCircle       },
 ] as const;
 
 // ─── Nav primitives ───────────────────────────────────────────────────────────
@@ -142,12 +145,17 @@ function Sidebar({
             <NavItem key={item.href} {...item} active={isActive(item.href, true)} collapsed={collapsed} />
           ))}
         </div>
+
+        <SectionLabel label="Help" collapsed={collapsed} />
+        <div className="flex flex-col gap-0.5">
+          {HELP_NAV.map((item) => (
+            <NavItem key={item.href} {...item} active={isActive(item.href)} collapsed={collapsed} />
+          ))}
+        </div>
       </nav>
 
       {/* Bottom pinned */}
       <div className={cn("shrink-0 border-t border-white/5 py-3", collapsed ? "px-2" : "px-3")}>
-        <NavItem href="/help" label="Help" icon={HelpCircle} active={false} collapsed={collapsed} />
-
         {!collapsed && (
           <div className="mt-2 flex items-center gap-2.5 rounded-lg px-3 py-2">
             <div className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-brand-700 text-xs font-bold text-white">
