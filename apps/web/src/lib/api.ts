@@ -249,3 +249,45 @@ export async function deleteOrgLogo(idOrSlug: string): Promise<boolean> {
   const data = await apiFetch<{ ok: boolean }>(`/api/v1/orgs/${idOrSlug}/logo`, { method: "DELETE" });
   return data?.ok ?? false;
 }
+
+export type OrgMember = {
+  id: string;
+  role: "owner" | "admin" | "member";
+  agent_id: string;
+  name: string;
+  status: string;
+  agent_type?: string;
+  model?: string;
+  avatar_url?: string;
+  created_at: string;
+};
+
+export async function fetchOrgMembers(idOrSlug: string): Promise<OrgMember[]> {
+  const data = await apiFetch<{ ok: boolean; members: OrgMember[] }>(`/api/v1/orgs/${idOrSlug}/members`);
+  return data?.ok ? data.members : [];
+}
+
+export async function addOrgMember(idOrSlug: string, agentId: string, role: string): Promise<OrgMember | null> {
+  const data = await apiFetch<{ ok: boolean; member: OrgMember }>(`/api/v1/orgs/${idOrSlug}/members`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ agent_id: agentId, role }),
+  });
+  return data?.ok ? data.member : null;
+}
+
+export async function updateOrgMemberRole(idOrSlug: string, agentId: string, role: string): Promise<boolean> {
+  const data = await apiFetch<{ ok: boolean }>(`/api/v1/orgs/${idOrSlug}/members/${agentId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ role }),
+  });
+  return data?.ok ?? false;
+}
+
+export async function removeOrgMember(idOrSlug: string, agentId: string): Promise<boolean> {
+  const data = await apiFetch<{ ok: boolean }>(`/api/v1/orgs/${idOrSlug}/members/${agentId}`, {
+    method: "DELETE",
+  });
+  return data?.ok ?? false;
+}

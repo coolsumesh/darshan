@@ -2,10 +2,12 @@
 
 import * as React from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   Building2, Bot, Camera, Check, ChevronRight, ExternalLink,
   LayoutGrid, List, Plus, Search, X, Zap, Users,
   FolderKanban, Archive, Trash2, Save, Upload, Link2,
+  MoreVertical, Crown, Settings, UserCircle,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { Button } from "@/components/ui/button";
@@ -794,7 +796,19 @@ function OrgDetailPanel({ org: initialOrg, onClose, onUpdated, onDeleted }: {
 
 // ─── Own Org Featured Card ────────────────────────────────────────────────────
 function OwnOrgCard({ org, onView }: { org: ExtOrg; onView: () => void }) {
+  const router = useRouter();
   const orgStatus = (org as unknown as { status?: string }).status ?? "active";
+  const [menuOpen, setMenuOpen] = React.useState(false);
+  const menuRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
+    }
+    if (menuOpen) document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [menuOpen]);
+
   return (
     <div className="relative mb-6 overflow-hidden rounded-2xl border border-brand-200 bg-brand-50/30 p-5 dark:border-brand-500/20 dark:bg-brand-500/5"
       style={{ borderLeft: "4px solid #7C3AED" }}>
@@ -803,6 +817,7 @@ function OwnOrgCard({ org, onView }: { org: ExtOrg; onView: () => void }) {
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <h2 className="font-display text-lg font-extrabold text-zinc-900 dark:text-white">{org.name}</h2>
+            <Crown className="h-4 w-4 text-brand-500" />
             <span className="rounded-full bg-brand-100 px-2 py-0.5 text-[11px] font-semibold text-brand-700 dark:bg-brand-500/10 dark:text-brand-300">Own workspace</span>
             <span className="font-mono text-xs text-zinc-400">@{org.slug}</span>
           </div>
@@ -818,10 +833,33 @@ function OwnOrgCard({ org, onView }: { org: ExtOrg; onView: () => void }) {
             orgStatus === "active" ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400" : "bg-zinc-100 text-zinc-500")}>
             ● {orgStatus === "active" ? "Active" : orgStatus}
           </span>
-          <button onClick={onView}
+          <Link href={`/organisations/${org.id}`}
             className="flex items-center gap-1.5 rounded-xl bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 transition-colors">
             Manage <ChevronRight className="h-4 w-4" />
-          </button>
+          </Link>
+          {/* ⋮ menu */}
+          <div className="relative" ref={menuRef}>
+            <button onClick={() => setMenuOpen(v => !v)}
+              className="grid h-8 w-8 place-items-center rounded-xl text-zinc-500 hover:bg-zinc-100 dark:hover:bg-white/10 transition-colors">
+              <MoreVertical className="h-4 w-4" />
+            </button>
+            {menuOpen && (
+              <div className="absolute right-0 top-full z-30 mt-1 w-44 rounded-xl bg-white py-1.5 shadow-xl ring-1 ring-zinc-200 dark:bg-[#1E1B33] dark:ring-[#2D2A45]">
+                <button onClick={() => { router.push(`/organisations/${org.id}`); setMenuOpen(false); }}
+                  className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-50 dark:text-zinc-300 dark:hover:bg-white/5">
+                  <Settings className="h-3.5 w-3.5" /> Settings
+                </button>
+                <button onClick={() => { router.push(`/organisations/${org.id}?tab=members`); setMenuOpen(false); }}
+                  className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-50 dark:text-zinc-300 dark:hover:bg-white/5">
+                  <Users className="h-3.5 w-3.5" /> Members
+                </button>
+                <button onClick={() => { router.push(`/organisations/${org.id}?tab=agents`); setMenuOpen(false); }}
+                  className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-50 dark:text-zinc-300 dark:hover:bg-white/5">
+                  <Bot className="h-3.5 w-3.5" /> Agents
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>
@@ -829,7 +867,11 @@ function OwnOrgCard({ org, onView }: { org: ExtOrg; onView: () => void }) {
 }
 
 // ─── External Org Card ────────────────────────────────────────────────────────
-function ExternalOrgCard({ org, onView }: { org: ExtOrg; onView: () => void }) {
+function ExternalOrgCard({ org, onView, onArchive }: {
+  org: ExtOrg; onView: () => void;
+  onArchive?: () => void;
+}) {
+  const router = useRouter();
   const tm = ORG_TYPE_META[org.type] ?? ORG_TYPE_META.partner;
   const orgStatus = (org as unknown as { status?: string }).status ?? "active";
   const isArchived = orgStatus === "archived";
@@ -838,12 +880,25 @@ function ExternalOrgCard({ org, onView }: { org: ExtOrg; onView: () => void }) {
     org.type === "client"  ? "bg-emerald-500" :
     org.type === "vendor"  ? "bg-amber-500" : "bg-zinc-400";
 
+  const [menuOpen, setMenuOpen] = React.useState(false);
+  const menuRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
+    }
+    if (menuOpen) document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [menuOpen]);
+
   return (
-    <div className={cn(
-      "flex flex-col rounded-2xl bg-white ring-1 ring-zinc-200 shadow-sm dark:bg-[#16132A] dark:ring-[#2D2A45] overflow-hidden",
-      "hover:shadow-md transition-all hover:-translate-y-0.5",
-      isArchived && "opacity-60"
-    )}>
+    <div
+      onClick={() => router.push(`/organisations/${org.id}`)}
+      className={cn(
+        "flex flex-col rounded-2xl bg-white ring-1 ring-zinc-200 shadow-sm dark:bg-[#16132A] dark:ring-[#2D2A45] overflow-hidden",
+        "hover:shadow-md transition-all hover:-translate-y-0.5 cursor-pointer",
+        isArchived && "opacity-60"
+      )}>
       {/* Top accent bar */}
       <div className={cn("h-1 w-full shrink-0", accentColor)} />
       <div className="flex flex-col gap-3 p-4">
@@ -855,6 +910,38 @@ function ExternalOrgCard({ org, onView }: { org: ExtOrg; onView: () => void }) {
               <span className={cn("rounded-full px-1.5 py-0.5 text-[10px] font-semibold", tm.badge)}>{tm.label}</span>
               <span className="font-mono text-[10px] text-zinc-400">@{org.slug}</span>
             </div>
+          </div>
+          {/* ⋮ menu */}
+          <div className="relative shrink-0" ref={menuRef} onClick={e => e.stopPropagation()}>
+            <button onClick={() => setMenuOpen(v => !v)}
+              className="grid h-7 w-7 place-items-center rounded-lg text-zinc-400 hover:bg-zinc-100 dark:hover:bg-white/10 transition-colors">
+              <MoreVertical className="h-4 w-4" />
+            </button>
+            {menuOpen && (
+              <div className="absolute right-0 top-full z-30 mt-1 w-44 rounded-xl bg-white py-1.5 shadow-xl ring-1 ring-zinc-200 dark:bg-[#1E1B33] dark:ring-[#2D2A45]">
+                <button onClick={() => { router.push(`/organisations/${org.id}`); setMenuOpen(false); }}
+                  className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-50 dark:text-zinc-300 dark:hover:bg-white/5">
+                  <Settings className="h-3.5 w-3.5" /> Settings
+                </button>
+                <button onClick={() => { router.push(`/organisations/${org.id}?tab=members`); setMenuOpen(false); }}
+                  className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-50 dark:text-zinc-300 dark:hover:bg-white/5">
+                  <Users className="h-3.5 w-3.5" /> Members
+                </button>
+                <button onClick={() => { router.push(`/organisations/${org.id}?tab=agents`); setMenuOpen(false); }}
+                  className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-50 dark:text-zinc-300 dark:hover:bg-white/5">
+                  <Bot className="h-3.5 w-3.5" /> Agents
+                </button>
+                {!isArchived && onArchive && (
+                  <>
+                    <div className="my-1 h-px bg-zinc-100 dark:bg-white/5" />
+                    <button onClick={() => { onArchive(); setMenuOpen(false); }}
+                      className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-amber-600 hover:bg-amber-50 dark:text-amber-400 dark:hover:bg-amber-500/10">
+                      <Archive className="h-3.5 w-3.5" /> Archive
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
           </div>
         </div>
         {org.description
@@ -871,15 +958,11 @@ function ExternalOrgCard({ org, onView }: { org: ExtOrg; onView: () => void }) {
           </span>
           <span>{relTime((org as unknown as { created_at?: string }).created_at)}</span>
         </div>
-        <div className="flex gap-2 border-t border-zinc-100 pt-3 dark:border-white/5">
-          <button onClick={onView}
-            className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-zinc-50 py-1.5 text-xs font-semibold text-zinc-700 ring-1 ring-zinc-200 hover:bg-zinc-100 dark:bg-white/5 dark:text-zinc-300 dark:ring-white/10 transition-colors">
-            <ExternalLink className="h-3 w-3" /> View
-          </button>
-          <button onClick={onView}
+        <div className="flex gap-2 border-t border-zinc-100 pt-3 dark:border-white/5" onClick={e => e.stopPropagation()}>
+          <Link href={`/organisations/${org.id}`}
             className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-brand-600 py-1.5 text-xs font-semibold text-white hover:bg-brand-700 transition-colors">
-            Edit
-          </button>
+            <ExternalLink className="h-3 w-3" /> View
+          </Link>
         </div>
       </div>
     </div>
@@ -887,16 +970,31 @@ function ExternalOrgCard({ org, onView }: { org: ExtOrg; onView: () => void }) {
 }
 
 // ─── External Org List Row ────────────────────────────────────────────────────
-function ExternalOrgListRow({ org, onView }: { org: ExtOrg; onView: () => void }) {
+function ExternalOrgListRow({ org, onView, onArchive }: {
+  org: ExtOrg; onView: () => void; onArchive?: () => void;
+}) {
+  const router = useRouter();
   const tm = ORG_TYPE_META[org.type] ?? ORG_TYPE_META.partner;
   const orgStatus = (org as unknown as { status?: string }).status ?? "active";
   const isArchived = orgStatus === "archived";
+
+  const [menuOpen, setMenuOpen] = React.useState(false);
+  const menuRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
+    }
+    if (menuOpen) document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [menuOpen]);
+
   return (
     <div className={cn(
       "group flex items-center gap-4 border-b border-zinc-100 px-2 py-3 dark:border-[#2D2A45]",
-      "hover:bg-zinc-50 dark:hover:bg-white/5 transition-colors",
+      "hover:bg-zinc-50 dark:hover:bg-white/5 transition-colors cursor-pointer",
       isArchived && "opacity-60"
-    )}>
+    )} onClick={() => router.push(`/organisations/${org.id}`)}>
       <OrgAvatar name={org.name} avatarUrl={org.avatar_url} color={org.avatar_color} size={32} className="rounded-lg" />
       <div className="w-40 shrink-0">
         <div className="text-sm font-semibold text-zinc-900 dark:text-white truncate">{org.name}</div>
@@ -914,11 +1012,35 @@ function ExternalOrgListRow({ org, onView }: { org: ExtOrg; onView: () => void }
       <div className="w-20 shrink-0 text-xs text-zinc-400">
         {relTime((org as unknown as { created_at?: string }).created_at)}
       </div>
-      <div className="flex shrink-0 gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-        <button onClick={onView}
+      <div className="flex shrink-0 items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
+        <Link href={`/organisations/${org.id}`}
           className="flex items-center gap-1 rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-700 transition-colors">
           View
-        </button>
+        </Link>
+        <div className="relative" ref={menuRef}>
+          <button onClick={() => setMenuOpen(v => !v)}
+            className="grid h-7 w-7 place-items-center rounded-lg text-zinc-400 hover:bg-zinc-100 dark:hover:bg-white/10 transition-colors">
+            <MoreVertical className="h-3.5 w-3.5" />
+          </button>
+          {menuOpen && (
+            <div className="absolute right-0 top-full z-30 mt-1 w-40 rounded-xl bg-white py-1.5 shadow-xl ring-1 ring-zinc-200 dark:bg-[#1E1B33] dark:ring-[#2D2A45]">
+              <button onClick={() => { router.push(`/organisations/${org.id}?tab=members`); setMenuOpen(false); }}
+                className="flex w-full items-center gap-2 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-50 dark:text-zinc-300 dark:hover:bg-white/5">
+                <Users className="h-3.5 w-3.5" /> Members
+              </button>
+              <button onClick={() => { router.push(`/organisations/${org.id}?tab=agents`); setMenuOpen(false); }}
+                className="flex w-full items-center gap-2 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-50 dark:text-zinc-300 dark:hover:bg-white/5">
+                <Bot className="h-3.5 w-3.5" /> Agents
+              </button>
+              {!isArchived && onArchive && (
+                <button onClick={() => { onArchive(); setMenuOpen(false); }}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-sm text-amber-600 hover:bg-amber-50 dark:text-amber-400 dark:hover:bg-amber-500/10">
+                  <Archive className="h-3.5 w-3.5" /> Archive
+                </button>
+              )}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -940,6 +1062,13 @@ export default function OrganisationsPage() {
     setLoading(false);
   }
   React.useEffect(() => { reload(); }, []);
+
+  async function handleArchive(orgId: string) {
+    const updated = await updateOrg(orgId, { status: "archived" });
+    if (updated) {
+      setOrgs(prev => prev.map(o => o.id === orgId ? { ...o, ...(updated as ExtOrg) } : o));
+    }
+  }
 
   const ownOrgs      = orgs.filter(o => o.type === "own");
   const externalOrgs = orgs.filter(o => o.type !== "own");
@@ -1079,7 +1208,7 @@ export default function OrganisationsPage() {
                 ) : view === "grid" ? (
                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
                     {filteredExternal.map(o => (
-                      <ExternalOrgCard key={o.id} org={o} onView={() => { setDetailOrg(o); setShowNew(false); }} />
+                      <ExternalOrgCard key={o.id} org={o} onView={() => { setDetailOrg(o); setShowNew(false); }} onArchive={() => handleArchive(o.id)} />
                     ))}
                     {!query && (
                       <button onClick={() => { setShowNew(true); setDetailOrg(null); }}
@@ -1098,7 +1227,7 @@ export default function OrganisationsPage() {
                       ))}
                     </div>
                     {filteredExternal.map(o => (
-                      <ExternalOrgListRow key={o.id} org={o} onView={() => { setDetailOrg(o); setShowNew(false); }} />
+                      <ExternalOrgListRow key={o.id} org={o} onView={() => { setDetailOrg(o); setShowNew(false); }} onArchive={() => handleArchive(o.id)} />
                     ))}
                   </div>
                 )
