@@ -282,13 +282,14 @@ function AgentCredentialsPanel({ agent }: { agent: ExtAgent }) {
 
   const heartbeatBlock =
 `## Darshan Agent Inbox — ${agent.name}
-AGENT_ID: ${agentId}
-TOKEN: ${token}
+AGENT_ID:  ${agentId}
+TOKEN:     ${token}
 INBOX_URL: ${inboxUrl}
-ACK_URL: ${ackUrl}
+ACK_URL:   ${ackUrl}
 
 ### Steps (run on every heartbeat):
 1. GET INBOX_URL with header: Authorization: Bearer ${token}
+   (use the TOKEN value above — replace literal "TOKEN" with the value if your config tool requires it)
 2. For each pending item, handle by type:
 
 **type = "ping"**

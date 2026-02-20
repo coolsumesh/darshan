@@ -8,6 +8,16 @@ export default {
     "./src/app/**/*.{ts,tsx}",
     "./src/components/**/*.{ts,tsx}",
   ],
+  safelist: [
+    // Brand colours used dynamically (cn() / ternaries) — must never be purged
+    { pattern: /^bg-brand-(50|100|200|300|400|500|600|700|800|900|950)$/ },
+    { pattern: /^text-brand-(50|100|200|300|400|500|600|700|800|900|950)$/ },
+    { pattern: /^ring-brand-(50|100|200|300|400|500|600|700|800|900|950)$/ },
+    { pattern: /^border-brand-(50|100|200|300|400|500|600|700|800|900|950)$/ },
+    { pattern: /^hover:bg-brand-(50|100|200|300|400|500|600|700|800|900|950)$/ },
+    { pattern: /^dark:bg-brand-(50|100|200|300|400|500|600|700|800|900|950)(\/\d+)?$/ },
+    { pattern: /^dark:text-brand-(50|100|200|300|400|500|600|700|800|900|950)$/ },
+  ],
   theme: {
     extend: {
       boxShadow: {
@@ -61,4 +71,5 @@ export default {
     },
   },
   plugins: [forms, typography],
-} satisfies Config;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+} satisfies Record<string, any>;
