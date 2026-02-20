@@ -7,8 +7,8 @@ const Markdown = dynamic(() => import("react-markdown"), { ssr: false });
 import Link from "next/link";
 import {
   ArrowLeft, BookOpen, Calendar, ChevronDown, ExternalLink,
-  FileCode2, Filter, GripVertical, Kanban, LayoutList,
-  MoreHorizontal, Plus, Search, SortAsc, UserPlus, Users, X,
+  FileCode2, Filter, GripVertical, LayoutList, Zap,
+  MoreHorizontal, Plus, Search, SortAsc, UserPlus, Users, X, Trash2, Check,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -27,7 +27,7 @@ import {
 import { type Agent } from "@/lib/agents";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-type Tab = "table" | "kanban" | "team" | "architecture" | "tech-spec";
+type Tab = "table" | "team" | "architecture" | "tech-spec";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const STATUS_META: Record<TaskStatus, { label: string; bg: string; text: string; dot: string }> = {
@@ -61,12 +61,7 @@ const TABLE_SECTIONS: { status: TaskStatus; label: string; accent: string }[] = 
   { status: "done",        label: "Done",        accent: "bg-emerald-500" },
 ];
 
-const TASK_COLUMNS = TABLE_SECTIONS.map((s) => ({
-  id: s.status,
-  label: s.label,
-  color: `border-t-${s.accent.replace("bg-", "")}`,
-  dot: s.accent,
-}));
+// Kanban removed
 
 const TASK_TYPES   = ["Task", "Feature", "Bug", "Quality", "Infrastructure"];
 const PRIORITIES   = ["urgent", "high", "medium", "low"] as Priority[];
@@ -770,102 +765,6 @@ function MainTableView({
   );
 }
 
-// ─── Kanban card ──────────────────────────────────────────────────────────────
-function TaskCard({
-  task, acting, onMove, onDelete, onDragStart, onOpen,
-}: {
-  task: Task; acting: boolean;
-  onMove: (s: TaskStatus) => void; onDelete: () => void;
-  onDragStart: (e: React.DragEvent) => void; onOpen: () => void;
-}) {
-  const nextActions: { label: string; status: TaskStatus; style: string }[] = [];
-  if (task.status === "proposed") {
-    nextActions.push(
-      { label: "→ To Do",   status: "approved",    style: "bg-amber-50 text-amber-700 ring-amber-200 hover:bg-amber-100 dark:bg-amber-500/10 dark:text-amber-400 dark:ring-amber-500/30" },
-      { label: "✓ Done",    status: "done",        style: "bg-emerald-50 text-emerald-700 ring-emerald-200 hover:bg-emerald-100 dark:bg-emerald-500/10 dark:text-emerald-400 dark:ring-emerald-500/30" },
-    );
-  } else if (task.status === "approved") {
-    nextActions.push(
-      { label: "▶ Start",   status: "in-progress", style: "bg-brand-50 text-brand-700 ring-brand-200 hover:bg-brand-100 dark:bg-brand-500/10 dark:text-brand-400 dark:ring-brand-500/30" },
-      { label: "✓ Done",    status: "done",        style: "bg-emerald-50 text-emerald-700 ring-emerald-200 hover:bg-emerald-100 dark:bg-emerald-500/10 dark:text-emerald-400 dark:ring-emerald-500/30" },
-    );
-  } else if (task.status === "in-progress") {
-    nextActions.push(
-      { label: "⬆ Review",  status: "review",      style: "bg-sky-50 text-sky-700 ring-sky-200 hover:bg-sky-100 dark:bg-sky-500/10 dark:text-sky-400 dark:ring-sky-500/30" },
-      { label: "✓ Done",    status: "done",        style: "bg-emerald-50 text-emerald-700 ring-emerald-200 hover:bg-emerald-100 dark:bg-emerald-500/10 dark:text-emerald-400 dark:ring-emerald-500/30" },
-    );
-  } else if (task.status === "review") {
-    nextActions.push(
-      { label: "✓ Approve", status: "done",        style: "bg-emerald-50 text-emerald-700 ring-emerald-200 hover:bg-emerald-100 dark:bg-emerald-500/10 dark:text-emerald-400 dark:ring-emerald-500/30" },
-      { label: "↩ Rework",  status: "in-progress", style: "bg-brand-50 text-brand-700 ring-brand-200 hover:bg-brand-100 dark:bg-brand-500/10 dark:text-brand-400 dark:ring-brand-500/30" },
-    );
-  } else {
-    nextActions.push(
-      { label: "↩ Reopen",  status: "proposed",    style: "bg-zinc-50 text-zinc-600 ring-zinc-200 hover:bg-zinc-100 dark:bg-zinc-800 dark:text-zinc-300 dark:ring-zinc-700" },
-    );
-  }
-
-  const due = formatDueDate(task.due_date);
-
-  return (
-    <div draggable onDragStart={onDragStart}
-      className={cn(
-        "group rounded-xl bg-white p-3 ring-1 ring-zinc-200 shadow-softSm",
-        "dark:bg-[#16132A] dark:ring-[#2D2A45]",
-        "cursor-grab active:cursor-grabbing active:scale-[0.98] transition-all",
-        acting && "opacity-60 pointer-events-none"
-      )}>
-      <div className="flex items-start gap-2">
-        <GripVertical className="mt-0.5 h-3.5 w-3.5 shrink-0 text-zinc-300 dark:text-zinc-700 group-hover:text-zinc-400" />
-        <div className="min-w-0 flex-1">
-          <div className="font-display text-sm font-semibold text-zinc-900 dark:text-white">{task.title}</div>
-          {task.description && (
-            <p className="mt-1 line-clamp-2 text-xs leading-snug text-zinc-500 dark:text-zinc-400">{task.description}</p>
-          )}
-        </div>
-        <button onClick={onOpen} className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-          <ExternalLink className="h-3.5 w-3.5 text-zinc-400" />
-        </button>
-      </div>
-
-      {/* Pills row */}
-      <div className="mt-2 flex flex-wrap items-center gap-1.5">
-        {task.priority && task.priority !== "medium" && <PriorityPill priority={task.priority} />}
-        {task.type && task.type !== "Task" && <TypePill type={task.type} />}
-        {due && <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-medium", due.cls)}>{due.text}</span>}
-      </div>
-
-      {/* Meta */}
-      <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px] text-zinc-500 dark:text-zinc-400">
-        {task.assignee && (
-          <span className="rounded-full bg-brand-100 px-2 py-0.5 font-semibold text-brand-700 dark:bg-brand-500/10 dark:text-brand-300">
-            {task.assignee}
-          </span>
-        )}
-        {(task.estimated_sp ?? 0) > 0 && (
-          <span className="ml-auto rounded-full bg-zinc-100 px-2 py-0.5 font-medium text-zinc-600 dark:bg-white/10 dark:text-zinc-400">
-            {task.estimated_sp} SP
-          </span>
-        )}
-      </div>
-
-      {/* Actions */}
-      <div className="mt-3 flex flex-wrap gap-1.5">
-        {nextActions.map((a) => (
-          <button key={a.status} disabled={acting} onClick={() => onMove(a.status)}
-            className={cn("flex-1 rounded-lg py-1.5 text-xs font-semibold ring-1 transition disabled:opacity-50", a.style)}>
-            {a.label}
-          </button>
-        ))}
-        <button disabled={acting} onClick={onDelete}
-          className="flex-1 rounded-lg py-1.5 text-xs font-semibold ring-1 transition bg-red-50 text-red-600 ring-red-200 hover:bg-red-100 dark:bg-red-500/10 dark:text-red-400 dark:ring-red-500/30 disabled:opacity-50">
-          {task.status === "proposed" ? "✕ Reject" : "✕ Remove"}
-        </button>
-      </div>
-    </div>
-  );
-}
-
 // ─── Create Task Modal ────────────────────────────────────────────────────────
 function CreateTaskModal({
   defaultStatus, team, onSave, onClose,
@@ -975,7 +874,7 @@ function CreateTaskModal({
 function TaskBoardContent({
   view, projectId, tasks, setTasks, team,
 }: {
-  view: "table" | "kanban"; projectId: string;
+  view: "table"; projectId: string;
   tasks: Task[]; setTasks: React.Dispatch<React.SetStateAction<Task[]>>;
   team: TeamMemberWithAgent[];
 }) {
@@ -1016,72 +915,16 @@ function TaskBoardContent({
     setCreateIn(null);
   }
 
-  function onDragStart(e: React.DragEvent, id: string) { e.dataTransfer.setData("taskId", id); e.dataTransfer.effectAllowed = "move"; }
-  function onDragOver(e: React.DragEvent, status: TaskStatus) { e.preventDefault(); setDragOver(status); }
-  async function onDrop(e: React.DragEvent, status: TaskStatus) {
-    e.preventDefault(); setDragOver(null);
-    const id = e.dataTransfer.getData("taskId");
-    const task = tasks.find((t) => t.id === id);
-    if (!task || task.status === status) return;
-    await moveTask(id, status);
-  }
-
   return (
     <div className="flex min-h-0 flex-1 overflow-hidden">
       {/* Main content */}
       <div className={cn("flex min-w-0 flex-1 flex-col overflow-y-auto transition-all duration-250", detailTask ? "pr-0" : "")}>
-        {view === "table" && (
-          <MainTableView
-            tasks={visibleTasks} acting={acting} team={team}
-            onUpdate={patchTask} onDelete={removeTask}
-            onAddTask={(status) => setCreateIn(status)}
-            onOpenTask={(task, index) => setDetailTask({ task, index })}
-          />
-        )}
-
-        {view === "kanban" && (
-          <div className="overflow-x-auto pb-2">
-            <div className="flex gap-3" style={{ minWidth: `${TASK_COLUMNS.length * 256}px` }}>
-              {TASK_COLUMNS.map((col) => {
-                const colTasks = visibleTasks.filter((t) => t.status === col.id);
-                const isOver   = dragOver === col.id;
-                return (
-                  <div key={col.id}
-                    className={cn(
-                      "flex flex-1 flex-col gap-3 rounded-2xl p-4 transition-colors ring-1",
-                      "bg-zinc-50 ring-zinc-200 dark:bg-[#0F0D1E] dark:ring-[#2D2A45]",
-                      isOver && "bg-brand-50 ring-brand-300 dark:bg-brand-950/40 dark:ring-brand-500/30"
-                    )}
-                    style={{ minWidth: 232 }}
-                    onDragOver={(e) => onDragOver(e, col.id)}
-                    onDragLeave={() => setDragOver(null)}
-                    onDrop={(e) => onDrop(e, col.id)}
-                  >
-                    <div className={cn("flex items-center gap-2 border-t-[3px] pt-3", col.color)}>
-                      <div className={cn("h-2 w-2 shrink-0 rounded-full", col.dot)} />
-                      <span className="font-display flex-1 text-xs font-bold text-zinc-700 dark:text-zinc-200 uppercase tracking-wide">{col.label}</span>
-                      <span className="grid h-5 min-w-5 place-items-center rounded-full bg-zinc-200 px-1.5 text-[11px] font-semibold text-zinc-600 dark:bg-white/10 dark:text-zinc-300">{colTasks.length}</span>
-                    </div>
-                    <div className="flex flex-col gap-2">
-                      {colTasks.map((task) => (
-                        <TaskCard key={task.id} task={task} acting={acting === task.id}
-                          onMove={(s) => moveTask(task.id, s)}
-                          onDelete={() => removeTask(task.id)}
-                          onDragStart={(e) => onDragStart(e, task.id)}
-                          onOpen={() => setDetailTask({ task, index: tasks.indexOf(task) })}
-                        />
-                      ))}
-                    </div>
-                    <button onClick={() => setCreateIn(col.id)}
-                      className="mt-auto flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-medium text-zinc-500 transition hover:bg-white hover:text-zinc-700 dark:hover:bg-white/5 dark:hover:text-zinc-200">
-                      <Plus className="h-3.5 w-3.5" /> Add task
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
+        <MainTableView
+          tasks={visibleTasks} acting={acting} team={team}
+          onUpdate={patchTask} onDelete={removeTask}
+          onAddTask={(status) => setCreateIn(status)}
+          onOpenTask={(task, index) => setDetailTask({ task, index })}
+        />
       </div>
 
       {/* Task Detail Panel */}
@@ -1106,7 +949,7 @@ function TaskBoardContent({
 }
 
 // ─── Sprint Board Tab wrapper (state + WS) ────────────────────────────────────
-function SprintBoardTab({ view, projectId }: { view: "table" | "kanban"; projectId: string }) {
+function SprintBoardTab({ view, projectId }: { view: "table"; projectId: string }) {
   const [tasks, setTasks] = React.useState<Task[]>([]);
   const [team,  setTeam]  = React.useState<TeamMemberWithAgent[]>([]);
 
@@ -1265,6 +1108,86 @@ function AgentRegistryPanel({ agents, onAdd, onClose, alreadyAdded }: {
   );
 }
 
+function TeamMemberRow({ m, projectId, pinging, pingMeta, onPing, onRemove, onRoleChange }: {
+  m: TeamMemberWithAgent; projectId: string; pinging: boolean;
+  pingMeta: Record<string, { dot: string; label: string }>;
+  onPing: () => void; onRemove: () => void; onRoleChange: (role: string) => void;
+}) {
+  const [editingRole, setEditingRole] = React.useState(false);
+  const name      = m.agent?.name ?? m.agentId;
+  const ext       = m.agent as unknown as Record<string, unknown>;
+  const pingKey   = pinging ? "pending" : (ext?.ping_status as string ?? "unknown");
+  const ps        = pingMeta[pingKey] ?? pingMeta.unknown;
+  const model     = ext?.model as string | undefined;
+  const orgName   = ext?.org_name as string | undefined;
+  const agentType = ext?.agent_type as string | undefined;
+  const isOnline  = m.agent?.status === "online";
+  void projectId;
+
+  return (
+    <div className="group flex items-center gap-3 border-b border-zinc-100 px-4 py-2.5 last:border-0 hover:bg-zinc-50 dark:border-[#2D2A45] dark:hover:bg-white/5 transition-colors">
+      <span className={cn("h-2 w-2 shrink-0 rounded-full", isOnline ? "bg-emerald-400" : "bg-zinc-300")} />
+      <div className="flex-1 min-w-0 flex items-center gap-2.5">
+        <div className={cn("grid h-7 w-7 shrink-0 place-items-center rounded-lg text-xs font-bold text-white",
+          agentType === "human" ? "bg-sky-700" : "bg-zinc-800 dark:bg-zinc-700")}>
+          {name[0]?.toUpperCase()}
+        </div>
+        <div className="min-w-0">
+          <div className="truncate text-sm font-semibold text-zinc-900 dark:text-white">{name}</div>
+          {m.agent?.desc && <div className="truncate text-[11px] text-zinc-400">{m.agent.desc}</div>}
+        </div>
+      </div>
+      {/* Role */}
+      <div className="w-28 shrink-0">
+        {editingRole ? (
+          <select autoFocus defaultValue={m.role}
+            onBlur={() => setEditingRole(false)}
+            onChange={(e) => { onRoleChange(e.target.value); setEditingRole(false); }}
+            className="w-full rounded-lg border-0 bg-white px-2 py-1 text-xs font-semibold ring-1 ring-violet-400 focus:outline-none dark:bg-zinc-900">
+            {TEAM_ROLES.map(r => <option key={r}>{r}</option>)}
+          </select>
+        ) : (
+          <button onClick={() => setEditingRole(true)}
+            className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-semibold text-zinc-600 hover:bg-violet-100 hover:text-violet-700 transition-colors dark:bg-white/10 dark:text-zinc-400 capitalize">
+            {m.role}
+          </button>
+        )}
+      </div>
+      {/* Type */}
+      <div className="w-20 shrink-0">
+        <span className={cn("rounded-full px-2 py-0.5 text-[10px] font-semibold",
+          agentType === "human" ? "bg-sky-100 text-sky-700 dark:bg-sky-500/10 dark:text-sky-300"
+                                : "bg-violet-100 text-violet-700 dark:bg-violet-500/10 dark:text-violet-300")}>
+          {agentType === "human" ? "Human" : "AI"}
+        </span>
+      </div>
+      {/* Model */}
+      <div className="w-32 shrink-0">
+        {model ? <span className="rounded bg-zinc-100 px-1.5 py-0.5 text-[11px] font-mono text-zinc-500 dark:bg-white/10">{model}</span>
+               : <span className="text-xs text-zinc-300 dark:text-zinc-600">—</span>}
+      </div>
+      {/* Org */}
+      <div className="w-28 shrink-0 truncate text-[11px] text-zinc-500">{orgName ?? "—"}</div>
+      {/* Ping */}
+      <div className="w-24 shrink-0 flex items-center gap-1">
+        <span className={cn("h-1.5 w-1.5 rounded-full shrink-0", ps.dot)} />
+        <span className="text-[11px] text-zinc-400">{ps.label}</span>
+      </div>
+      {/* Actions */}
+      <div className="w-20 shrink-0 flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+        <button onClick={onPing} disabled={pinging} title="Ping"
+          className="grid h-6 w-6 place-items-center rounded text-zinc-400 hover:bg-zinc-200 hover:text-zinc-700 dark:hover:bg-white/10 transition-colors disabled:opacity-40">
+          <Zap className="h-3.5 w-3.5" />
+        </button>
+        <button onClick={onRemove} title="Remove"
+          className="grid h-6 w-6 place-items-center rounded text-zinc-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-500/10 transition-colors">
+          <Trash2 className="h-3.5 w-3.5" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function TeamTab({ projectId }: { projectId: string }) {
   const [team,         setTeam]         = React.useState<TeamMemberWithAgent[]>([]);
   const [allAgents,    setAllAgents]    = React.useState<NonNullable<TeamMemberWithAgent["agent"]>[]>([]);
@@ -1305,87 +1228,68 @@ function TeamTab({ projectId }: { projectId: string }) {
 
   return (
     <>
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between">
-          <div>
-            <CardTitle>Team</CardTitle>
-            <div className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
-              {team.length} agent{team.length !== 1 ? "s" : ""} · {team.filter(m => m.agent?.status === "online").length} online
-            </div>
-          </div>
-          <Button variant="primary" size="sm" onClick={() => setShowRegistry(true)}>
-            <UserPlus className="h-4 w-4" /> Add Agent
-          </Button>
-        </CardHeader>
-        <CardContent>
-          {team.length === 0 ? (
-            <div className="flex flex-col items-center gap-3 py-10 text-center">
-              <Users className="h-8 w-8 text-zinc-300 dark:text-zinc-600" />
-              <p className="text-sm font-medium text-zinc-700 dark:text-zinc-200">No agents yet</p>
-              <Button variant="secondary" size="sm" onClick={() => setShowRegistry(true)}>Add from registry</Button>
-            </div>
-          ) : (
-            <div className="flex flex-col gap-2">
-              {team.map((m) => {
-                const name       = m.agent?.name ?? m.agentId;
-                const ext        = m.agent as unknown as Record<string, unknown>;
-                const pingStatus = pingingIds.has(m.agentId) ? "pending" : (ext?.ping_status as string ?? "unknown");
-                const orgName    = ext?.org_name as string | undefined;
-                const caps       = (ext?.capabilities as string[]) ?? [];
-                const model      = ext?.model as string | undefined;
-                const lastSeen   = ext?.last_seen_at as string | undefined;
-                const ps         = PING_STATUS_META[pingStatus] ?? PING_STATUS_META.unknown;
+      {/* Header */}
+      <div className="mb-4 flex items-center justify-between">
+        <div>
+          <h2 className="font-display text-lg font-bold text-zinc-900 dark:text-white">Team</h2>
+          <p className="text-xs text-zinc-500">
+            {team.length} member{team.length !== 1 ? "s" : ""} · {team.filter(m => m.agent?.status === "online").length} online
+          </p>
+        </div>
+        <button
+          onClick={() => setShowRegistry(true)}
+          className="flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold text-white transition-colors"
+          style={{ backgroundColor: "#7C3AED" }}>
+          <UserPlus className="h-4 w-4" /> Add Agent
+        </button>
+      </div>
 
-                return (
-                  <div key={m.agentId} className="flex items-center gap-4 rounded-2xl bg-zinc-50 p-4 ring-1 ring-zinc-200 dark:bg-white/5 dark:ring-[#2D2A45]">
-                    {/* Avatar with online dot */}
-                    <div className="relative grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-zinc-900 text-white dark:bg-zinc-700">
-                      <span className="text-xs font-semibold">{name[0]?.toUpperCase()}</span>
-                      <span className={cn(
-                        "absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full ring-2 ring-white dark:ring-[#0F0D1E]",
-                        m.agent?.status === "online" ? "bg-emerald-400" : "bg-zinc-400"
-                      )} />
-                    </div>
-                    {/* Info */}
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="font-display text-sm font-bold text-zinc-900 dark:text-white">{name}</span>
-                        {orgName && (
-                          <span className="rounded-full bg-brand-100 px-2 py-0.5 text-[11px] font-semibold text-brand-700 dark:bg-brand-500/10 dark:text-brand-300">{orgName}</span>
-                        )}
-                        {model && (
-                          <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-medium text-zinc-500 dark:bg-white/10">{model}</span>
-                        )}
-                      </div>
-                      <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                        <span className="flex items-center gap-1 text-[11px] text-zinc-500">
-                          <span className={cn("h-1.5 w-1.5 rounded-full", ps.dot)} />
-                          {ps.label}
-                          {lastSeen && <span className="text-zinc-400">· seen {new Date(lastSeen).toLocaleTimeString()}</span>}
-                        </span>
-                        {caps.slice(0, 5).map((c) => (
-                          <span key={c} className="rounded bg-zinc-100 px-1.5 py-0.5 text-[10px] font-medium text-zinc-500 dark:bg-white/10">{c}</span>
-                        ))}
-                      </div>
-                      <div className="mt-0.5 text-[11px] text-zinc-400">{m.role}{m.agent?.desc && ` · ${m.agent.desc}`}</div>
-                    </div>
-                    {/* Actions */}
-                    <div className="flex shrink-0 items-center gap-2">
-                      <Button size="sm" variant="secondary">Inspect</Button>
-                      <Button size="sm" variant="secondary"
-                        disabled={pingingIds.has(m.agentId)}
-                        onClick={() => handlePing(m.agentId)}>
-                        {pingingIds.has(m.agentId) ? "Pinging…" : "Ping"}
-                      </Button>
-                      <Button size="sm" variant="ghost" onClick={() => handleRemove(m.agentId)}>Remove</Button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+      {/* Table */}
+      <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white dark:border-[#2D2A45] dark:bg-[#16132A]">
+        {/* Column headers */}
+        <div className="flex items-center border-b border-zinc-100 bg-zinc-50 px-4 py-2 dark:border-[#2D2A45] dark:bg-[#0F0D1E]">
+          <div className="w-4 shrink-0 mr-3" />
+          <div className="flex-1 min-w-0 text-[11px] font-semibold uppercase tracking-wide text-zinc-400">Name</div>
+          <div className="w-28 shrink-0 text-[11px] font-semibold uppercase tracking-wide text-zinc-400">Role</div>
+          <div className="w-20 shrink-0 text-[11px] font-semibold uppercase tracking-wide text-zinc-400">Type</div>
+          <div className="w-32 shrink-0 text-[11px] font-semibold uppercase tracking-wide text-zinc-400">Model</div>
+          <div className="w-28 shrink-0 text-[11px] font-semibold uppercase tracking-wide text-zinc-400">Org</div>
+          <div className="w-24 shrink-0 text-[11px] font-semibold uppercase tracking-wide text-zinc-400">Ping</div>
+          <div className="w-20 shrink-0" />
+        </div>
+
+        {team.length === 0 ? (
+          <div className="flex flex-col items-center gap-3 py-12 text-center">
+            <Users className="h-8 w-8 text-zinc-300 dark:text-zinc-600" />
+            <p className="text-sm font-medium text-zinc-600 dark:text-zinc-300">No agents yet</p>
+            <button onClick={() => setShowRegistry(true)}
+              className="text-sm font-semibold text-violet-600 hover:underline">Add from registry</button>
+          </div>
+        ) : (
+          team.map((m) => (
+            <TeamMemberRow
+              key={m.agentId}
+              m={m}
+              projectId={projectId}
+              pinging={pingingIds.has(m.agentId)}
+              pingMeta={PING_STATUS_META}
+              onPing={() => handlePing(m.agentId)}
+              onRemove={() => handleRemove(m.agentId)}
+              onRoleChange={async (role) => {
+                await addTeamMember(projectId, m.agentId, role);
+                fetchTeam(projectId).then(setTeam);
+              }}
+            />
+          ))
+        )}
+
+        {/* Add row */}
+        <button onClick={() => setShowRegistry(true)}
+          className="flex w-full items-center gap-2 border-t border-dashed border-zinc-200 px-6 py-2.5 text-xs text-zinc-400 hover:bg-zinc-50 hover:text-zinc-600 dark:border-[#2D2A45] dark:hover:bg-white/5 transition-colors">
+          <Plus className="h-3.5 w-3.5" /> Add agent
+        </button>
+      </div>
+
       {showRegistry && (
         <AgentRegistryPanel
           agents={allAgents}
@@ -1445,8 +1349,7 @@ function ProjectHeader({ project }: { project: { id: string; name: string; descr
 
 // ─── Tab Bar ──────────────────────────────────────────────────────────────────
 const TABS: { id: Tab; label: string; icon: React.ElementType }[] = [
-  { id: "table",        label: "Main table",   icon: LayoutList },
-  { id: "kanban",       label: "Kanban",       icon: Kanban     },
+  { id: "table",        label: "Task List",    icon: LayoutList },
   { id: "team",         label: "Team",         icon: Users      },
   { id: "architecture", label: "Architecture", icon: BookOpen   },
   { id: "tech-spec",    label: "Tech Spec",    icon: FileCode2  },
@@ -1500,7 +1403,7 @@ export default function ProjectDetailPage(props: { params: Promise<{ id: string 
     </div>
   );
 
-  const isBoardTab = activeTab === "table" || activeTab === "kanban";
+  const isBoardTab = activeTab === "table";
 
   return (
     <div className="flex h-full flex-col">
@@ -1537,7 +1440,7 @@ export default function ProjectDetailPage(props: { params: Promise<{ id: string 
       <div className={cn("flex min-h-0 flex-1 flex-col overflow-hidden", isBoardTab ? "pt-4 px-0" : "overflow-y-auto px-1 py-4")}>
         {isBoardTab && (
           <SprintBoardTabWithSignal
-            view={activeTab as "table" | "kanban"}
+            view={activeTab as "table"}
             projectId={project.id}
             newTaskSignal={newTaskSignal}
           />
@@ -1551,7 +1454,7 @@ export default function ProjectDetailPage(props: { params: Promise<{ id: string 
 }
 
 // Thin wrapper so Toolbar's "New task" can trigger the modal
-function SprintBoardTabWithSignal({ view, projectId, newTaskSignal }: { view: "table" | "kanban"; projectId: string; newTaskSignal: number }) {
+function SprintBoardTabWithSignal({ view, projectId, newTaskSignal }: { view: "table"; projectId: string; newTaskSignal: number }) {
   const [tasks, setTasks] = React.useState<Task[]>([]);
   const [team,  setTeam]  = React.useState<TeamMemberWithAgent[]>([]);
   const [createIn, setCreateIn] = React.useState<TaskStatus | null>(null);
