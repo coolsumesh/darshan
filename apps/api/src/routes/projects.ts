@@ -149,6 +149,10 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
         vals.push(req.query.status);
         conditions.push(`status = $${vals.length}`);
       }
+      if (req.query.assignee) {
+        vals.push(req.query.assignee);
+        conditions.push(`lower(assignee) = lower($${vals.length})`);
+      }
       const { rows } = await db.query(
         `select * from tasks where ${conditions.join(" and ")} order by created_at asc`,
         vals
