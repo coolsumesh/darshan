@@ -139,11 +139,21 @@ export async function registerAgents(server: FastifyInstance, db: pg.Pool) {
     return { ok: true, projects: rows };
   });
 
-  // ── List agents for an org ──────────────────────────────────────────────────
-  server.get<{ Params: { id: string } }>("/api/v1/orgs/:id/agents", async (req) => {
+  // ── List agents for an org (via org_members, ai_agent type only) ───────────
+  server.get<{ Params: { id: string } }>("/api/v1/orgs/:id/agents", async (req, reply) => {
+    const { rows: orgs } = await db.query(
+      `select id from organisations where id::text = $1 or slug = $1`, [req.params.id]
+    );
+    if (!orgs.length) return reply.status(404).send({ ok: false, error: "org not found" });
     const { rows } = await db.query(
-      `select * from agents where org_id::text = $1 order by lower(name) asc`,
-      [req.params.id]
+      `select a.id, a.name, a.status, a.agent_type, a.model, a.provider,
+              a.capabilities, a.ping_status, a.last_seen_at, a.org_id,
+              om.role as member_role
+       from org_members om
+       join agents a on a.id = om.agent_id
+       where om.org_id = $1 and a.agent_type = 'ai_agent'
+       order by lower(a.name) asc`,
+      [orgs[0].id]
     );
     return { ok: true, agents: rows };
   });

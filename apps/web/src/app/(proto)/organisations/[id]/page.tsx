@@ -482,14 +482,25 @@ function MembersTab({ orgId, canEdit }: { orgId: string; canEdit: boolean }) {
         </div>
       ) : (
         <div className="flex flex-col gap-2">
-          {members.map(m => (
+          {members.map(m => {
+            const isHuman = m.agent_type === "human";
+            return (
             <div key={m.id} className="flex items-center gap-3 rounded-xl bg-zinc-50 px-4 py-3 dark:bg-white/5">
               <AgentAvatar name={m.name} size={36} />
               <div className="min-w-0 flex-1">
-                <div className="text-sm font-semibold text-zinc-900 dark:text-white">{m.name}</div>
-                <div className="text-[11px] text-zinc-400">
-                  {m.agent_type?.replace("ai_", "") ?? "agent"}
-                  {m.model && ` · ${m.model}`}
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="text-sm font-semibold text-zinc-900 dark:text-white">{m.name}</span>
+                  <span className={cn(
+                    "rounded-full px-1.5 py-0.5 text-[10px] font-semibold",
+                    isHuman
+                      ? "bg-sky-100 text-sky-700 dark:bg-sky-500/10 dark:text-sky-300"
+                      : "bg-violet-100 text-violet-700 dark:bg-violet-500/10 dark:text-violet-300"
+                  )}>
+                    {isHuman ? "👤 Human" : "🤖 AI Agent"}
+                  </span>
+                </div>
+                <div className="text-[11px] text-zinc-400 mt-0.5">
+                  {m.model ? m.model : isHuman ? "Team member" : "AI Agent"}
                 </div>
               </div>
               <div className="flex items-center gap-2 shrink-0">
@@ -516,7 +527,7 @@ function MembersTab({ orgId, canEdit }: { orgId: string; canEdit: boolean }) {
                 )}
               </div>
             </div>
-          ))}
+          ); })}
         </div>
       )}
 
