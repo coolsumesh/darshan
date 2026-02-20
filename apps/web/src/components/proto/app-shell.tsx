@@ -13,6 +13,7 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  FileText,
   HelpCircle,
   FolderKanban,
   Menu,
@@ -42,6 +43,12 @@ const TOOL_NAV = [
 
 const SETTINGS_NAV = [
   { href: "/settings", label: "Settings",    icon: Settings         },
+] as const;
+
+const DOCS_NAV = [
+  { href: "/docs",          label: "Overview",      icon: FileText     },
+  { href: "/docs/api",      label: "API Reference", icon: FileText     },
+  { href: "/docs/agents",   label: "Agents",        icon: FileText     },
 ] as const;
 
 const HELP_NAV = [
@@ -143,6 +150,13 @@ function Sidebar({
         <div className="flex flex-col gap-0.5">
           {SETTINGS_NAV.map((item) => (
             <NavItem key={item.href} {...item} active={isActive(item.href, true)} collapsed={collapsed} />
+          ))}
+        </div>
+
+        <SectionLabel label="Docs" collapsed={collapsed} />
+        <div className="flex flex-col gap-0.5">
+          {DOCS_NAV.map((item) => (
+            <NavItem key={item.href} {...item} active={isActive(item.href)} collapsed={collapsed} />
           ))}
         </div>
 

@@ -26,6 +26,8 @@ export type Task = {
   estimated_sp?: number;
   priority?: Priority;
   due_date?: string; // ISO date "YYYY-MM-DD"
+  completion_note?: string;
+  completed_at?: string;
 };
 
 export type TeamMember = {

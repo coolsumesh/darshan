@@ -171,7 +171,7 @@ export async function registerAgents(server: FastifyInstance, db: pg.Pool) {
 
     const token = Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
     const { rows } = await db.query(
-      `insert into agents (name, desc, status, org_id, agent_type, model, provider, capabilities, endpoint_type, endpoint_config, callback_token, ping_status)
+      `insert into agents (name, description, status, org_id, agent_type, model, provider, capabilities, endpoint_type, endpoint_config, callback_token, ping_status)
        values ($1,$2,'offline',$3,$4,$5,$6,$7,$8,$9,$10,'unknown') returning *`,
       [name, desc ?? null, req.params.id, agent_type, model ?? null, provider ?? null,
        JSON.stringify(capabilities), endpoint_type, JSON.stringify(endpoint_config), token]
@@ -195,7 +195,7 @@ export async function registerAgents(server: FastifyInstance, db: pg.Pool) {
     const vals: unknown[]  = [];
     let i = 1;
     if (name         !== undefined) { fields.push(`name = $${i++}`);          vals.push(name); }
-    if (desc         !== undefined) { fields.push(`desc = $${i++}`);          vals.push(desc); }
+    if (desc         !== undefined) { fields.push(`description = $${i++}`);     vals.push(desc); }
     if (agent_type   !== undefined) { fields.push(`agent_type = $${i++}`);    vals.push(agent_type); }
     if (model        !== undefined) { fields.push(`model = $${i++}`);         vals.push(model); }
     if (provider     !== undefined) { fields.push(`provider = $${i++}`);      vals.push(provider); }

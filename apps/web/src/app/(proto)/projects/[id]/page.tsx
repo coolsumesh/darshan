@@ -38,12 +38,12 @@ const STATUS_META: Record<TaskStatus, { label: string; bg: string; text: string;
   done:          { label: "Done",        bg: "bg-emerald-100", text: "text-emerald-700", dot: "bg-emerald-500" },
 };
 
-const TYPE_META: Record<string, { bg: string; text: string }> = {
-  Task:           { bg: "bg-zinc-100",    text: "text-zinc-600"   },
-  Feature:        { bg: "bg-green-100",   text: "text-green-700"  },
-  Bug:            { bg: "bg-red-100",     text: "text-red-600"    },
-  Quality:        { bg: "bg-purple-100",  text: "text-purple-700" },
-  Infrastructure: { bg: "bg-blue-100",    text: "text-blue-700"   },
+const TYPE_META: Record<string, { bg: string; text: string; dot: string }> = {
+  Task:           { bg: "bg-zinc-100",    text: "text-zinc-600",   dot: "bg-zinc-400"   },
+  Feature:        { bg: "bg-green-100",   text: "text-green-700",  dot: "bg-green-500"  },
+  Bug:            { bg: "bg-red-100",     text: "text-red-600",    dot: "bg-red-500"    },
+  Quality:        { bg: "bg-purple-100",  text: "text-purple-700", dot: "bg-purple-500" },
+  Infrastructure: { bg: "bg-blue-100",    text: "text-blue-700",   dot: "bg-blue-500"   },
 };
 
 const PRIORITY_META: Record<string, { label: string; bg: string; text: string; dot: string }> = {
@@ -135,11 +135,17 @@ function PriorityPill({ priority, onClick }: { priority?: string; onClick?: (e: 
   );
 }
 
-function TypePill({ type }: { type?: string }) {
+function TypePill({ type, onClick }: { type?: string; onClick?: (e: React.MouseEvent<HTMLSpanElement>) => void }) {
   const t = type ?? "Task";
   const m = TYPE_META[t] ?? TYPE_META.Task;
   return (
-    <span className={cn("inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold", m.bg, m.text)}>
+    <span
+      onClick={onClick}
+      className={cn(
+        "inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold",
+        m.bg, m.text,
+        onClick && "cursor-pointer hover:opacity-80 transition-opacity"
+      )}>
       {t}
     </span>
   );
@@ -267,6 +273,39 @@ function PriorityPopover({ anchorEl, priority, onSelect, onClose }: {
   );
 }
 
+
+// ─── Type Popover ─────────────────────────────────────────────────────────────
+function TypePopover({ anchorEl, type, onSelect, onClose }: {
+  anchorEl: HTMLElement | null; type?: string; onSelect: (t: string) => void; onClose: () => void;
+}) {
+  const ref = React.useRef<HTMLDivElement>(null);
+  const [pos, setPos] = React.useState<{ top: number; left: number } | null>(null);
+  React.useLayoutEffect(() => {
+    if (!anchorEl) return;
+    const r = anchorEl.getBoundingClientRect();
+    setPos({ top: r.bottom + 4, left: r.left });
+  }, [anchorEl]);
+  React.useEffect(() => {
+    const handler = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) onClose(); };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [onClose]);
+  if (!pos || typeof document === "undefined") return null;
+  return createPortal(
+    <div ref={ref} style={{ position: "fixed", top: pos.top, left: pos.left, zIndex: 9999 }}
+      className="w-40 overflow-hidden rounded-xl bg-white shadow-lg ring-1 ring-zinc-200 dark:bg-[#1E1B35] dark:ring-[#2D2A45]">
+      {TASK_TYPES.map((t) => (
+        <button key={t} onClick={() => { onSelect(t); onClose(); }}
+          className={cn("flex w-full items-center gap-2.5 px-3 py-2 text-sm transition-colors hover:bg-zinc-50 dark:hover:bg-white/5", t === (type ?? "Task") && "bg-zinc-50 dark:bg-white/5")}>
+          <span className={cn("h-2 w-2 shrink-0 rounded-full", TYPE_META[t]?.dot ?? "bg-zinc-300")} />
+          <span className="font-medium text-zinc-700 dark:text-zinc-300">{t}</span>
+          {t === (type ?? "Task") && <span className="ml-auto text-zinc-400">&#x2713;</span>}
+        </button>
+      ))}
+    </div>,
+    document.body
+  );
+}
 // ─── Color bar ────────────────────────────────────────────────────────────────
 function SectionColorBar({ tasks }: { tasks: Task[] }) {
   const total = tasks.length;
@@ -409,7 +448,25 @@ function TaskDetailPanel({
               className="w-16 rounded-lg bg-white px-2 py-0.5 text-xs ring-1 ring-zinc-200 focus:outline-none dark:bg-white/10 dark:ring-white/10 dark:text-white" />
           )}
           {task.proposer && propRow("Created by", <span className="text-xs text-zinc-500">{task.proposer}</span>)}
+          {task.completed_at && propRow("Completed", <span className="text-xs text-emerald-600 dark:text-emerald-400">{new Date(task.completed_at).toLocaleDateString()}</span>)}
         </div>
+
+        {/* Completion summary — shown when done */}
+        {task.status === "done" && (
+          <div className="mb-4">
+            <div className="mb-2 flex items-center gap-2">
+              <span className="h-2 w-2 rounded-full bg-emerald-400" />
+              <span className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Completion Summary</span>
+            </div>
+            <textarea
+              value={task.completion_note ?? ""}
+              onChange={(e) => onUpdate(task.id, { completion_note: e.target.value })}
+              rows={4}
+              placeholder="What was completed? List deliverables, decisions, and outcomes..."
+              className="w-full resize-none rounded-xl bg-emerald-50 p-3 text-sm text-zinc-700 placeholder:text-zinc-400 ring-1 ring-emerald-200 focus:outline-none focus:ring-emerald-400 dark:bg-emerald-500/5 dark:text-zinc-300 dark:ring-emerald-500/20"
+            />
+          </div>
+        )}
 
         {/* Description */}
         <div className="mb-4">
@@ -546,7 +603,12 @@ function TableRow({
 
       {/* Type */}
       <div className="flex w-32 shrink-0 items-center px-3">
-        <TypePill type={task.type} />
+        <TypePill type={task.type} onClick={(e) => openPop === "type" ? closePopover() : openPopover("type", e.currentTarget as HTMLElement)} />
+        {openPop === "type" && (
+          <TypePopover anchorEl={anchorEl} type={task.type}
+            onSelect={(t) => { onUpdate(task.id, { type: t }); closePopover(); }}
+            onClose={closePopover} />
+        )}
       </div>
 
       {/* Due date */}
