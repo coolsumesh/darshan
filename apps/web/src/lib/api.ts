@@ -8,9 +8,15 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "/api/backend";
 
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T | null> {
   try {
+    const headers: Record<string, string> = {
+      ...(init?.headers as Record<string, string> ?? {}),
+    };
+    // Only set Content-Type when there is a body — Fastify v5 rejects
+    // DELETE/GET requests that have Content-Type: application/json but no body.
+    if (init?.body) headers["Content-Type"] = "application/json";
     const res = await fetch(`${API_BASE}${path}`, {
-      headers: { "Content-Type": "application/json" },
       ...init,
+      headers,
     });
     if (!res.ok) return null;
     return res.json() as Promise<T>;
