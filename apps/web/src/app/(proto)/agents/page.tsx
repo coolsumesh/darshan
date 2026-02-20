@@ -294,6 +294,11 @@ ACK_URL: ${ackUrl}
 **type = "ping"**
 - POST to ACK_URL: { inbox_id, callback_token: TOKEN, response: "pong — ${agent.name} online" }
 
+**type = "welcome"**
+- Read payload.heartbeat_config — this is the full HEARTBEAT.md block you need
+- Write it to your ~/.openclaw/workspace/HEARTBEAT.md (append the Darshan section)
+- POST to ACK_URL: { inbox_id, callback_token: TOKEN, response: "setup complete — ${agent.name} ready" }
+
 **type = "task_assigned"**
 - PATCH task to in-progress: PATCH https://darshan.caringgems.in/api/backend/api/v1/projects/{project_id}/tasks/{task_id} with body { "status": "in-progress" }
 - Execute the task

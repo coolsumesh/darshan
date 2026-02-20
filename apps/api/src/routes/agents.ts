@@ -4,6 +4,7 @@ import { broadcast } from "../broadcast.js";
 import { writeFileSync, unlinkSync, existsSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join, extname } from "path";
+import { randomBytes } from "crypto";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -169,14 +170,62 @@ export async function registerAgents(server: FastifyInstance, db: pg.Pool) {
     const { name, desc, model, provider, agent_type = "ai_agent", capabilities = [], endpoint_type = "openclaw_poll", endpoint_config = {} } = req.body;
     if (!name) return reply.status(400).send({ ok: false, error: "name required" });
 
-    const token = Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+    const token = randomBytes(32).toString("hex");
     const { rows } = await db.query(
       `insert into agents (name, description, status, org_id, agent_type, model, provider, capabilities, endpoint_type, endpoint_config, callback_token, ping_status)
        values ($1,$2,'offline',$3,$4,$5,$6,$7,$8,$9,$10,'unknown') returning *`,
       [name, desc ?? null, req.params.id, agent_type, model ?? null, provider ?? null,
        JSON.stringify(capabilities), endpoint_type, JSON.stringify(endpoint_config), token]
     );
-    return { ok: true, agent: rows[0] };
+
+    const agent = rows[0];
+
+    // Auto-send welcome inbox item with full setup instructions
+    if (agent_type === "ai_agent" && endpoint_type === "openclaw_poll") {
+      const baseUrl = "https://darshan.caringgems.in/api/backend/api/v1";
+      const inboxUrl = `${baseUrl}/agents/${agent.id}/inbox`;
+      const ackUrl   = `${baseUrl}/agents/${agent.id}/inbox/ack`;
+      const heartbeatBlock =
+`## Darshan Agent Inbox — ${name}
+AGENT_ID: ${agent.id}
+TOKEN: ${token}
+INBOX_URL: ${inboxUrl}
+ACK_URL: ${ackUrl}
+
+### Steps (run on every heartbeat):
+1. GET INBOX_URL with header: Authorization: Bearer TOKEN
+2. For each pending item, handle by type:
+
+**type = "ping"**
+- POST to ACK_URL: { inbox_id, callback_token: TOKEN, response: "pong — ${name} online" }
+
+**type = "task_assigned"**
+- PATCH task to in-progress: PATCH https://darshan.caringgems.in/api/backend/api/v1/projects/{project_id}/tasks/{task_id} with body { "status": "in-progress" }
+- Execute the task
+- POST to ACK_URL: { inbox_id, callback_token: TOKEN, response: "picked up — working on: {title}" }
+
+**type = "welcome"**
+- Read payload.heartbeat_config — this is the full HEARTBEAT.md block you need
+- Write it to your ~/.openclaw/workspace/HEARTBEAT.md (append the Darshan section)
+- POST to ACK_URL: { inbox_id, callback_token: TOKEN, response: "setup complete — ${name} ready" }
+
+**Any other type**
+- POST to ACK_URL: { inbox_id, callback_token: TOKEN, response: "ack" }`;
+
+      await db.query(
+        `insert into agent_inbox (agent_id, type, payload) values ($1, 'welcome', $2)`,
+        [agent.id, JSON.stringify({
+          message: `Welcome to Darshan, ${name}! You have been registered as an AI agent. Paste the heartbeat_config block below into your OpenClaw HEARTBEAT.md to start receiving tasks.`,
+          heartbeat_config: heartbeatBlock,
+          agent_id: agent.id,
+          token,
+          inbox_url: inboxUrl,
+          ack_url: ackUrl,
+        })]
+      );
+    }
+
+    return { ok: true, agent };
   });
 
   // ── Delete / remove an agent ───────────────────────────────────────────────
