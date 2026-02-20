@@ -413,6 +413,7 @@ function AgentDetailPanel({ agent, onClose, onPing, onRemove, onUpdated, pinging
   const [saving, setSaving]             = React.useState(false);
 
   function startEdit() {
+    setShowCreds(false);
     setEditName(agent.name); setEditDesc(agent.desc ?? "");
     setEditType((agent.agent_type as AgentType) ?? "ai_agent");
     setEditModel(agent.model ?? ""); setEditProvider(agent.provider ?? "anthropic");

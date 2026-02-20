@@ -1174,7 +1174,7 @@ function TeamMemberRow({ m, projectId, pinging, pingMeta, onPing, onRemove, onRo
         <span className="text-[11px] text-zinc-400">{ps.label}</span>
       </div>
       {/* Actions */}
-      <div className="w-20 shrink-0 flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+      <div className="w-20 shrink-0 flex items-center justify-end gap-1">
         <button onClick={onPing} disabled={pinging} title="Ping"
           className="grid h-6 w-6 place-items-center rounded text-zinc-400 hover:bg-zinc-200 hover:text-zinc-700 dark:hover:bg-white/10 transition-colors disabled:opacity-40">
           <Zap className="h-3.5 w-3.5" />
