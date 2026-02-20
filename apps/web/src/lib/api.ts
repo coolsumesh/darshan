@@ -195,6 +195,17 @@ export async function fetchAgentProjects(agentId: string): Promise<AgentProject[
   return data?.ok ? data.projects : [];
 }
 
+export async function updateAgent(agentId: string, payload: Partial<{
+  name: string; desc: string; agent_type: string;
+  model: string; provider: string; capabilities: string[]; endpoint_type: string;
+}>): Promise<boolean> {
+  const data = await apiFetch<{ ok: boolean }>(`/api/v1/agents/${agentId}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+  return data?.ok ?? false;
+}
+
 export async function deleteAgent(agentId: string): Promise<boolean> {
   const data = await apiFetch<{ ok: boolean }>(`/api/v1/agents/${agentId}`, { method: "DELETE" });
   return data?.ok ?? false;

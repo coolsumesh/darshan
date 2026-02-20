@@ -3,13 +3,13 @@
 import * as React from "react";
 import {
   Building2, Bot, Check, ChevronDown, ExternalLink,
-  LayoutGrid, List, Plus, Search, X, Zap, Users,
-  Activity, Clock, Trash2,
+  LayoutGrid, List, Pencil, Plus, Search, X, Zap, Users,
+  Activity, Trash2,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { fetchAgents, fetchOrgs, createOrg, createOrgAgent, pingAgent, fetchAgentProjects, deleteAgent, type Org, type AgentProject } from "@/lib/api";
+import { fetchAgents, fetchOrgs, createOrg, createOrgAgent, pingAgent, fetchAgentProjects, deleteAgent, updateAgent, updateOrg, deleteOrg, type Org, type AgentProject } from "@/lib/api";
 import type { Agent } from "@/lib/agents";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -53,16 +53,22 @@ function pingLabel(status: string, ms?: number): string {
   return PING_META[status]?.label ?? "Unknown";
 }
 
+const AGENT_TYPE_LABELS: Record<string, string> = {
+  ai_agent: "AI Agent", ai_coordinator: "Coordinator", human: "Human", system: "System",
+};
+function formatAgentType(t?: string) { return AGENT_TYPE_LABELS[t ?? ""] ?? t ?? "—"; }
+
 const AGENT_TYPES   = ["ai_agent", "ai_coordinator", "human", "system"];
 const PROVIDERS     = ["anthropic", "openai", "google", "mistral", "other"];
 const CAPABILITIES  = ["code", "design", "ux", "review", "api", "infra", "deploy", "plan", "data", "writing"];
 const POPULAR_MODELS = ["claude-sonnet-4-6", "claude-opus-4-6", "gpt-4o", "gpt-4-turbo", "gemini-1.5-pro", "mistral-large"];
-const ORG_TYPES     = [{ value: "partner", label: "Partner" }, { value: "client", label: "Client" }, { value: "vendor", label: "Vendor" }];
+const ORG_TYPES     = [{ value: "own", label: "Own" }, { value: "partner", label: "Partner" }, { value: "client", label: "Client" }, { value: "vendor", label: "Vendor" }];
 
 // ─── Agent Detail Panel ───────────────────────────────────────────────────────
-function AgentDetailPanel({ agent, onClose, onPing, onRemove, pinging }: {
+function AgentDetailPanel({ agent, onClose, onPing, onRemove, onUpdated, pinging }: {
   agent: ExtAgent; onClose: () => void;
-  onPing: (id: string) => void; onRemove: (id: string) => void; pinging: boolean;
+  onPing: (id: string) => void; onRemove: (id: string) => void;
+  onUpdated: () => void; pinging: boolean;
 }) {
   const sm  = STATUS_META[agent.status] ?? STATUS_META.offline;
   const pingStatusKey = pinging ? "pending" : (agent.ping_status ?? "unknown");
@@ -71,6 +77,33 @@ function AgentDetailPanel({ agent, onClose, onPing, onRemove, pinging }: {
   const [projects, setProjects] = React.useState<AgentProject[]>([]);
   const [confirmDelete, setConfirmDelete] = React.useState(false);
   const [deleting, setDeleting] = React.useState(false);
+
+  // Edit state
+  const [editing, setEditing] = React.useState(false);
+  const [editName, setEditName]         = React.useState(agent.name);
+  const [editDesc, setEditDesc]         = React.useState(agent.desc ?? "");
+  const [editType, setEditType]         = React.useState(agent.agent_type ?? "ai_agent");
+  const [editModel, setEditModel]       = React.useState(agent.model ?? "");
+  const [editProvider, setEditProvider] = React.useState(agent.provider ?? "anthropic");
+  const [editCaps, setEditCaps]         = React.useState<string[]>(agent.capabilities ?? []);
+  const [saving, setSaving]             = React.useState(false);
+
+  function startEdit() {
+    setEditName(agent.name); setEditDesc(agent.desc ?? "");
+    setEditType(agent.agent_type ?? "ai_agent"); setEditModel(agent.model ?? "");
+    setEditProvider(agent.provider ?? "anthropic"); setEditCaps(agent.capabilities ?? []);
+    setEditing(true);
+  }
+  function cancelEdit() { setEditing(false); }
+  async function saveEdit() {
+    setSaving(true);
+    await updateAgent(agent.id, {
+      name: editName.trim(), desc: editDesc.trim(),
+      agent_type: editType, model: editModel, provider: editProvider, capabilities: editCaps,
+    });
+    setSaving(false); setEditing(false); onUpdated();
+  }
+  function toggleCap(c: string) { setEditCaps(p => p.includes(c) ? p.filter(x => x !== c) : [...p, c]); }
 
   React.useEffect(() => {
     fetchAgentProjects(agent.id).then(setProjects);
@@ -82,6 +115,8 @@ function AgentDetailPanel({ agent, onClose, onPing, onRemove, pinging }: {
     setDeleting(false);
   }
 
+  const sel = "w-full rounded-xl border-0 bg-zinc-50 px-3 py-2 text-sm text-zinc-900 ring-1 ring-zinc-200 focus:outline-none focus:ring-2 focus:ring-brand-400/40 dark:bg-zinc-900 dark:text-zinc-100 dark:ring-zinc-700";
+
   return (
     <div className="flex h-full w-[400px] shrink-0 flex-col border-l border-zinc-200 bg-white dark:border-[#2D2A45] dark:bg-[#16132A] animate-slide-in-right">
       {/* Header */}
@@ -89,16 +124,27 @@ function AgentDetailPanel({ agent, onClose, onPing, onRemove, pinging }: {
         <button onClick={onClose} className="grid h-7 w-7 place-items-center rounded-lg text-zinc-400 hover:bg-zinc-100 dark:hover:bg-white/10">
           <X className="h-4 w-4" />
         </button>
-        <span className="flex-1 font-display font-bold text-zinc-900 dark:text-white">{agent.name}</span>
-        {isCoord && (
+        <span className="flex-1 font-display font-bold text-zinc-900 dark:text-white">
+          {editing ? <span className="text-brand-600">Editing</span> : agent.name}
+        </span>
+        {!editing && isCoord && (
           <span className="rounded-full bg-brand-100 px-2 py-0.5 text-[11px] font-semibold text-brand-700 dark:bg-brand-500/10 dark:text-brand-300">Coordinator</span>
         )}
-        <button
-          onClick={() => setConfirmDelete(true)}
-          className="grid h-7 w-7 place-items-center rounded-lg text-zinc-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-500/10 transition-colors"
-          title="Remove agent">
-          <Trash2 className="h-4 w-4" />
-        </button>
+        {!editing && (
+          <button onClick={startEdit}
+            className="grid h-7 w-7 place-items-center rounded-lg text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-white/10 transition-colors"
+            title="Edit agent">
+            <Pencil className="h-3.5 w-3.5" />
+          </button>
+        )}
+        {!editing && (
+          <button
+            onClick={() => setConfirmDelete(true)}
+            className="grid h-7 w-7 place-items-center rounded-lg text-zinc-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-500/10 transition-colors"
+            title="Remove agent">
+            <Trash2 className="h-4 w-4" />
+          </button>
+        )}
       </div>
 
       {/* Confirm delete */}
@@ -120,6 +166,70 @@ function AgentDetailPanel({ agent, onClose, onPing, onRemove, pinging }: {
       )}
 
       <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-5">
+
+        {/* ── EDIT MODE ── */}
+        {editing ? (
+          <>
+            <div className="flex flex-col gap-4">
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-semibold text-zinc-500 uppercase tracking-wide">Name</label>
+                <input value={editName} onChange={e => setEditName(e.target.value)} className={sel} />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-semibold text-zinc-500 uppercase tracking-wide">Description</label>
+                <textarea value={editDesc} onChange={e => setEditDesc(e.target.value)} rows={3}
+                  className={cn(sel, "resize-none")} placeholder="What does this agent do?" />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-xs font-semibold text-zinc-500 uppercase tracking-wide">Agent type</label>
+                  <select value={editType} onChange={e => setEditType(e.target.value)} className={sel}>
+                    {AGENT_TYPES.map(t => <option key={t} value={t}>{formatAgentType(t)}</option>)}
+                  </select>
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-xs font-semibold text-zinc-500 uppercase tracking-wide">Provider</label>
+                  <select value={editProvider} onChange={e => setEditProvider(e.target.value)} className={sel}>
+                    {PROVIDERS.map(p => <option key={p}>{p}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-semibold text-zinc-500 uppercase tracking-wide">Model</label>
+                <select value={editModel} onChange={e => setEditModel(e.target.value)} className={sel}>
+                  <option value="">— none —</option>
+                  {POPULAR_MODELS.map(m => <option key={m} value={m}>{m}</option>)}
+                </select>
+              </div>
+              <div className="flex flex-col gap-2">
+                <label className="text-xs font-semibold text-zinc-500 uppercase tracking-wide">Capabilities</label>
+                <div className="flex flex-wrap gap-2">
+                  {CAPABILITIES.map(c => (
+                    <button key={c} onClick={() => toggleCap(c)}
+                      className={cn("flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium ring-1 transition-colors",
+                        editCaps.includes(c)
+                          ? "bg-brand-600 text-white ring-brand-600"
+                          : "bg-zinc-100 text-zinc-600 ring-zinc-200 hover:bg-zinc-200 dark:bg-white/10 dark:text-zinc-400 dark:ring-white/10")}>
+                      {editCaps.includes(c) && <Check className="h-3 w-3" />}{c}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <div className="flex gap-2 border-t border-zinc-100 pt-4 dark:border-white/5">
+              <button onClick={cancelEdit}
+                className="flex-1 rounded-xl py-2 text-sm font-semibold text-zinc-600 ring-1 ring-zinc-200 hover:bg-zinc-50 dark:text-zinc-400 dark:ring-white/10">
+                Cancel
+              </button>
+              <button onClick={saveEdit} disabled={saving || !editName.trim()}
+                className="flex-1 rounded-xl bg-brand-600 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-60 transition-colors">
+                {saving ? "Saving…" : "Save changes"}
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+        {/* ── VIEW MODE ── */}
         {/* Identity */}
         <div className="flex items-start gap-4">
           <div className={cn(
@@ -135,7 +245,7 @@ function AgentDetailPanel({ agent, onClose, onPing, onRemove, pinging }: {
             <div className="mt-1 flex flex-wrap gap-1.5">
               {agent.model && <span className="rounded bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-600 dark:bg-white/10 dark:text-zinc-400">{agent.model}</span>}
               {agent.provider && <span className="rounded bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-600 dark:bg-white/10 dark:text-zinc-400">{agent.provider}</span>}
-              {agent.agent_type && <span className="rounded bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-600 dark:bg-white/10 dark:text-zinc-400">{agent.agent_type}</span>}
+              {agent.agent_type && <span className="rounded bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-600 dark:bg-white/10 dark:text-zinc-400">{formatAgentType(agent.agent_type)}</span>}
             </div>
           </div>
         </div>
@@ -268,6 +378,8 @@ function AgentDetailPanel({ agent, onClose, onPing, onRemove, pinging }: {
             </div>
           </div>
         </div>
+          </>
+        )}
       </div>
     </div>
   );
@@ -389,7 +501,7 @@ function AgentListRow({ agent, onPing, onInspect, pinging }: {
       <div className={cn("w-24 shrink-0 flex items-center gap-1 text-xs font-semibold", sm.text)}>
         <span className={cn("h-1.5 w-1.5 rounded-full", sm.dot)} />{sm.label}
       </div>
-      <div className="w-28 shrink-0 text-xs text-zinc-500">{agent.agent_type ?? "—"}</div>
+      <div className="w-28 shrink-0 text-xs text-zinc-500">{formatAgentType(agent.agent_type)}</div>
       <div className="w-36 shrink-0 text-xs text-zinc-500 font-mono">{agent.model ?? "—"}</div>
       <div className="flex min-w-0 flex-1 flex-wrap gap-1">
         {(agent.capabilities ?? []).slice(0, 3).map((c) => (
@@ -413,10 +525,13 @@ function AgentListRow({ agent, onPing, onInspect, pinging }: {
 }
 
 // ─── Org Section ──────────────────────────────────────────────────────────────
-function OrgSection({ org, agents, view, onPing, onInspect, onOnboardAgent, pingingIds }: {
+function OrgSection({ org, agents, view, onPing, onInspect, onOnboardAgent, onEditOrg, onDeleteOrg, pingingIds }: {
   org: Org; agents: ExtAgent[]; view: AgentView;
   onPing: (id: string) => void; onInspect: (a: ExtAgent) => void;
-  onOnboardAgent: (orgId: string) => void; pingingIds: Set<string>;
+  onOnboardAgent: (orgId: string) => void;
+  onEditOrg: (org: Org) => void;
+  onDeleteOrg: (org: Org) => void;
+  pingingIds: Set<string>;
 }) {
   const [collapsed, setCollapsed] = React.useState(false);
   const orgTypeCls =
@@ -428,30 +543,44 @@ function OrgSection({ org, agents, view, onPing, onInspect, onOnboardAgent, ping
 
   return (
     <div className="mb-6">
-      <button onClick={() => setCollapsed(c => !c)}
-        className="group/org flex w-full items-center gap-3 rounded-xl px-3 py-3 hover:bg-zinc-50 dark:hover:bg-white/5 transition-colors">
-        <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-zinc-900 dark:bg-zinc-700">
-          <Building2 className="h-5 w-5 text-white" />
-        </div>
-        <div className="min-w-0 flex-1 text-left">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="font-display font-bold text-zinc-900 dark:text-white">{org.name}</span>
-            <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-semibold capitalize", orgTypeCls)}>{org.type}</span>
-            <span className="font-mono text-xs text-zinc-400">@{org.slug}</span>
+      <div className="flex items-center gap-2 rounded-xl px-3 py-2 hover:bg-zinc-50 dark:hover:bg-white/5 transition-colors">
+        {/* Collapse trigger — takes up most of the row */}
+        <button onClick={() => setCollapsed(c => !c)} className="flex min-w-0 flex-1 items-center gap-3 text-left">
+          <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-zinc-900 dark:bg-zinc-700">
+            <Building2 className="h-5 w-5 text-white" />
           </div>
-          <div className="mt-0.5 flex items-center gap-3 text-xs text-zinc-400">
-            <span>{agents.length} agent{agents.length !== 1 ? "s" : ""}</span>
-            <span>·</span>
-            <span className="text-emerald-500">{onlineCount} online</span>
-            {org.project_count != null && <><span>·</span><span>{org.project_count} project{org.project_count !== 1 ? "s" : ""}</span></>}
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-display font-bold text-zinc-900 dark:text-white">{org.name}</span>
+              <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-semibold capitalize", orgTypeCls)}>{org.type}</span>
+              <span className="font-mono text-xs text-zinc-400">@{org.slug}</span>
+            </div>
+            <div className="mt-0.5 flex items-center gap-3 text-xs text-zinc-400">
+              <span>{agents.length} agent{agents.length !== 1 ? "s" : ""}</span>
+              <span>·</span>
+              <span className="text-emerald-500">{onlineCount} online</span>
+              {org.project_count != null && <><span>·</span><span>{org.project_count} project{org.project_count !== 1 ? "s" : ""}</span></>}
+            </div>
           </div>
-        </div>
-        <button onClick={e => { e.stopPropagation(); onOnboardAgent(org.id); }}
-          className="flex items-center gap-1 rounded-lg bg-brand-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-brand-700 transition-colors opacity-0 group-hover/org:opacity-100">
+          <ChevronDown className={cn("h-4 w-4 text-zinc-400 transition-transform shrink-0", collapsed && "-rotate-90")} />
+        </button>
+
+        {/* Action buttons — always visible */}
+        <button onClick={() => onOnboardAgent(org.id)}
+          className="flex items-center gap-1 rounded-lg bg-brand-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-brand-700 transition-colors">
           <Plus className="h-3 w-3" /> Agent
         </button>
-        <ChevronDown className={cn("h-4 w-4 text-zinc-400 transition-transform shrink-0", collapsed && "-rotate-90")} />
-      </button>
+        <button onClick={() => onEditOrg(org)}
+          className="grid h-7 w-7 place-items-center rounded-lg text-zinc-400 hover:bg-zinc-200 hover:text-zinc-600 dark:hover:bg-white/10 transition-colors"
+          title="Edit organisation">
+          <Pencil className="h-3.5 w-3.5" />
+        </button>
+        <button onClick={() => onDeleteOrg(org)}
+          className="grid h-7 w-7 place-items-center rounded-lg text-zinc-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-500/10 transition-colors"
+          title="Delete organisation">
+          <Trash2 className="h-3.5 w-3.5" />
+        </button>
+      </div>
 
       {!collapsed && (
         <div className="mt-2 px-2">
@@ -488,6 +617,123 @@ function OrgSection({ org, agents, view, onPing, onInspect, onOnboardAgent, ping
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── Edit Org Modal ───────────────────────────────────────────────────────────
+function EditOrgModal({ org, onDone, onClose }: {
+  org: Org; onDone: () => void; onClose: () => void;
+}) {
+  const [name, setName]   = React.useState(org.name);
+  const [desc, setDesc]   = React.useState(org.description ?? "");
+  const [type, setType]   = React.useState(org.type);
+  const [saving, setSaving] = React.useState(false);
+  const [error, setError]   = React.useState("");
+
+  async function handleSave() {
+    if (!name.trim()) { setError("Name is required."); return; }
+    setSaving(true); setError("");
+    const result = await updateOrg(org.id, { name: name.trim(), description: desc.trim() || undefined, type });
+    if (result) { onDone(); }
+    else { setError("Failed to save. Please try again."); setSaving(false); }
+  }
+
+  const inp = "w-full rounded-xl border-0 bg-zinc-50 px-3 py-2.5 text-sm text-zinc-900 ring-1 ring-zinc-200 focus:outline-none focus:ring-2 focus:ring-brand-400/40 dark:bg-zinc-900 dark:text-zinc-100 dark:ring-zinc-700";
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <button className="absolute inset-0 bg-zinc-950/50 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative z-10 flex w-full max-w-md flex-col rounded-2xl bg-white shadow-xl ring-1 ring-zinc-200 dark:bg-[#16132A] dark:ring-[#2D2A45]">
+        <div className="flex items-center justify-between border-b border-zinc-200 px-5 py-4 dark:border-[#2D2A45]">
+          <div>
+            <div className="font-display text-sm font-bold text-zinc-900 dark:text-white">Edit Organisation</div>
+            <div className="mt-0.5 text-xs text-zinc-500">@{org.slug} · slug cannot be changed</div>
+          </div>
+          <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg text-zinc-400 hover:bg-zinc-100 dark:hover:bg-white/10"><X className="h-4 w-4" /></button>
+        </div>
+        <div className="flex flex-col gap-4 p-5">
+          <div>
+            <label className="mb-2 block text-xs font-semibold text-zinc-700 dark:text-zinc-300">Relationship type</label>
+            <div className="flex gap-2">
+              {ORG_TYPES.map(({ value, label }) => (
+                <button key={value} onClick={() => setType(value as Org["type"])}
+                  className={cn("flex-1 rounded-xl py-2 text-sm font-semibold ring-1 transition-colors",
+                    type === value ? "bg-brand-600 text-white ring-brand-600" : "bg-zinc-50 text-zinc-600 ring-zinc-200 hover:bg-zinc-100 dark:bg-white/5 dark:text-zinc-400 dark:ring-white/10")}>
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">Organisation name <span className="text-red-500">*</span></label>
+            <Input autoFocus value={name} onChange={e => setName(e.target.value)} />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">Slug (read-only)</label>
+            <input value={org.slug} disabled className={cn(inp, "opacity-50 cursor-not-allowed")} />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">Description</label>
+            <Input placeholder="What does this org do?" value={desc} onChange={e => setDesc(e.target.value)} />
+          </div>
+          {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-600 dark:bg-red-500/10">{error}</p>}
+        </div>
+        <div className="flex justify-end gap-3 border-t border-zinc-200 px-5 py-4 dark:border-[#2D2A45]">
+          <Button variant="secondary" size="sm" onClick={onClose}>Cancel</Button>
+          <Button variant="primary" size="sm" onClick={handleSave} disabled={!name || saving}>
+            {saving ? "Saving…" : "Save changes"}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Delete Org Confirm ───────────────────────────────────────────────────────
+function DeleteOrgConfirm({ org, agentCount, onDone, onClose }: {
+  org: Org; agentCount: number; onDone: () => void; onClose: () => void;
+}) {
+  const [deleting, setDeleting] = React.useState(false);
+  const hasAgents = agentCount > 0;
+
+  async function handleDelete() {
+    setDeleting(true);
+    const ok = await deleteOrg(org.id);
+    if (ok) onDone();
+    else { setDeleting(false); }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <button className="absolute inset-0 bg-zinc-950/50 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative z-10 w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl ring-1 ring-zinc-200 dark:bg-[#16132A] dark:ring-[#2D2A45]">
+        <div className="mb-4 grid h-12 w-12 place-items-center rounded-2xl bg-red-100 dark:bg-red-500/10">
+          <Trash2 className="h-6 w-6 text-red-600 dark:text-red-400" />
+        </div>
+        <h3 className="font-display text-base font-bold text-zinc-900 dark:text-white">Delete {org.name}?</h3>
+        {hasAgents ? (
+          <p className="mt-2 text-sm text-zinc-500">
+            This org has <strong className="text-zinc-800 dark:text-zinc-200">{agentCount} agent{agentCount !== 1 ? "s" : ""}</strong> assigned. Remove all agents first before deleting the organisation.
+          </p>
+        ) : (
+          <p className="mt-2 text-sm text-zinc-500">
+            This will permanently delete <strong className="text-zinc-800 dark:text-zinc-200">{org.name}</strong> and all its records. This cannot be undone.
+          </p>
+        )}
+        <div className="mt-5 flex gap-3">
+          <button onClick={onClose}
+            className="flex-1 rounded-xl py-2 text-sm font-semibold text-zinc-600 ring-1 ring-zinc-200 hover:bg-zinc-50 dark:text-zinc-400 dark:ring-white/10">
+            Cancel
+          </button>
+          {!hasAgents && (
+            <button onClick={handleDelete} disabled={deleting}
+              className="flex-1 rounded-xl bg-red-600 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-60 transition-colors">
+              {deleting ? "Deleting…" : "Delete org"}
+            </button>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -703,6 +949,10 @@ export default function AgentsPage() {
   const [showAgentModal,  setShowAgentModal]  = React.useState(false);
   const [agentModalOrgId, setAgentModalOrgId] = React.useState<string | undefined>();
 
+  // Org edit / delete
+  const [editOrgTarget,         setEditOrgTarget]         = React.useState<Org | null>(null);
+  const [deleteOrgTarget,       setDeleteOrgTarget]       = React.useState<Org | null>(null);
+
   async function reload() {
     const [os, ag] = await Promise.all([fetchOrgs(), fetchAgents()]);
     setOrgs(os);
@@ -867,7 +1117,10 @@ export default function AgentsPage() {
               {ownOrg && (
                 <OrgSection org={ownOrg} agents={agentsFor(ownOrg.id)} view={view}
                   onPing={handlePing} onInspect={setDetailAgent}
-                  onOnboardAgent={openAgentModal} pingingIds={pingingIds} />
+                  onOnboardAgent={openAgentModal}
+                  onEditOrg={setEditOrgTarget}
+                  onDeleteOrg={setDeleteOrgTarget}
+                  pingingIds={pingingIds} />
               )}
               {partnerOrgs.length > 0 && (
                 <div className="mb-5 flex items-center gap-3">
@@ -879,7 +1132,10 @@ export default function AgentsPage() {
               {partnerOrgs.map(org => (
                 <OrgSection key={org.id} org={org} agents={agentsFor(org.id)} view={view}
                   onPing={handlePing} onInspect={setDetailAgent}
-                  onOnboardAgent={openAgentModal} pingingIds={pingingIds} />
+                  onOnboardAgent={openAgentModal}
+                  onEditOrg={setEditOrgTarget}
+                  onDeleteOrg={setDeleteOrgTarget}
+                  pingingIds={pingingIds} />
               ))}
               {unassigned.length > 0 && (
                 <div>
@@ -916,6 +1172,7 @@ export default function AgentsPage() {
           onClose={() => setDetailAgent(null)}
           onPing={(id) => { handlePing(id); setDetailAgent(a => a ? { ...a, ping_status: "pending" } : null); }}
           onRemove={handleRemoveAgent}
+          onUpdated={() => { reload(); setDetailAgent(null); }}
           pinging={pingingIds.has(detailAgent.id)}
         />
       )}
@@ -925,6 +1182,21 @@ export default function AgentsPage() {
         <OnboardOrgModal
           onDone={() => { setShowOrgModal(false); reload(); }}
           onClose={() => setShowOrgModal(false)}
+        />
+      )}
+      {editOrgTarget && (
+        <EditOrgModal
+          org={editOrgTarget}
+          onDone={() => { setEditOrgTarget(null); reload(); }}
+          onClose={() => setEditOrgTarget(null)}
+        />
+      )}
+      {deleteOrgTarget && (
+        <DeleteOrgConfirm
+          org={deleteOrgTarget}
+          agentCount={agents.filter(a => a.org_id === deleteOrgTarget.id).length}
+          onDone={() => { setDeleteOrgTarget(null); reload(); }}
+          onClose={() => setDeleteOrgTarget(null)}
         />
       )}
       {showAgentModal && (

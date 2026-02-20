@@ -180,6 +180,38 @@ export async function registerAgents(server: FastifyInstance, db: pg.Pool) {
   });
 
   // ── Delete / remove an agent ───────────────────────────────────────────────
+  // ── Update agent ────────────────────────────────────────────────────────────
+  server.patch<{ Params: { id: string }; Body: {
+    name?: string; desc?: string; agent_type?: string;
+    model?: string; provider?: string; capabilities?: string[]; endpoint_type?: string;
+  } }>("/api/v1/agents/:id", async (req, reply) => {
+    const { rows } = await db.query(
+      `select id from agents where id::text = $1`, [req.params.id]
+    );
+    if (!rows.length) return reply.status(404).send({ ok: false, error: "agent not found" });
+
+    const { name, desc, agent_type, model, provider, capabilities, endpoint_type } = req.body ?? {};
+    const fields: string[] = [];
+    const vals: unknown[]  = [];
+    let i = 1;
+    if (name         !== undefined) { fields.push(`name = $${i++}`);          vals.push(name); }
+    if (desc         !== undefined) { fields.push(`desc = $${i++}`);          vals.push(desc); }
+    if (agent_type   !== undefined) { fields.push(`agent_type = $${i++}`);    vals.push(agent_type); }
+    if (model        !== undefined) { fields.push(`model = $${i++}`);         vals.push(model); }
+    if (provider     !== undefined) { fields.push(`provider = $${i++}`);      vals.push(provider); }
+    if (capabilities !== undefined) { fields.push(`capabilities = $${i++}`);  vals.push(JSON.stringify(capabilities)); }
+    if (endpoint_type!== undefined) { fields.push(`endpoint_type = $${i++}`); vals.push(endpoint_type); }
+    if (!fields.length) return reply.status(400).send({ ok: false, error: "nothing to update" });
+
+    vals.push(rows[0].id);
+    const { rows: updated } = await db.query(
+      `update agents set ${fields.join(", ")}, updated_at = now() where id = $${i} returning *`,
+      vals
+    );
+    broadcast("agent:updated", { agentId: rows[0].id });
+    return { ok: true, agent: updated[0] };
+  });
+
   server.delete<{ Params: { id: string } }>("/api/v1/agents/:id", async (req, reply) => {
     const { rows } = await db.query(
       `select id, name from agents where id::text = $1`, [req.params.id]
