@@ -903,8 +903,8 @@ function TaskBoardContent({
   }
 
   async function handleCreate(payload: { title: string; description: string; assignee: string; status: TaskStatus; type: string; estimated_sp: number; priority: Priority }) {
-    const created = await createTask(projectId, { ...payload, proposer: "Mithran ⚡" });
-    if (created) setTasks((prev) => [...prev, created]);
+    await createTask(projectId, { ...payload, proposer: "Mithran ⚡" });
+    // Do NOT optimistically add here — the WebSocket `task:created` event is the single source of truth.
     setCreateIn(null);
   }
 
@@ -1437,8 +1437,8 @@ function SprintBoardTabWithSignal({ view, projectId, newTaskSignal }: { view: "t
   }, [projectId]);
 
   async function handleCreate(payload: { title: string; description: string; assignee: string; status: TaskStatus; type: string; estimated_sp: number; priority: Priority }) {
-    const created = await createTask(projectId, { ...payload, proposer: "Mithran ⚡" });
-    if (created) setTasks((prev) => [...prev, created]);
+    await createTask(projectId, { ...payload, proposer: "Mithran ⚡" });
+    // WebSocket task:created is the single source of truth — no optimistic add here.
     setCreateIn(null);
   }
 
