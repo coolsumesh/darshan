@@ -787,15 +787,15 @@ function CreateTaskModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <button className="absolute inset-0 bg-zinc-950/40 backdrop-blur-[2px]" onClick={onClose} />
-      <div className="relative z-10 w-full max-w-md rounded-2xl bg-white shadow-soft ring-1 ring-zinc-200 dark:bg-[#16132A] dark:ring-[#2D2A45]">
-        <div className="flex items-center justify-between border-b border-zinc-200 px-5 py-4 dark:border-[#2D2A45]">
+      <div className="relative z-10 flex w-full max-w-md flex-col rounded-2xl bg-white shadow-soft ring-1 ring-zinc-200 dark:bg-[#16132A] dark:ring-[#2D2A45] max-h-[90vh]">
+        <div className="flex shrink-0 items-center justify-between border-b border-zinc-200 px-5 py-4 dark:border-[#2D2A45]">
           <div className="font-display text-sm font-semibold text-zinc-900 dark:text-white">New task</div>
           <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800">
             <X className="h-4 w-4" />
           </button>
         </div>
 
-        <div className="flex flex-col gap-4 p-5">
+        <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-5 min-h-0">
           <div className="flex flex-col gap-1.5">
             <label className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">Title <span className="text-red-500">*</span></label>
             <Input autoFocus placeholder="What needs to be done?" value={title}
@@ -843,7 +843,7 @@ function CreateTaskModal({
           </div>
         </div>
 
-        <div className="flex justify-end gap-3 border-t border-zinc-200 px-5 py-4 dark:border-[#2D2A45]">
+        <div className="flex shrink-0 justify-end gap-3 border-t border-zinc-200 px-5 py-4 dark:border-[#2D2A45]">
           <Button variant="secondary" size="sm" onClick={onClose}>Cancel</Button>
           <Button variant="primary" size="sm" onClick={handleSave} disabled={!title.trim() || saving}>
             {saving ? "Creating…" : "Create task"}
