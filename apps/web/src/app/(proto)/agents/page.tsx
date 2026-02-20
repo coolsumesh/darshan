@@ -264,7 +264,7 @@ function OrgSection({ org, agents, onInspect, onPing, onDelete, onAddAgent, ping
 }
 
 // ─── Agent Credentials Panel ─────────────────────────────────────────────────
-const BASE_URL = "https://darshan.caringgems.in/api/backend/v1";
+const BASE_URL = "https://darshan.caringgems.in/api/backend/api/v1";
 
 function AgentCredentialsPanel({ agent }: { agent: ExtAgent }) {
   const agentId  = agent.id;
