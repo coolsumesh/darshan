@@ -135,7 +135,7 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
   );
 
   // ── List tasks for project ─────────────────────────────────────────────────
-  server.get<{ Params: { id: string }; Querystring: { status?: string } }>(
+  server.get<{ Params: { id: string }; Querystring: { status?: string; assignee?: string } }>(
     "/api/v1/projects/:id/tasks",
     async (req, reply) => {
       const { rows: project } = await db.query(
