@@ -3,7 +3,7 @@
 import * as React from "react";
 import {
   Bot, Check, ChevronDown, Plus, Search, X, Zap,
-  Activity, Trash2, Pencil, Building2, Users,
+  Activity, Trash2, Pencil, Building2, Users, Key, Copy,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { Button } from "@/components/ui/button";
@@ -263,6 +263,124 @@ function OrgSection({ org, agents, onInspect, onPing, onDelete, onAddAgent, ping
   );
 }
 
+// ─── Agent Credentials Panel ─────────────────────────────────────────────────
+const BASE_URL = "https://darshan.caringgems.in/api/backend/v1";
+
+function AgentCredentialsPanel({ agent }: { agent: ExtAgent }) {
+  const agentId  = agent.id;
+  const token    = agent.callback_token ?? "";
+  const inboxUrl = `${BASE_URL}/agents/${agentId}/inbox?token=${token}`;
+  const ackUrl   = `${BASE_URL}/agents/${agentId}/inbox/ack`;
+  const [revealed, setRevealed] = React.useState(false);
+  const [copied,   setCopied]   = React.useState<string | null>(null);
+
+  function copy(text: string, key: string) {
+    navigator.clipboard.writeText(text);
+    setCopied(key);
+    setTimeout(() => setCopied(null), 2000);
+  }
+
+  const heartbeatBlock =
+`## Darshan Agent Inbox — ${agent.name}
+AGENT_ID: ${agentId}
+TOKEN: ${token}
+INBOX_URL: ${inboxUrl}
+ACK_URL: ${ackUrl}
+
+### Steps (run on every heartbeat):
+1. GET INBOX_URL — token is in the query string (not Authorization header)
+2. For each pending item, handle by type:
+
+**type = "ping"**
+- POST to ACK_URL: { inbox_id, callback_token: TOKEN, response: "pong — ${agent.name} online" }
+
+**type = "task_assigned"**
+- PATCH task to in-progress: PATCH https://darshan.caringgems.in/api/backend/v1/projects/{project_id}/tasks/{task_id} with body { "status": "in-progress" }
+- Execute the task
+- POST to ACK_URL: { inbox_id, callback_token: TOKEN, response: "picked up — working on: {title}" }
+
+**Any other type**
+- POST to ACK_URL: { inbox_id, callback_token: TOKEN, response: "ack" }`;
+
+  function CopyRow({ label, value, id }: { label: string; value: string; id: string }) {
+    return (
+      <div className="flex flex-col gap-1">
+        <span className="text-[10px] font-semibold uppercase tracking-wide text-zinc-400">{label}</span>
+        <div className="flex items-center gap-2 rounded-lg bg-zinc-50 px-3 py-2 ring-1 ring-zinc-100 dark:bg-white/5 dark:ring-white/10">
+          <code className="min-w-0 flex-1 truncate text-xs font-mono text-zinc-700 dark:text-zinc-300">{value}</code>
+          <button onClick={() => copy(value, id)}
+            className="shrink-0 rounded p-1 text-zinc-400 hover:bg-zinc-200 hover:text-zinc-700 dark:hover:bg-white/10 transition-colors">
+            {copied === id ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-4 p-4">
+      {/* Warning */}
+      <div className="flex items-start gap-2 rounded-xl bg-amber-50 p-3 dark:bg-amber-500/10">
+        <span className="text-base leading-none">⚠️</span>
+        <p className="text-xs text-amber-700 dark:text-amber-300">
+          Keep these credentials secret. Anyone with this token can read and acknowledge this agent&apos;s inbox.
+        </p>
+      </div>
+
+      {/* Credentials */}
+      <CopyRow label="Agent ID" value={agentId} id="agent_id" />
+
+      {/* Token with reveal toggle */}
+      <div className="flex flex-col gap-1">
+        <div className="flex items-center justify-between">
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-zinc-400">Callback Token</span>
+          <button onClick={() => setRevealed(r => !r)}
+            className="text-[10px] text-brand-600 hover:underline">{revealed ? "Hide" : "Reveal"}</button>
+        </div>
+        <div className="flex items-center gap-2 rounded-lg bg-zinc-50 px-3 py-2 ring-1 ring-zinc-100 dark:bg-white/5 dark:ring-white/10">
+          <code className="min-w-0 flex-1 truncate text-xs font-mono text-zinc-700 dark:text-zinc-300">
+            {revealed ? token : "•".repeat(Math.min(token.length, 28))}
+          </code>
+          <button onClick={() => copy(token, "token")}
+            className="shrink-0 rounded p-1 text-zinc-400 hover:bg-zinc-200 hover:text-zinc-700 dark:hover:bg-white/10 transition-colors">
+            {copied === "token" ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+          </button>
+        </div>
+      </div>
+
+      <CopyRow label="Inbox URL" value={inboxUrl} id="inbox_url" />
+      <CopyRow label="Ack URL"   value={ackUrl}   id="ack_url"   />
+
+      {/* Instructions */}
+      <div className="rounded-xl bg-violet-50 p-3 dark:bg-violet-500/10">
+        <p className="mb-2 text-xs font-semibold text-violet-700 dark:text-violet-300">📋 Setup instructions for your friend</p>
+        <ol className="list-decimal list-inside space-y-1 text-xs text-violet-600 dark:text-violet-400">
+          <li>Install OpenClaw on their machine</li>
+          <li>Open <code className="rounded bg-violet-100 px-1 dark:bg-violet-500/20">~/.openclaw/workspace/HEARTBEAT.md</code></li>
+          <li>Paste the config block below into it</li>
+          <li>OpenClaw will start polling Darshan on every heartbeat (~30 min)</li>
+        </ol>
+      </div>
+
+      {/* Ready-to-paste block */}
+      <div className="flex flex-col gap-1.5">
+        <div className="flex items-center justify-between">
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-zinc-400">Paste into HEARTBEAT.md</span>
+          <button onClick={() => copy(heartbeatBlock, "heartbeat")}
+            className="flex items-center gap-1 text-[10px] font-semibold text-brand-600 hover:underline">
+            {copied === "heartbeat"
+              ? <><Check className="h-3 w-3 text-emerald-500" /> Copied!</>
+              : <><Copy className="h-3 w-3" /> Copy all</>}
+          </button>
+        </div>
+        <pre className="overflow-x-auto whitespace-pre-wrap break-all rounded-xl bg-zinc-900 p-3 text-[10px] leading-relaxed text-zinc-300 dark:bg-black/40">
+          {heartbeatBlock}
+        </pre>
+      </div>
+    </div>
+  );
+}
+
 // ─── Agent Detail Panel ───────────────────────────────────────────────────────
 function AgentDetailPanel({ agent, onClose, onPing, onRemove, onUpdated, pinging }: {
   agent: ExtAgent; onClose: () => void;
@@ -278,6 +396,7 @@ function AgentDetailPanel({ agent, onClose, onPing, onRemove, onUpdated, pinging
   const [confirmDelete, setConfirmDelete] = React.useState(false);
   const [deleting, setDeleting] = React.useState(false);
 
+  const [showCreds, setShowCreds]       = React.useState(false);
   const [editing, setEditing]           = React.useState(false);
   const [editName, setEditName]         = React.useState(agent.name);
   const [editDesc, setEditDesc]         = React.useState(agent.desc ?? "");
@@ -319,13 +438,24 @@ function AgentDetailPanel({ agent, onClose, onPing, onRemove, onUpdated, pinging
           {agent.name[0]?.toUpperCase()}
         </div>
         <span className="flex-1 truncate font-display font-bold text-zinc-900 dark:text-white">
-          {editing ? <span className="text-brand-600">Editing</span> : agent.name}
+          {showCreds ? <span className="text-amber-600">Credentials</span>
+            : editing ? <span className="text-brand-600">Editing</span>
+            : agent.name}
         </span>
         <span className={cn("shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold", TYPE_BADGE[agent.agent_type ?? "ai_agent"])}>
           {TYPE_LABEL[agent.agent_type ?? "ai_agent"]}
         </span>
         {!editing && (
           <>
+            <button onClick={() => setShowCreds(s => !s)} title="Credentials"
+              className={cn(
+                "grid h-7 w-7 place-items-center rounded-lg transition-colors",
+                showCreds
+                  ? "bg-amber-100 text-amber-600 dark:bg-amber-500/20 dark:text-amber-400"
+                  : "text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-white/10"
+              )}>
+              <Key className="h-3.5 w-3.5" />
+            </button>
             <button onClick={startEdit} title="Edit"
               className="grid h-7 w-7 place-items-center rounded-lg text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-white/10 transition-colors">
               <Pencil className="h-3.5 w-3.5" />
@@ -357,7 +487,11 @@ function AgentDetailPanel({ agent, onClose, onPing, onRemove, onUpdated, pinging
         </div>
       )}
 
-      <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-5">
+      <div className="flex-1 overflow-y-auto">
+        {showCreds ? (
+          <AgentCredentialsPanel agent={agent} />
+        ) : (
+        <div className="p-4 flex flex-col gap-5">
         {editing ? (
           /* ── Edit Mode ── */
           <>
@@ -533,6 +667,8 @@ function AgentDetailPanel({ agent, onClose, onPing, onRemove, onUpdated, pinging
               )}
             </div>
           </>
+        )}
+        </div>
         )}
       </div>
     </div>
