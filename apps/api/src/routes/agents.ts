@@ -327,7 +327,7 @@ export async function registerAgents(server: FastifyInstance, db: pg.Pool) {
     if (!orgs.length) return reply.status(404).send({ ok: false, error: "org not found" });
     const { rows } = await db.query(
       `select om.id, om.role, om.created_at,
-              a.id as agent_id, a.name, a.status, a.agent_type, a.model, a.avatar_url, a.org_id
+              a.id as agent_id, a.name, a.status, a.agent_type, a.model, a.org_id
        from org_members om
        join agents a on a.id = om.agent_id
        where om.org_id = $1
