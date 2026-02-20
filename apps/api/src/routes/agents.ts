@@ -293,9 +293,11 @@ export async function registerAgents(server: FastifyInstance, db: pg.Pool) {
   // ── Agent polls its inbox ───────────────────────────────────────────────────
   server.get<{
     Params: { id: string };
-    Querystring: { token: string; status?: string };
+    Querystring: { token?: string; status?: string };
   }>("/api/v1/agents/:id/inbox", async (req, reply) => {
-    const { token, status = "pending" } = req.query;
+    const { status = "pending" } = req.query;
+    // Accept token from Authorization header (preferred) or query string (legacy)
+    const token = (req.headers.authorization?.replace(/^Bearer\s+/i, "") || req.query.token) ?? "";
 
     // Verify token
     const { rows: agents } = await db.query(

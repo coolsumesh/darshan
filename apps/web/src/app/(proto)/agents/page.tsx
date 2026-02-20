@@ -269,7 +269,7 @@ const BASE_URL = "https://darshan.caringgems.in/api/backend/v1";
 function AgentCredentialsPanel({ agent }: { agent: ExtAgent }) {
   const agentId  = agent.id;
   const token    = agent.callback_token ?? "";
-  const inboxUrl = `${BASE_URL}/agents/${agentId}/inbox?token=${token}`;
+  const inboxUrl = `${BASE_URL}/agents/${agentId}/inbox`;
   const ackUrl   = `${BASE_URL}/agents/${agentId}/inbox/ack`;
   const [revealed, setRevealed] = React.useState(false);
   const [copied,   setCopied]   = React.useState<string | null>(null);
@@ -288,7 +288,7 @@ INBOX_URL: ${inboxUrl}
 ACK_URL: ${ackUrl}
 
 ### Steps (run on every heartbeat):
-1. GET INBOX_URL — token is in the query string (not Authorization header)
+1. GET INBOX_URL with header: Authorization: Bearer TOKEN
 2. For each pending item, handle by type:
 
 **type = "ping"**
