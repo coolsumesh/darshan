@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { createPortal } from "react-dom";
 import dynamic from "next/dynamic";
 const Markdown = dynamic(() => import("react-markdown"), { ssr: false });
 import Link from "next/link";
@@ -145,13 +146,25 @@ function TypePill({ type }: { type?: string }) {
 }
 
 // ─── Inline popovers ──────────────────────────────────────────────────────────
-function StatusPopover({ status, onSelect, onClose }: {
-  status: TaskStatus; onSelect: (s: TaskStatus) => void; onClose: () => void;
+function StatusPopover({ anchorEl, status, onSelect, onClose }: {
+  anchorEl: HTMLElement | null; status: TaskStatus; onSelect: (s: TaskStatus) => void; onClose: () => void;
 }) {
   const ref = React.useRef<HTMLDivElement>(null);
-  useClickOutside(ref, onClose);
-  return (
-    <div ref={ref} className="absolute left-0 top-full z-50 mt-1 w-44 overflow-hidden rounded-xl bg-white shadow-lg ring-1 ring-zinc-200 dark:bg-[#1E1B35] dark:ring-[#2D2A45]">
+  const [pos, setPos] = React.useState<{ top: number; left: number } | null>(null);
+  React.useLayoutEffect(() => {
+    if (!anchorEl) return;
+    const r = anchorEl.getBoundingClientRect();
+    setPos({ top: r.bottom + 4, left: r.left });
+  }, [anchorEl]);
+  React.useEffect(() => {
+    const handler = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) onClose(); };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [onClose]);
+  if (!pos || typeof document === "undefined") return null;
+  return createPortal(
+    <div ref={ref} style={{ position: "fixed", top: pos.top, left: pos.left, zIndex: 9999 }}
+      className="w-44 overflow-hidden rounded-xl bg-white shadow-lg ring-1 ring-zinc-200 dark:bg-[#1E1B35] dark:ring-[#2D2A45]">
       {(Object.keys(STATUS_META) as TaskStatus[]).map((s) => {
         const m = STATUS_META[s];
         return (
@@ -163,20 +176,33 @@ function StatusPopover({ status, onSelect, onClose }: {
           </button>
         );
       })}
-    </div>
+    </div>,
+    document.body
   );
 }
 
-function OwnerPopover({ assignee, team, onSelect, onClose }: {
-  assignee?: string; team: TeamMemberWithAgent[];
+function OwnerPopover({ anchorEl, assignee, team, onSelect, onClose }: {
+  anchorEl: HTMLElement | null; assignee?: string; team: TeamMemberWithAgent[];
   onSelect: (name: string) => void; onClose: () => void;
 }) {
-  const ref   = React.useRef<HTMLDivElement>(null);
+  const ref = React.useRef<HTMLDivElement>(null);
   const [q, setQ] = React.useState("");
-  useClickOutside(ref, onClose);
+  const [pos, setPos] = React.useState<{ top: number; left: number } | null>(null);
+  React.useLayoutEffect(() => {
+    if (!anchorEl) return;
+    const r = anchorEl.getBoundingClientRect();
+    setPos({ top: r.bottom + 4, left: r.left });
+  }, [anchorEl]);
+  React.useEffect(() => {
+    const handler = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) onClose(); };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [onClose]);
   const members = team.filter((m) => !q || (m.agent?.name ?? m.agentId).toLowerCase().includes(q.toLowerCase()));
-  return (
-    <div ref={ref} className="absolute left-0 top-full z-50 mt-1 w-52 overflow-hidden rounded-xl bg-white shadow-lg ring-1 ring-zinc-200 dark:bg-[#1E1B35] dark:ring-[#2D2A45]">
+  if (!pos || typeof document === "undefined") return null;
+  return createPortal(
+    <div ref={ref} style={{ position: "fixed", top: pos.top, left: pos.left, zIndex: 9999 }}
+      className="w-52 overflow-hidden rounded-xl bg-white shadow-lg ring-1 ring-zinc-200 dark:bg-[#1E1B35] dark:ring-[#2D2A45]">
       <div className="p-2">
         <input autoFocus value={q} onChange={(e) => setQ(e.target.value)}
           placeholder="Search member…"
@@ -193,7 +219,7 @@ function OwnerPopover({ assignee, team, onSelect, onClose }: {
         return (
           <button key={m.agentId} onClick={() => { onSelect(name); onClose(); }}
             className="flex w-full items-center gap-2.5 px-3 py-2 text-xs transition-colors hover:bg-zinc-50 dark:hover:bg-white/5">
-            <div className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-brand-600 text-[10px] font-bold text-white">
+            <div className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-violet-600 text-[10px] font-bold text-white">
               {name[0]?.toUpperCase()}
             </div>
             <span className="flex-1 truncate font-medium text-zinc-800 dark:text-white">{name}</span>
@@ -201,17 +227,30 @@ function OwnerPopover({ assignee, team, onSelect, onClose }: {
           </button>
         );
       })}
-    </div>
+    </div>,
+    document.body
   );
 }
 
-function PriorityPopover({ priority, onSelect, onClose }: {
-  priority?: string; onSelect: (p: Priority) => void; onClose: () => void;
+function PriorityPopover({ anchorEl, priority, onSelect, onClose }: {
+  anchorEl: HTMLElement | null; priority?: string; onSelect: (p: Priority) => void; onClose: () => void;
 }) {
   const ref = React.useRef<HTMLDivElement>(null);
-  useClickOutside(ref, onClose);
-  return (
-    <div ref={ref} className="absolute left-0 top-full z-50 mt-1 w-40 overflow-hidden rounded-xl bg-white shadow-lg ring-1 ring-zinc-200 dark:bg-[#1E1B35] dark:ring-[#2D2A45]">
+  const [pos, setPos] = React.useState<{ top: number; left: number } | null>(null);
+  React.useLayoutEffect(() => {
+    if (!anchorEl) return;
+    const r = anchorEl.getBoundingClientRect();
+    setPos({ top: r.bottom + 4, left: r.left });
+  }, [anchorEl]);
+  React.useEffect(() => {
+    const handler = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) onClose(); };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [onClose]);
+  if (!pos || typeof document === "undefined") return null;
+  return createPortal(
+    <div ref={ref} style={{ position: "fixed", top: pos.top, left: pos.left, zIndex: 9999 }}
+      className="w-40 overflow-hidden rounded-xl bg-white shadow-lg ring-1 ring-zinc-200 dark:bg-[#1E1B35] dark:ring-[#2D2A45]">
       {PRIORITIES.map((p) => {
         const m = PRIORITY_META[p];
         return (
@@ -223,7 +262,8 @@ function PriorityPopover({ priority, onSelect, onClose }: {
           </button>
         );
       })}
-    </div>
+    </div>,
+    document.body
   );
 }
 
@@ -255,6 +295,9 @@ function TaskDetailPanel({
   const [editingDesc,  setEditingDesc]  = React.useState(false);
   const [desc,         setDesc]         = React.useState(task.description ?? "");
   const [openPop,      setOpenPop]      = React.useState<string | null>(null);
+  const [anchorEl,     setAnchorEl]     = React.useState<HTMLElement | null>(null);
+  function openPopover(name: string, el: HTMLElement) { setOpenPop(name); setAnchorEl(el); }
+  function closePopover() { setOpenPop(null); setAnchorEl(null); }
 
   function saveTitle() {
     setEditingTitle(false);
@@ -314,23 +357,23 @@ function TaskDetailPanel({
         <div className="mb-5 flex flex-col gap-2 rounded-xl bg-zinc-50 p-3 dark:bg-[#0F0D1E]">
           {propRow("Status",
             <div className="relative">
-              <StatusPill status={task.status} onClick={() => setOpenPop(openPop === "status" ? null : "status")} />
+              <StatusPill status={task.status} onClick={(e) => openPop === "status" ? closePopover() : openPopover("status", e.currentTarget as HTMLElement)} />
               {openPop === "status" && (
-                <StatusPopover status={task.status} onSelect={(s) => onUpdate(task.id, { status: s })} onClose={() => setOpenPop(null)} />
+                <StatusPopover anchorEl={anchorEl} status={task.status} onSelect={(s) => { onUpdate(task.id, { status: s }); closePopover(); }} onClose={closePopover} />
               )}
             </div>
           )}
           {propRow("Priority",
             <div className="relative">
-              <PriorityPill priority={task.priority} onClick={() => setOpenPop(openPop === "priority" ? null : "priority")} />
+              <PriorityPill priority={task.priority} onClick={(e) => openPop === "priority" ? closePopover() : openPopover("priority", e.currentTarget as HTMLElement)} />
               {openPop === "priority" && (
-                <PriorityPopover priority={task.priority} onSelect={(p) => onUpdate(task.id, { priority: p })} onClose={() => setOpenPop(null)} />
+                <PriorityPopover anchorEl={anchorEl} priority={task.priority} onSelect={(p) => { onUpdate(task.id, { priority: p }); closePopover(); }} onClose={closePopover} />
               )}
             </div>
           )}
           {propRow("Owner",
             <div className="relative">
-              <button onClick={() => setOpenPop(openPop === "owner" ? null : "owner")}
+              <button onClick={(e) => openPop === "owner" ? closePopover() : openPopover("owner", e.currentTarget as HTMLElement)}
                 className="flex items-center gap-1.5 rounded-full hover:opacity-80 transition-opacity">
                 {task.assignee ? (
                   <>
@@ -344,8 +387,8 @@ function TaskDetailPanel({
                 )}
               </button>
               {openPop === "owner" && (
-                <OwnerPopover assignee={task.assignee} team={team}
-                  onSelect={(name) => onUpdate(task.id, { assignee: name })} onClose={() => setOpenPop(null)} />
+                <OwnerPopover anchorEl={anchorEl} assignee={task.assignee} team={team}
+                  onSelect={(name) => { onUpdate(task.id, { assignee: name }); closePopover(); }} onClose={closePopover} />
               )}
             </div>
           )}
@@ -413,6 +456,9 @@ function TableRow({
 }) {
   const taskIdStr = `DSH-${String(taskNumber).padStart(3, "0")}`;
   const [openPop, setOpenPop] = React.useState<string | null>(null);
+  const [anchorEl, setAnchorEl] = React.useState<HTMLElement | null>(null);
+  function openPopover(name: string, el: HTMLElement) { setOpenPop(name); setAnchorEl(el); }
+  function closePopover() { setOpenPop(null); setAnchorEl(null); }
   const [editTitle, setEditTitle] = React.useState(false);
   const [titleVal,  setTitleVal]  = React.useState(task.title);
   const due = formatDueDate(task.due_date);
@@ -457,8 +503,8 @@ function TableRow({
       </div>
 
       {/* Owner */}
-      <div className="relative flex w-28 shrink-0 items-center px-3">
-        <button onClick={() => setOpenPop(openPop === "owner" ? null : "owner")}
+      <div className="flex w-28 shrink-0 items-center px-3">
+        <button onClick={(e) => openPop === "owner" ? closePopover() : openPopover("owner", e.currentTarget as HTMLElement)}
           className="flex items-center gap-1.5 hover:opacity-80 transition-opacity">
           {task.assignee ? (
             <>
@@ -472,29 +518,29 @@ function TableRow({
           )}
         </button>
         {openPop === "owner" && (
-          <OwnerPopover assignee={task.assignee} team={team}
-            onSelect={(name) => { onUpdate(task.id, { assignee: name }); setOpenPop(null); }}
-            onClose={() => setOpenPop(null)} />
+          <OwnerPopover anchorEl={anchorEl} assignee={task.assignee} team={team}
+            onSelect={(name) => { onUpdate(task.id, { assignee: name }); closePopover(); }}
+            onClose={closePopover} />
         )}
       </div>
 
       {/* Status */}
-      <div className="relative flex w-36 shrink-0 items-center px-3">
-        <StatusPill status={task.status} onClick={() => setOpenPop(openPop === "status" ? null : "status")} />
+      <div className="flex w-36 shrink-0 items-center px-3">
+        <StatusPill status={task.status} onClick={(e) => openPop === "status" ? closePopover() : openPopover("status", e.currentTarget as HTMLElement)} />
         {openPop === "status" && (
-          <StatusPopover status={task.status}
-            onSelect={(s) => { onUpdate(task.id, { status: s }); setOpenPop(null); }}
-            onClose={() => setOpenPop(null)} />
+          <StatusPopover anchorEl={anchorEl} status={task.status}
+            onSelect={(s) => { onUpdate(task.id, { status: s }); closePopover(); }}
+            onClose={closePopover} />
         )}
       </div>
 
       {/* Priority */}
-      <div className="relative flex w-28 shrink-0 items-center px-3">
-        <PriorityPill priority={task.priority} onClick={() => setOpenPop(openPop === "priority" ? null : "priority")} />
+      <div className="flex w-28 shrink-0 items-center px-3">
+        <PriorityPill priority={task.priority} onClick={(e) => openPop === "priority" ? closePopover() : openPopover("priority", e.currentTarget as HTMLElement)} />
         {openPop === "priority" && (
-          <PriorityPopover priority={task.priority}
-            onSelect={(p) => { onUpdate(task.id, { priority: p }); setOpenPop(null); }}
-            onClose={() => setOpenPop(null)} />
+          <PriorityPopover anchorEl={anchorEl} priority={task.priority}
+            onSelect={(p) => { onUpdate(task.id, { priority: p }); closePopover(); }}
+            onClose={closePopover} />
         )}
       </div>
 
