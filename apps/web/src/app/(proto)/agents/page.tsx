@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { createPortal } from "react-dom";
 import {
   Bot, Check, ChevronDown, Plus, Search, X, Zap,
   Activity, Trash2, Pencil, Building2, Users, Key, Copy,
@@ -404,6 +405,7 @@ function AgentDetailPanel({ agent, onClose, onPing, onRemove, onUpdated, pinging
 
   const [showCreds, setShowCreds]       = React.useState(false);
   const [editing, setEditing]           = React.useState(false);
+  React.useEffect(() => { setShowCreds(false); setEditing(false); }, [agent.id]);
   const [editName, setEditName]         = React.useState(agent.name);
   const [editDesc, setEditDesc]         = React.useState(agent.desc ?? "");
   const [editType, setEditType]         = React.useState<AgentType>((agent.agent_type as AgentType) ?? "ai_agent");
@@ -445,9 +447,7 @@ function AgentDetailPanel({ agent, onClose, onPing, onRemove, onUpdated, pinging
           {agent.name[0]?.toUpperCase()}
         </div>
         <span className="flex-1 truncate font-display font-bold text-zinc-900 dark:text-white">
-          {showCreds ? <span className="text-amber-600">Credentials</span>
-            : editing ? <span className="text-brand-600">Editing</span>
-            : agent.name}
+          {editing ? <span className="text-brand-600">Editing</span> : agent.name}
         </span>
         <span className={cn("shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold", TYPE_BADGE[agent.agent_type ?? "ai_agent"])}>
           {TYPE_LABEL[agent.agent_type ?? "ai_agent"]}
@@ -494,10 +494,25 @@ function AgentDetailPanel({ agent, onClose, onPing, onRemove, onUpdated, pinging
         </div>
       )}
 
+      {showCreds && createPortal(
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <button className="absolute inset-0 bg-zinc-950/50 backdrop-blur-[2px]" onClick={() => setShowCreds(false)} />
+          <div className="relative z-10 flex w-[480px] max-h-[90vh] flex-col rounded-2xl bg-white shadow-2xl ring-1 ring-zinc-200 dark:bg-[#16132A] dark:ring-[#2D2A45]">
+            <div className="flex shrink-0 items-center justify-between border-b border-zinc-200 px-5 py-4 dark:border-[#2D2A45]">
+              <span className="font-display text-sm font-semibold text-zinc-900 dark:text-white">🔑 Agent Credentials — {agent.name}</span>
+              <button onClick={() => setShowCreds(false)} className="grid h-7 w-7 place-items-center rounded-lg text-zinc-400 hover:bg-zinc-100 dark:hover:bg-white/10">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto">
+              <AgentCredentialsPanel agent={agent} />
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
       <div className="flex-1 overflow-y-auto">
-        {showCreds ? (
-          <AgentCredentialsPanel agent={agent} />
-        ) : (
         <div className="p-4 flex flex-col gap-5">
         {editing ? (
           /* ── Edit Mode ── */
@@ -676,7 +691,6 @@ function AgentDetailPanel({ agent, onClose, onPing, onRemove, onUpdated, pinging
           </>
         )}
         </div>
-        )}
       </div>
     </div>
   );
