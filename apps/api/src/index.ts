@@ -1,6 +1,7 @@
 import "dotenv/config";
 import Fastify from "fastify";
 import cors from "@fastify/cors";
+import cookie from "@fastify/cookie";
 import websocket from "@fastify/websocket";
 import multipart from "@fastify/multipart";
 import fastifyStatic from "@fastify/static";
@@ -22,6 +23,7 @@ import { registerAuditRoute } from "./routes/auditRoute.js";
 import { registerWs } from "./routes/ws.js";
 import { startConnector } from "./connector.js";
 import { registerProjects } from "./routes/projects.js";
+import { registerAuth, verifyToken } from "./routes/auth.js";
 
 const PORT = Number(process.env.PORT ?? 4000);
 const HOST = process.env.HOST ?? "0.0.0.0";
@@ -32,7 +34,8 @@ const server = Fastify({ logger: true });
 const uploadsDir = join(__dirname, "..", "uploads", "logos");
 mkdirSync(uploadsDir, { recursive: true });
 
-await server.register(cors, { origin: true });
+await server.register(cors, { origin: true, credentials: true });
+await server.register(cookie);
 await server.register(websocket);
 await server.register(multipart, { limits: { fileSize: 2 * 1024 * 1024 } }); // 2MB
 await server.register(fastifyStatic, {
@@ -51,6 +54,27 @@ server.get("/", async () => {
 
 const db = getDb();
 await runMigrations(db);
+
+// Register auth routes (no guard on these)
+await registerAuth(server);
+
+// JWT auth guard for all /api/v1/* routes except /api/v1/auth/*
+server.addHook("preHandler", async (req, reply) => {
+  const url = req.url.split("?")[0];
+  if (!url.startsWith("/api/v1/")) return;
+  if (url.startsWith("/api/v1/auth/")) return;
+  // Allow internal A2A callback token routes (they use their own auth)
+  if (url.includes("/inbox")) return;
+
+  const token = (req.cookies as Record<string, string>)?.["darshan_token"];
+  if (!token) {
+    return reply.status(401).send({ ok: false, error: "not authenticated" });
+  }
+  const payload = verifyToken(token);
+  if (!payload) {
+    return reply.status(401).send({ ok: false, error: "invalid token" });
+  }
+});
 
 await registerAgents(server, db);
 await registerThreads(server, db);

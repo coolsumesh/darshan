@@ -15,6 +15,7 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T | null> 
     // DELETE/GET requests that have Content-Type: application/json but no body.
     if (init?.body) headers["Content-Type"] = "application/json";
     const res = await fetch(`${API_BASE}${path}`, {
+      credentials: "include",  // always send auth cookie
       ...init,
       headers,
     });
@@ -23,6 +24,30 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T | null> 
   } catch {
     return null;
   }
+}
+
+// ── Auth ──────────────────────────────────────────────────────────────────────
+
+export type AuthUser = { id: string; email: string; name: string; role: string };
+
+export async function authLogin(email: string, password: string): Promise<AuthUser | null> {
+  const data = await apiFetch<{ ok: boolean; user: AuthUser }>("/api/v1/auth/login", {
+    method: "POST",
+    body: JSON.stringify({ email, password }),
+    credentials: "include",
+  });
+  return data?.ok ? data.user : null;
+}
+
+export async function authLogout(): Promise<void> {
+  await apiFetch("/api/v1/auth/logout", { method: "POST", credentials: "include" });
+}
+
+export async function authMe(): Promise<AuthUser | null> {
+  const data = await apiFetch<{ ok: boolean; user: AuthUser }>("/api/v1/auth/me", {
+    credentials: "include",
+  });
+  return data?.ok ? data.user : null;
 }
 
 // ── Projects ──────────────────────────────────────────────────────────────────
