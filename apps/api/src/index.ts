@@ -58,7 +58,10 @@ await runMigrations(db);
 // Register auth routes (no guard on these)
 await registerAuth(server);
 
-// JWT auth guard for all /api/v1/* routes except /api/v1/auth/*
+// Static API key for internal/agent use (heartbeat task polling, CLI calls)
+const INTERNAL_API_KEY = process.env.DARSHAN_API_KEY ?? "824cdfcdec0e35cf550002c2dfa3541932f58e2e2497cfaa3c844dc99f5b972f";
+
+// Auth guard for all /api/v1/* routes — supports JWT cookie OR Bearer API key
 server.addHook("preHandler", async (req, reply) => {
   const url = req.url.split("?")[0];
   if (!url.startsWith("/api/v1/")) return;
@@ -66,6 +69,14 @@ server.addHook("preHandler", async (req, reply) => {
   // Allow internal A2A callback token routes (they use their own auth)
   if (url.includes("/inbox")) return;
 
+  // 1. Try Bearer API key (for internal/agent calls)
+  const authHeader = req.headers.authorization ?? "";
+  if (authHeader.startsWith("Bearer ")) {
+    const key = authHeader.slice(7);
+    if (key === INTERNAL_API_KEY) return; // valid internal key
+  }
+
+  // 2. Try JWT cookie (for browser sessions)
   const token = (req.cookies as Record<string, string>)?.["darshan_token"];
   if (!token) {
     return reply.status(401).send({ ok: false, error: "not authenticated" });
