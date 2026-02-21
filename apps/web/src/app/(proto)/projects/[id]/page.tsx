@@ -351,8 +351,7 @@ function TaskDetailPanel({
 
   return (
     <div
-      className="flex flex-col border-l border-zinc-200 bg-white dark:border-[#2D2A45] dark:bg-[#16132A]"
-      style={{ width: 400, minWidth: 400 }}
+      className="flex flex-col bg-white dark:bg-[#16132A] fixed inset-0 z-40 md:relative md:inset-auto md:border-l md:border-zinc-200 md:dark:border-[#2D2A45] md:w-[400px] md:min-w-[400px]"
     >
       {/* Header */}
       <div className="flex items-center gap-2 border-b border-zinc-200 px-4 py-3 dark:border-[#2D2A45]">
@@ -522,10 +521,34 @@ function TableRow({
 
   return (
     <div className={cn(
-      "group flex items-center border-b border-zinc-100 dark:border-[#2D2A45] transition-colors min-h-[40px]",
-      "hover:bg-zinc-50 dark:hover:bg-white/5",
+      "group transition-colors",
       acting && "opacity-50 pointer-events-none"
     )}>
+      {/* ── Mobile card layout (< md) ── */}
+      <div
+        className="md:hidden flex flex-col gap-1 border-b border-zinc-100 px-3 py-2.5 hover:bg-zinc-50 dark:border-[#2D2A45] dark:hover:bg-white/5 cursor-pointer"
+        onClick={onOpen}
+      >
+        <div className="text-sm font-medium text-zinc-900 dark:text-white truncate">{task.title}</div>
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <StatusPill status={task.status} />
+          <PriorityPill priority={task.priority} />
+          {task.assignee && (
+            <div className="flex items-center gap-1">
+              <div className="grid h-5 w-5 place-items-center rounded-full bg-brand-600 text-[9px] font-bold text-white">
+                {task.assignee[0]?.toUpperCase()}
+              </div>
+              <span className="text-xs text-zinc-500">{task.assignee}</span>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ── Desktop full row layout (≥ md) ── */}
+      <div className={cn(
+        "hidden md:flex items-center border-b border-zinc-100 dark:border-[#2D2A45] transition-colors min-h-[40px]",
+        "hover:bg-zinc-50 dark:hover:bg-white/5"
+      )}>
       {/* Checkbox */}
       <div className="flex w-8 shrink-0 items-center justify-center">
         <input type="checkbox"
@@ -636,6 +659,7 @@ function TableRow({
           <X className="h-3.5 w-3.5" />
         </button>
       </div>
+      </div>{/* end desktop row */}
     </div>
   );
 }
@@ -687,8 +711,8 @@ function TableSection({
 
       {!collapsed && (
         <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white dark:border-[#2D2A45] dark:bg-[#16132A]">
-          {/* Column headers */}
-          <div className="flex items-center border-b border-zinc-100 bg-zinc-50 dark:border-[#2D2A45] dark:bg-[#0F0D1E]">
+          {/* Column headers — desktop only */}
+          <div className="hidden md:flex items-center border-b border-zinc-100 bg-zinc-50 dark:border-[#2D2A45] dark:bg-[#0F0D1E]">
             <div className="w-8 shrink-0" />
             <div className="w-5 shrink-0" />
             {COL_HEADERS.map((h) => (
@@ -821,7 +845,7 @@ function CreateTaskModal({
               className="w-full resize-none rounded-xl border-0 bg-zinc-50 px-3 py-2.5 text-sm text-zinc-900 ring-1 ring-zinc-200 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-brand-400/40 dark:bg-zinc-900 dark:text-zinc-100 dark:ring-zinc-700" />
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="flex flex-col gap-1.5">
               <label className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">Assignee</label>
               <select value={assignee} onChange={(e) => setAssignee(e.target.value)} className={sel}>
@@ -917,8 +941,8 @@ function TaskBoardContent({
 
   return (
     <div className="flex min-h-0 flex-1 overflow-hidden">
-      {/* Main content */}
-      <div className={cn("flex min-w-0 flex-1 flex-col overflow-y-auto transition-all duration-250", detailTask ? "pr-0" : "")}>
+      {/* Main content — hidden on mobile when detail panel is open */}
+      <div className={cn("flex min-w-0 flex-1 flex-col overflow-y-auto transition-all duration-250", detailTask ? "hidden md:flex" : "flex")}>
         <MainTableView
           tasks={visibleTasks} acting={acting} team={team}
           onUpdate={patchTask} onDelete={removeTask}
@@ -929,7 +953,7 @@ function TaskBoardContent({
 
       {/* Task Detail Panel */}
       {detailTask && (
-        <div className="animate-slide-in-right flex h-full shrink-0" style={{ width: 400 }}>
+        <div className="animate-slide-in-right md:w-[400px] md:shrink-0 md:h-full">
           <TaskDetailPanel
             task={detailTask.task}
             team={team}
@@ -1043,9 +1067,9 @@ function AgentRegistryPanel({ agents, onAdd, onClose, alreadyAdded }: {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-end p-4">
+    <div className="fixed inset-0 z-50 flex items-end justify-end sm:p-4">
       <button className="absolute inset-0 bg-zinc-950/40 backdrop-blur-[2px]" onClick={onClose} />
-      <div className="relative z-10 flex w-80 flex-col gap-3 rounded-2xl bg-white p-5 shadow-soft ring-1 ring-zinc-200 dark:bg-[#16132A] dark:ring-[#2D2A45]">
+      <div className="relative z-10 flex w-full flex-col gap-3 rounded-t-2xl bg-white p-5 shadow-soft ring-1 ring-zinc-200 sm:w-80 sm:rounded-2xl dark:bg-[#16132A] dark:ring-[#2D2A45]">
         <div className="flex items-center justify-between">
           <h3 className="font-display text-sm font-semibold text-zinc-900 dark:text-white">Add Agent to Team</h3>
           <button onClick={onClose} className="grid h-7 w-7 place-items-center rounded-lg text-zinc-400 hover:bg-zinc-100 dark:hover:bg-white/10"><X className="h-4 w-4" /></button>
@@ -1125,64 +1149,96 @@ function TeamMemberRow({ m, projectId, pinging, pingMeta, onPing, onRemove, onRo
   void projectId;
 
   return (
-    <div className="group flex items-center gap-3 border-b border-zinc-100 px-4 py-2.5 last:border-0 hover:bg-zinc-50 dark:border-[#2D2A45] dark:hover:bg-white/5 transition-colors">
-      <span className={cn("h-2 w-2 shrink-0 rounded-full", isOnline ? "bg-emerald-400" : "bg-zinc-300")} />
-      <div className="flex-1 min-w-0 flex items-center gap-2.5">
+    <div className="group border-b border-zinc-100 last:border-0 dark:border-[#2D2A45] transition-colors hover:bg-zinc-50 dark:hover:bg-white/5">
+      {/* ── Mobile row (< md) ── */}
+      <div className="flex md:hidden items-center gap-3 px-4 py-2.5">
+        <span className={cn("h-2 w-2 shrink-0 rounded-full", isOnline ? "bg-emerald-400" : "bg-zinc-300")} />
         <div className={cn("grid h-7 w-7 shrink-0 place-items-center rounded-lg text-xs font-bold text-white",
           agentType === "human" ? "bg-sky-700" : "bg-zinc-800 dark:bg-zinc-700")}>
           {name[0]?.toUpperCase()}
         </div>
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-semibold text-zinc-900 dark:text-white">{name}</div>
-          {m.agent?.desc && <div className="truncate text-[11px] text-zinc-400">{m.agent.desc}</div>}
         </div>
-      </div>
-      {/* Role */}
-      <div className="w-28 shrink-0">
         {editingRole ? (
           <select autoFocus defaultValue={m.role}
             onBlur={() => setEditingRole(false)}
             onChange={(e) => { onRoleChange(e.target.value); setEditingRole(false); }}
-            className="w-full rounded-lg border-0 bg-white px-2 py-1 text-xs font-semibold ring-1 ring-violet-400 focus:outline-none dark:bg-zinc-900">
+            className="rounded-lg border-0 bg-white px-2 py-1 text-xs font-semibold ring-1 ring-violet-400 focus:outline-none dark:bg-zinc-900">
             {TEAM_ROLES.map(r => <option key={r}>{r}</option>)}
           </select>
         ) : (
           <button onClick={() => setEditingRole(true)}
-            className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-semibold text-zinc-600 hover:bg-violet-100 hover:text-violet-700 transition-colors dark:bg-white/10 dark:text-zinc-400 capitalize">
+            className="shrink-0 rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-semibold text-zinc-600 hover:bg-violet-100 hover:text-violet-700 transition-colors dark:bg-white/10 dark:text-zinc-400 capitalize">
             {m.role}
           </button>
         )}
-      </div>
-      {/* Type */}
-      <div className="w-20 shrink-0">
-        <span className={cn("rounded-full px-2 py-0.5 text-[10px] font-semibold",
-          agentType === "human" ? "bg-sky-100 text-sky-700 dark:bg-sky-500/10 dark:text-sky-300"
-                                : "bg-violet-100 text-violet-700 dark:bg-violet-500/10 dark:text-violet-300")}>
-          {agentType === "human" ? "Human" : "AI"}
-        </span>
-      </div>
-      {/* Model */}
-      <div className="w-32 shrink-0">
-        {model ? <span className="rounded bg-zinc-100 px-1.5 py-0.5 text-[11px] font-mono text-zinc-500 dark:bg-white/10">{model}</span>
-               : <span className="text-xs text-zinc-300 dark:text-zinc-600">—</span>}
-      </div>
-      {/* Org */}
-      <div className="w-28 shrink-0 truncate text-[11px] text-zinc-500">{orgName ?? "—"}</div>
-      {/* Ping */}
-      <div className="w-24 shrink-0 flex items-center gap-1">
-        <span className={cn("h-1.5 w-1.5 rounded-full shrink-0", ps.dot)} />
-        <span className="text-[11px] text-zinc-400">{ps.label}</span>
-      </div>
-      {/* Actions */}
-      <div className="w-20 shrink-0 flex items-center justify-end gap-1">
-        <button onClick={onPing} disabled={pinging} title="Ping"
-          className="grid h-6 w-6 place-items-center rounded text-zinc-400 hover:bg-zinc-200 hover:text-zinc-700 dark:hover:bg-white/10 transition-colors disabled:opacity-40">
-          <Zap className="h-3.5 w-3.5" />
-        </button>
         <button onClick={onRemove} title="Remove"
-          className="grid h-6 w-6 place-items-center rounded text-zinc-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-500/10 transition-colors">
+          className="grid h-6 w-6 shrink-0 place-items-center rounded text-zinc-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-500/10 transition-colors">
           <Trash2 className="h-3.5 w-3.5" />
         </button>
+      </div>
+
+      {/* ── Desktop row (≥ md) ── */}
+      <div className="hidden md:flex items-center gap-3 px-4 py-2.5">
+        <span className={cn("h-2 w-2 shrink-0 rounded-full", isOnline ? "bg-emerald-400" : "bg-zinc-300")} />
+        <div className="flex-1 min-w-0 flex items-center gap-2.5">
+          <div className={cn("grid h-7 w-7 shrink-0 place-items-center rounded-lg text-xs font-bold text-white",
+            agentType === "human" ? "bg-sky-700" : "bg-zinc-800 dark:bg-zinc-700")}>
+            {name[0]?.toUpperCase()}
+          </div>
+          <div className="min-w-0">
+            <div className="truncate text-sm font-semibold text-zinc-900 dark:text-white">{name}</div>
+            {m.agent?.desc && <div className="truncate text-[11px] text-zinc-400">{m.agent.desc}</div>}
+          </div>
+        </div>
+        {/* Role */}
+        <div className="w-28 shrink-0">
+          {editingRole ? (
+            <select autoFocus defaultValue={m.role}
+              onBlur={() => setEditingRole(false)}
+              onChange={(e) => { onRoleChange(e.target.value); setEditingRole(false); }}
+              className="w-full rounded-lg border-0 bg-white px-2 py-1 text-xs font-semibold ring-1 ring-violet-400 focus:outline-none dark:bg-zinc-900">
+              {TEAM_ROLES.map(r => <option key={r}>{r}</option>)}
+            </select>
+          ) : (
+            <button onClick={() => setEditingRole(true)}
+              className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-semibold text-zinc-600 hover:bg-violet-100 hover:text-violet-700 transition-colors dark:bg-white/10 dark:text-zinc-400 capitalize">
+              {m.role}
+            </button>
+          )}
+        </div>
+        {/* Type */}
+        <div className="w-20 shrink-0">
+          <span className={cn("rounded-full px-2 py-0.5 text-[10px] font-semibold",
+            agentType === "human" ? "bg-sky-100 text-sky-700 dark:bg-sky-500/10 dark:text-sky-300"
+                                  : "bg-violet-100 text-violet-700 dark:bg-violet-500/10 dark:text-violet-300")}>
+            {agentType === "human" ? "Human" : "AI"}
+          </span>
+        </div>
+        {/* Model */}
+        <div className="w-32 shrink-0">
+          {model ? <span className="rounded bg-zinc-100 px-1.5 py-0.5 text-[11px] font-mono text-zinc-500 dark:bg-white/10">{model}</span>
+                 : <span className="text-xs text-zinc-300 dark:text-zinc-600">—</span>}
+        </div>
+        {/* Org */}
+        <div className="w-28 shrink-0 truncate text-[11px] text-zinc-500">{orgName ?? "—"}</div>
+        {/* Ping */}
+        <div className="w-24 shrink-0 flex items-center gap-1">
+          <span className={cn("h-1.5 w-1.5 rounded-full shrink-0", ps.dot)} />
+          <span className="text-[11px] text-zinc-400">{ps.label}</span>
+        </div>
+        {/* Actions */}
+        <div className="w-20 shrink-0 flex items-center justify-end gap-1">
+          <button onClick={onPing} disabled={pinging} title="Ping"
+            className="grid h-6 w-6 place-items-center rounded text-zinc-400 hover:bg-zinc-200 hover:text-zinc-700 dark:hover:bg-white/10 transition-colors disabled:opacity-40">
+            <Zap className="h-3.5 w-3.5" />
+          </button>
+          <button onClick={onRemove} title="Remove"
+            className="grid h-6 w-6 place-items-center rounded text-zinc-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-500/10 transition-colors">
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -1246,8 +1302,8 @@ function TeamTab({ projectId }: { projectId: string }) {
 
       {/* Table */}
       <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white dark:border-[#2D2A45] dark:bg-[#16132A]">
-        {/* Column headers */}
-        <div className="flex items-center border-b border-zinc-100 bg-zinc-50 px-4 py-2 dark:border-[#2D2A45] dark:bg-[#0F0D1E]">
+        {/* Column headers — desktop only */}
+        <div className="hidden md:flex items-center border-b border-zinc-100 bg-zinc-50 px-4 py-2 dark:border-[#2D2A45] dark:bg-[#0F0D1E]">
           <div className="w-4 shrink-0 mr-3" />
           <div className="flex-1 min-w-0 text-[11px] font-semibold uppercase tracking-wide text-zinc-400">Name</div>
           <div className="w-28 shrink-0 text-[11px] font-semibold uppercase tracking-wide text-zinc-400">Role</div>
@@ -1311,14 +1367,14 @@ function ProjectHeader({ project }: { project: { id: string; name: string; descr
     status === "planned" ? "bg-zinc-100 text-zinc-600"       : "bg-zinc-100 text-zinc-500";
 
   return (
-    <div className="flex h-[72px] shrink-0 items-center gap-4 border-b border-zinc-200 bg-white px-1 dark:border-[#2D2A45] dark:bg-transparent">
+    <div className="flex min-h-[56px] shrink-0 items-center gap-3 border-b border-zinc-200 bg-white px-1 py-2 sm:h-[72px] sm:gap-4 dark:border-[#2D2A45] dark:bg-transparent">
       <Link href="/projects"
         className="grid h-9 w-9 shrink-0 place-items-center rounded-xl text-zinc-500 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-white/10 dark:text-zinc-400 transition-colors">
         <ArrowLeft className="h-4 w-4" />
       </Link>
 
       {/* Project avatar */}
-      <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl font-display text-lg font-bold text-white"
+      <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg font-display text-base font-bold text-white sm:h-10 sm:w-10 sm:rounded-xl sm:text-lg"
         style={{ background: "linear-gradient(135deg,#7C3AED 0%,#4F46E5 100%)" }}>
         {project.name[0]?.toUpperCase()}
       </div>
@@ -1326,17 +1382,17 @@ function ProjectHeader({ project }: { project: { id: string; name: string; descr
       {/* Name + description */}
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
-          <h1 className="font-display text-xl font-extrabold text-zinc-900 dark:text-white">{project.name}</h1>
+          <h1 className="font-display text-lg font-extrabold text-zinc-900 dark:text-white sm:text-xl">{project.name}</h1>
           <span className={cn("rounded-full px-2.5 py-0.5 text-xs font-semibold capitalize", statusCls)}>{status}</span>
         </div>
         {project.description && (
-          <p className="mt-0.5 text-sm text-zinc-500 dark:text-zinc-400 truncate">{project.description}</p>
+          <p className="mt-0.5 hidden text-sm text-zinc-500 dark:text-zinc-400 sm:block truncate">{project.description}</p>
         )}
       </div>
 
       {/* Actions */}
       <div className="flex shrink-0 items-center gap-2">
-        <button className="grid h-8 w-8 place-items-center rounded-lg text-zinc-500 hover:bg-zinc-100 dark:hover:bg-white/10 transition-colors">
+        <button className="hidden sm:grid h-8 w-8 place-items-center rounded-lg text-zinc-500 hover:bg-zinc-100 dark:hover:bg-white/10 transition-colors">
           <Search className="h-4 w-4" />
         </button>
         <button className="grid h-8 w-8 place-items-center rounded-lg text-zinc-500 hover:bg-zinc-100 dark:hover:bg-white/10 transition-colors">
@@ -1358,9 +1414,10 @@ const TABS: { id: Tab; label: string; icon: React.ElementType }[] = [
 // ─── Toolbar ──────────────────────────────────────────────────────────────────
 function Toolbar({ onNewTask }: { onNewTask: () => void }) {
   return (
-    <div className="flex h-10 shrink-0 items-center gap-2 border-b border-zinc-100 bg-white px-1 dark:border-[#2D2A45] dark:bg-transparent">
+    <div className="flex h-10 shrink-0 items-center gap-1 border-b border-zinc-100 bg-white px-1 dark:border-[#2D2A45] dark:bg-transparent sm:gap-2">
       <Button variant="primary" size="sm" onClick={onNewTask}>
-        <Plus className="mr-1.5 h-3.5 w-3.5" /> New task
+        <Plus className="h-3.5 w-3.5 sm:mr-1.5" />
+        <span className="hidden sm:inline">New task</span>
       </Button>
       <div className="mx-1 h-4 w-px bg-zinc-200 dark:bg-white/10" />
       {[
@@ -1371,9 +1428,9 @@ function Toolbar({ onNewTask }: { onNewTask: () => void }) {
         { icon: MoreHorizontal, label: "···"     },
       ].map(({ icon: Icon, label }) => (
         <button key={label}
-          className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-white/10 dark:hover:text-zinc-300">
+          className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-medium text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-white/10 dark:hover:text-zinc-300 sm:px-2.5">
           <Icon className="h-3.5 w-3.5" />
-          {label}
+          <span className="hidden sm:inline">{label}</span>
         </button>
       ))}
     </div>
@@ -1411,24 +1468,24 @@ export default function ProjectDetailPage(props: { params: Promise<{ id: string 
       <ProjectHeader project={project} />
 
       {/* Tab bar */}
-      <div className="flex shrink-0 items-center gap-0 border-b border-zinc-200 bg-white px-1 dark:border-[#2D2A45] dark:bg-transparent">
+      <div className="flex shrink-0 items-center gap-0 overflow-x-auto border-b border-zinc-200 bg-white px-1 dark:border-[#2D2A45] dark:bg-transparent" style={{ scrollbarWidth: "none" }}>
         {TABS.map((tab) => {
           const Icon   = tab.icon;
           const active = activeTab === tab.id;
           return (
             <button key={tab.id} onClick={() => setActiveTab(tab.id)}
               className={cn(
-                "flex items-center gap-2 border-b-2 px-4 py-2.5 text-sm font-semibold transition-colors -mb-px",
+                "flex shrink-0 items-center gap-2 whitespace-nowrap border-b-2 px-3 py-2.5 text-sm font-semibold transition-colors -mb-px sm:px-4",
                 active
                   ? "border-brand-600 text-zinc-900 dark:text-white"
                   : "border-transparent text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
               )}>
               <Icon className="h-4 w-4" />
-              {tab.label}
+              <span className="hidden sm:inline">{tab.label}</span>
             </button>
           );
         })}
-        <button className="ml-1 px-2 py-2.5 text-zinc-400 hover:text-zinc-600 border-b-2 border-transparent -mb-px">
+        <button className="ml-1 shrink-0 whitespace-nowrap px-2 py-2.5 text-zinc-400 hover:text-zinc-600 border-b-2 border-transparent -mb-px">
           <Plus className="h-4 w-4" />
         </button>
       </div>
