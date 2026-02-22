@@ -316,6 +316,57 @@ function SectionColorBar({ tasks }: { tasks: Task[] }) {
   );
 }
 
+// ─── Due Date Field ───────────────────────────────────────────────────────────
+function DueDateField({ value, onChange }: { value?: string; onChange: (v: string) => void }) {
+  const [editing, setEditing] = React.useState(false);
+  const inputRef = React.useRef<HTMLInputElement>(null);
+
+  React.useEffect(() => {
+    if (editing) inputRef.current?.showPicker?.();
+  }, [editing]);
+
+  const due = formatDueDate(value);
+
+  if (editing) {
+    return (
+      <input
+        ref={inputRef}
+        type="date"
+        autoFocus
+        defaultValue={value ?? ""}
+        onChange={(e) => { onChange(e.target.value); setEditing(false); }}
+        onBlur={() => setEditing(false)}
+        className="rounded-lg bg-white px-2 py-0.5 text-xs ring-1 ring-brand-400 focus:outline-none dark:bg-white/10 dark:text-zinc-300"
+      />
+    );
+  }
+
+  if (due) {
+    return (
+      <button
+        onClick={() => setEditing(true)}
+        className={cn(
+          "flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-semibold transition-opacity hover:opacity-80",
+          due.cls
+        )}
+      >
+        <Calendar className="h-3 w-3 shrink-0" />
+        {due.text}
+      </button>
+    );
+  }
+
+  return (
+    <button
+      onClick={() => setEditing(true)}
+      className="flex items-center gap-1.5 text-xs text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors"
+    >
+      <Calendar className="h-3.5 w-3.5" />
+      Add due date
+    </button>
+  );
+}
+
 // ─── Task Detail Panel ────────────────────────────────────────────────────────
 function TaskDetailPanel({
   task, team, taskNumber, onClose, onUpdate, onDelete,
@@ -432,9 +483,10 @@ function TaskDetailPanel({
             </select>
           )}
           {propRow("Due Date",
-            <input type="date" value={task.due_date ?? ""}
-              onChange={(e) => onUpdate(task.id, { due_date: e.target.value || undefined })}
-              className="rounded-lg bg-white px-2 py-0.5 text-xs ring-1 ring-zinc-200 focus:outline-none dark:bg-white/10 dark:ring-white/10 dark:text-zinc-300" />
+            <DueDateField
+              value={task.due_date}
+              onChange={(v) => onUpdate(task.id, { due_date: v || undefined })}
+            />
           )}
           {propRow("Story Pts",
             <input type="number" min={0} max={100} value={task.estimated_sp ?? 0}
