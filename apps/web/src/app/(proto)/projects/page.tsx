@@ -319,6 +319,13 @@ export default function ProjectsPage() {
     ? searchFiltered
     : searchFiltered.filter((p) => p.status === statusFilter);
 
+  // Stat summary (over all projects, not filtered)
+  const totalProjects  = projects.length;
+  const activeProjects = projects.filter((p) => p.status === "active").length;
+  const avgProgress    = totalProjects > 0
+    ? Math.round(projects.reduce((s, p) => s + (p.progress ?? 0), 0) / totalProjects)
+    : 0;
+
   function handleCreated(project: Project) {
     setShowModal(false);
     router.push(`/projects/${project.id}`);
@@ -339,6 +346,41 @@ export default function ProjectsPage() {
           <Plus className="h-4 w-4" /> New Project
         </button>
       </div>
+
+      {/* Stat summary cards */}
+      {!loading && (
+        <div className="grid grid-cols-3 gap-3">
+          {[
+            {
+              label: "Total Projects",
+              value: totalProjects,
+              sub: "across MithranLabs",
+              accent: "text-zinc-900 dark:text-white",
+              bg: "bg-white dark:bg-[#16132A]",
+            },
+            {
+              label: "Active",
+              value: activeProjects,
+              sub: `${totalProjects - activeProjects} planned / review`,
+              accent: "text-emerald-600 dark:text-emerald-400",
+              bg: "bg-white dark:bg-[#16132A]",
+            },
+            {
+              label: "Avg Progress",
+              value: `${avgProgress}%`,
+              sub: "across all projects",
+              accent: "text-brand-600 dark:text-brand-400",
+              bg: "bg-white dark:bg-[#16132A]",
+            },
+          ].map((s) => (
+            <div key={s.label} className={cn("flex flex-col gap-1 rounded-2xl p-4 ring-1 ring-zinc-200 shadow-softSm dark:ring-[#2D2A45]", s.bg)}>
+              <span className={cn("font-display text-2xl font-extrabold tabular-nums", s.accent)}>{s.value}</span>
+              <span className="text-sm font-semibold text-zinc-700 dark:text-zinc-200">{s.label}</span>
+              <span className="text-xs text-zinc-400">{s.sub}</span>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Search + Filter row */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
