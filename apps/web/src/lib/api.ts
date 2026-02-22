@@ -59,6 +59,16 @@ export async function fetchProjects(): Promise<Project[]> {
   return PROJECTS;
 }
 
+export async function createProject(payload: {
+  name: string; slug: string; description?: string; status?: string;
+}): Promise<Project | null> {
+  const data = await apiFetch<{ ok: boolean; project: Project }>("/api/v1/projects", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  return data?.ok && data.project ? data.project : null;
+}
+
 export async function fetchProject(id: string): Promise<Project | undefined> {
   const data = await apiFetch<{ ok: boolean; project: Project }>(`/api/v1/projects/${id}`);
   if (data?.ok && data.project) return data.project;

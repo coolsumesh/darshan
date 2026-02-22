@@ -1,11 +1,12 @@
 "use client";
 
 import * as React from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Plus, Search, FolderKanban, Users, TrendingUp } from "lucide-react";
+import { Plus, Search, FolderKanban, Users, TrendingUp, X } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { type Project } from "@/lib/projects";
-import { fetchProjects } from "@/lib/api";
+import { fetchProjects, createProject } from "@/lib/api";
 
 function statusLabel(s?: string) {
   if (s === "active")  return { label: "Active",  cls: "bg-emerald-100 text-emerald-700" };
@@ -85,10 +86,207 @@ function ProjectCard({ project }: { project: Project }) {
   );
 }
 
+// ── Slug helper ────────────────────────────────────────────────────────────────
+function toSlug(name: string): string {
+  return name
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+// ── New Project Modal ──────────────────────────────────────────────────────────
+function NewProjectModal({
+  onClose,
+  onCreated,
+}: {
+  onClose: () => void;
+  onCreated: (project: Project) => void;
+}) {
+  const [name,        setName]        = React.useState("");
+  const [slug,        setSlug]        = React.useState("");
+  const [slugEdited,  setSlugEdited]  = React.useState(false);
+  const [description, setDescription] = React.useState("");
+  const [status,      setStatus]      = React.useState<"active" | "planned">("active");
+  const [saving,      setSaving]      = React.useState(false);
+  const [error,       setError]       = React.useState<string | null>(null);
+  const [nameError,   setNameError]   = React.useState(false);
+  const [slugError,   setSlugError]   = React.useState(false);
+
+  // Auto-generate slug from name unless user has manually edited it
+  function handleNameChange(v: string) {
+    setName(v);
+    if (!slugEdited) setSlug(toSlug(v));
+  }
+
+  function handleSlugChange(v: string) {
+    setSlug(toSlug(v) || v.toLowerCase());
+    setSlugEdited(true);
+  }
+
+  async function handleSave() {
+    const nameOk = name.trim().length > 0;
+    const slugOk = slug.trim().length > 0;
+    setNameError(!nameOk);
+    setSlugError(!slugOk);
+    if (!nameOk || !slugOk) return;
+
+    setSaving(true);
+    setError(null);
+    try {
+      const project = await createProject({ name: name.trim(), slug: slug.trim(), description: description.trim(), status });
+      if (!project) { setError("Failed to create project. The slug may already be in use."); setSaving(false); return; }
+      onCreated(project);
+    } catch {
+      setError("Unexpected error. Please try again.");
+      setSaving(false);
+    }
+  }
+
+  // Close on Escape
+  React.useEffect(() => {
+    function onKey(e: KeyboardEvent) { if (e.key === "Escape") onClose(); }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const inputCls = "w-full rounded-xl border-0 bg-zinc-50 px-3 py-2.5 text-sm text-zinc-900 ring-1 ring-zinc-200 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-brand-400/40 dark:bg-zinc-900 dark:text-zinc-100 dark:ring-zinc-700";
+  const labelCls = "text-xs font-semibold text-zinc-700 dark:text-zinc-300";
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      {/* Backdrop */}
+      <button
+        className="absolute inset-0 bg-zinc-950/40 backdrop-blur-[2px]"
+        onClick={onClose}
+        aria-label="Close"
+      />
+
+      {/* Modal */}
+      <div className="relative z-10 flex w-full max-w-md flex-col rounded-2xl bg-white shadow-soft ring-1 ring-zinc-200 dark:bg-[#16132A] dark:ring-[#2D2A45] max-h-[90vh]">
+        {/* Header */}
+        <div className="flex shrink-0 items-center justify-between border-b border-zinc-200 px-5 py-4 dark:border-[#2D2A45]">
+          <h2 className="font-display text-sm font-semibold text-zinc-900 dark:text-white">New project</h2>
+          <button
+            onClick={onClose}
+            className="grid h-8 w-8 place-items-center rounded-lg text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-5 min-h-0">
+          {/* Name */}
+          <div className="flex flex-col gap-1.5">
+            <label className={labelCls}>
+              Name <span className="text-red-500">*</span>
+            </label>
+            <input
+              autoFocus
+              type="text"
+              placeholder="My Awesome Project"
+              value={name}
+              onChange={(e) => handleNameChange(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") handleSave(); }}
+              className={cn(inputCls, nameError && "ring-red-400 focus:ring-red-400")}
+            />
+            {nameError && <p className="text-xs text-red-500">Name is required</p>}
+          </div>
+
+          {/* Slug */}
+          <div className="flex flex-col gap-1.5">
+            <label className={labelCls}>
+              Slug <span className="text-red-500">*</span>
+            </label>
+            <div className="flex items-center rounded-xl ring-1 ring-zinc-200 focus-within:ring-2 focus-within:ring-brand-400/40 dark:ring-zinc-700 overflow-hidden bg-zinc-50 dark:bg-zinc-900">
+              <span className="px-3 text-sm text-zinc-400 select-none">/</span>
+              <input
+                type="text"
+                placeholder="my-awesome-project"
+                value={slug}
+                onChange={(e) => handleSlugChange(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") handleSave(); }}
+                className="flex-1 border-0 bg-transparent py-2.5 pr-3 text-sm text-zinc-900 placeholder:text-zinc-400 focus:outline-none dark:text-zinc-100"
+              />
+            </div>
+            {slugError && <p className="text-xs text-red-500">Slug is required</p>}
+            <p className="text-[11px] text-zinc-400">Used in URLs. Auto-generated from name; lowercase letters, numbers, hyphens only.</p>
+          </div>
+
+          {/* Description */}
+          <div className="flex flex-col gap-1.5">
+            <label className={labelCls}>Description</label>
+            <textarea
+              placeholder="What is this project about?"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              rows={3}
+              className={cn(inputCls, "resize-none")}
+            />
+          </div>
+
+          {/* Status */}
+          <div className="flex flex-col gap-1.5">
+            <label className={labelCls}>Status</label>
+            <div className="flex gap-2">
+              {(["active", "planned"] as const).map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => setStatus(s)}
+                  className={cn(
+                    "flex-1 rounded-xl py-2 text-sm font-semibold capitalize transition-colors ring-1",
+                    status === s
+                      ? s === "active"
+                        ? "bg-emerald-100 text-emerald-700 ring-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-400 dark:ring-emerald-500/20"
+                        : "bg-zinc-100 text-zinc-600 ring-zinc-200 dark:bg-white/10 dark:text-zinc-300 dark:ring-white/10"
+                      : "bg-white text-zinc-400 ring-zinc-200 hover:bg-zinc-50 dark:bg-transparent dark:ring-zinc-700 dark:text-zinc-500 dark:hover:bg-white/5"
+                  )}
+                >
+                  {s === "active" ? "Active" : "Planned"}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Error */}
+          {error && (
+            <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-600 dark:bg-red-500/10 dark:text-red-400">
+              {error}
+            </p>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="flex shrink-0 items-center justify-end gap-3 border-t border-zinc-200 px-5 py-4 dark:border-[#2D2A45]">
+          <button
+            onClick={onClose}
+            className="rounded-xl px-4 py-2 text-sm font-semibold text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-white/10 transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            style={{ backgroundColor: "#7C3AED" }}
+            className="inline-flex h-9 items-center justify-center rounded-xl px-4 text-sm font-semibold text-white transition disabled:opacity-50"
+          >
+            {saving ? "Creating…" : "Create project"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Page ───────────────────────────────────────────────────────────────────────
 export default function ProjectsPage() {
+  const router = useRouter();
   const [projects, setProjects] = React.useState<Project[]>([]);
   const [loading,  setLoading]  = React.useState(true);
   const [query,    setQuery]    = React.useState("");
+  const [showModal, setShowModal] = React.useState(false);
 
   React.useEffect(() => {
     fetchProjects().then((p) => { setProjects(p); setLoading(false); });
@@ -98,6 +296,11 @@ export default function ProjectsPage() {
     !query || p.name.toLowerCase().includes(query.toLowerCase())
   );
 
+  function handleCreated(project: Project) {
+    setShowModal(false);
+    router.push(`/projects/${project.id}`);
+  }
+
   return (
     <div className="flex flex-col gap-6">
       {/* Page header */}
@@ -106,7 +309,10 @@ export default function ProjectsPage() {
           <h1 className="font-display text-2xl font-bold text-zinc-900 dark:text-white">Projects</h1>
           <p className="mt-0.5 text-sm text-zinc-500">{projects.length} workspace{projects.length !== 1 ? "s" : ""} · MithranLabs</p>
         </div>
-        <button className="flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700">
+        <button
+          onClick={() => setShowModal(true)}
+          className="flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700"
+        >
           <Plus className="h-4 w-4" /> New Project
         </button>
       </div>
@@ -135,11 +341,32 @@ export default function ProjectsPage() {
           ))}
         </div>
       ) : filtered.length === 0 ? (
-        <div className="py-20 text-center text-sm text-zinc-400">No projects found.</div>
+        <div className="flex flex-col items-center gap-4 py-20 text-center">
+          <FolderKanban className="h-10 w-10 text-zinc-300 dark:text-zinc-600" />
+          <p className="text-sm text-zinc-400">
+            {query ? "No projects match your search." : "No projects yet. Create your first one!"}
+          </p>
+          {!query && (
+            <button
+              onClick={() => setShowModal(true)}
+              className="flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 transition-colors"
+            >
+              <Plus className="h-4 w-4" /> New Project
+            </button>
+          )}
+        </div>
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {filtered.map((p) => <ProjectCard key={p.id} project={p} />)}
         </div>
+      )}
+
+      {/* Modal */}
+      {showModal && (
+        <NewProjectModal
+          onClose={() => setShowModal(false)}
+          onCreated={handleCreated}
+        />
       )}
     </div>
   );
