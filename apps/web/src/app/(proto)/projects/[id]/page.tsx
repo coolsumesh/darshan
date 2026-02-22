@@ -545,10 +545,12 @@ function TableRow({
       </div>
 
       {/* ── Desktop full row layout (≥ md) ── */}
-      <div className={cn(
-        "hidden md:flex items-center border-b border-zinc-100 dark:border-[#2D2A45] transition-colors min-h-[40px]",
-        "hover:bg-zinc-50 dark:hover:bg-white/5"
-      )}>
+      <div
+        onClick={onOpen}
+        className={cn(
+          "hidden md:flex items-center border-b border-zinc-100 dark:border-[#2D2A45] transition-colors min-h-[40px] cursor-pointer",
+          "hover:bg-zinc-50 dark:hover:bg-white/5"
+        )}>
       {/* Checkbox */}
       <div className="flex w-8 shrink-0 items-center justify-center">
         <input type="checkbox"
@@ -556,7 +558,7 @@ function TableRow({
           onClick={(e) => e.stopPropagation()} />
       </div>
       {/* Drag */}
-      <div className="w-5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+      <div className="w-5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
         <GripVertical className="h-4 w-4 text-zinc-400" />
       </div>
 
@@ -566,12 +568,14 @@ function TableRow({
           <input autoFocus value={titleVal}
             onChange={(e) => setTitleVal(e.target.value)}
             onBlur={saveTitle}
+            onClick={(e) => e.stopPropagation()}
             onKeyDown={(e) => { if (e.key === "Enter") saveTitle(); if (e.key === "Escape") { setTitleVal(task.title); setEditTitle(false); } }}
             className="w-full rounded-lg bg-white px-2 py-0.5 text-sm ring-2 ring-brand-400 outline-none dark:bg-white/10 dark:text-white"
           />
         ) : (
-          <span onClick={() => setEditTitle(true)}
-            className="font-display cursor-text truncate text-sm font-medium text-zinc-900 dark:text-white hover:text-brand-600">
+          <span
+            onDoubleClick={(e) => { e.stopPropagation(); setEditTitle(true); }}
+            className="font-display truncate text-sm font-medium text-zinc-900 dark:text-white">
             {task.title}
           </span>
         )}
@@ -579,7 +583,7 @@ function TableRow({
 
       {/* Owner */}
       <div className="flex w-28 shrink-0 items-center px-3">
-        <button onClick={(e) => openPop === "owner" ? closePopover() : openPopover("owner", e.currentTarget as HTMLElement)}
+        <button onClick={(e) => { e.stopPropagation(); openPop === "owner" ? closePopover() : openPopover("owner", e.currentTarget as HTMLElement); }}
           className="flex items-center gap-1.5 hover:opacity-80 transition-opacity">
           {task.assignee ? (
             <>
@@ -601,7 +605,7 @@ function TableRow({
 
       {/* Status */}
       <div className="flex w-36 shrink-0 items-center px-3">
-        <StatusPill status={task.status} onClick={(e) => openPop === "status" ? closePopover() : openPopover("status", e.currentTarget as HTMLElement)} />
+        <StatusPill status={task.status} onClick={(e) => { e.stopPropagation(); openPop === "status" ? closePopover() : openPopover("status", e.currentTarget as HTMLElement); }} />
         {openPop === "status" && (
           <StatusPopover anchorEl={anchorEl} status={task.status}
             onSelect={(s) => { onUpdate(task.id, { status: s }); closePopover(); }}
@@ -611,7 +615,7 @@ function TableRow({
 
       {/* Priority */}
       <div className="flex w-28 shrink-0 items-center px-3">
-        <PriorityPill priority={task.priority} onClick={(e) => openPop === "priority" ? closePopover() : openPopover("priority", e.currentTarget as HTMLElement)} />
+        <PriorityPill priority={task.priority} onClick={(e) => { e.stopPropagation(); openPop === "priority" ? closePopover() : openPopover("priority", e.currentTarget as HTMLElement); }} />
         {openPop === "priority" && (
           <PriorityPopover anchorEl={anchorEl} priority={task.priority}
             onSelect={(p) => { onUpdate(task.id, { priority: p }); closePopover(); }}
@@ -621,7 +625,7 @@ function TableRow({
 
       {/* Type */}
       <div className="flex w-32 shrink-0 items-center px-3">
-        <TypePill type={task.type} onClick={(e) => openPop === "type" ? closePopover() : openPopover("type", e.currentTarget as HTMLElement)} />
+        <TypePill type={task.type} onClick={(e) => { e.stopPropagation(); openPop === "type" ? closePopover() : openPopover("type", e.currentTarget as HTMLElement); }} />
         {openPop === "type" && (
           <TypePopover anchorEl={anchorEl} type={task.type}
             onSelect={(t) => { onUpdate(task.id, { type: t }); closePopover(); }}
@@ -650,11 +654,11 @@ function TableRow({
 
       {/* Actions */}
       <div className="flex w-16 shrink-0 items-center justify-end gap-0.5 px-2 opacity-0 group-hover:opacity-100 transition-opacity">
-        <button onClick={onOpen}
+        <button onClick={(e) => { e.stopPropagation(); onOpen(); }}
           className="grid h-6 w-6 place-items-center rounded text-zinc-400 hover:bg-zinc-200 hover:text-zinc-600 dark:hover:bg-white/10">
           <ExternalLink className="h-3.5 w-3.5" />
         </button>
-        <button onClick={onDelete}
+        <button onClick={(e) => { e.stopPropagation(); onDelete(); }}
           className="grid h-6 w-6 place-items-center rounded text-zinc-400 hover:bg-red-100 hover:text-red-500 dark:hover:bg-red-500/10">
           <X className="h-3.5 w-3.5" />
         </button>
