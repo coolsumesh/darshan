@@ -1362,6 +1362,64 @@ function TeamTab({ projectId }: { projectId: string }) {
   );
 }
 
+// ─── Project Stats Bar ────────────────────────────────────────────────────────
+function ProjectStatsBar({ projectId }: { projectId: string }) {
+  const [tasks, setTasks] = React.useState<Task[]>([]);
+  const [team,  setTeam]  = React.useState<TeamMemberWithAgent[]>([]);
+  const [ready, setReady] = React.useState(false);
+
+  React.useEffect(() => {
+    Promise.all([fetchTasks(projectId), fetchTeam(projectId)]).then(([t, m]) => {
+      setTasks(t);
+      setTeam(m);
+      setReady(true);
+    });
+  }, [projectId]);
+
+  const total    = tasks.length;
+  const done     = tasks.filter((t) => t.status === "done").length;
+  const inReview = tasks.filter((t) => t.status === "review").length;
+  const inProg   = tasks.filter((t) => t.status === "in-progress").length;
+  const members  = team.length;
+  const pct      = total > 0 ? Math.round((done / total) * 100) : 0;
+
+  const stats: { label: string; value: React.ReactNode; accent?: string }[] = [
+    { label: "Tasks",       value: total,    accent: "text-zinc-900 dark:text-white"      },
+    { label: "Done",        value: done,     accent: "text-emerald-600 dark:text-emerald-400" },
+    { label: "In Progress", value: inProg,   accent: "text-brand-600 dark:text-brand-400" },
+    { label: "Review",      value: inReview, accent: "text-sky-600 dark:text-sky-400"     },
+    { label: "Members",     value: members,  accent: "text-zinc-700 dark:text-zinc-300"   },
+    { label: "Progress",    value: `${pct}%`, accent: "text-violet-600 dark:text-violet-400" },
+  ];
+
+  if (!ready) {
+    return (
+      <div className="flex h-9 shrink-0 items-center gap-6 border-b border-zinc-100 bg-zinc-50 px-4 dark:border-[#2D2A45] dark:bg-[#0F0D1E]">
+        {[1, 2, 3, 4].map((i) => (
+          <div key={i} className="h-3 w-12 animate-pulse rounded bg-zinc-200 dark:bg-white/10" />
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex h-9 shrink-0 items-center gap-0 overflow-x-auto border-b border-zinc-100 bg-zinc-50 dark:border-[#2D2A45] dark:bg-[#0F0D1E]" style={{ scrollbarWidth: "none" }}>
+      {stats.map((s, i) => (
+        <div key={s.label} className={cn("flex items-center gap-2 px-4", i > 0 && "border-l border-zinc-200 dark:border-[#2D2A45]")}>
+          <span className={cn("text-sm font-bold tabular-nums", s.accent)}>{s.value}</span>
+          <span className="text-[11px] text-zinc-400 whitespace-nowrap">{s.label}</span>
+        </div>
+      ))}
+      {/* Mini progress bar fills remaining space */}
+      <div className="ml-auto flex items-center gap-2 px-4 shrink-0">
+        <div className="h-1.5 w-24 overflow-hidden rounded-full bg-zinc-200 dark:bg-white/10">
+          <div className="h-full rounded-full bg-brand-500 transition-all" style={{ width: `${pct}%` }} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Project Header ───────────────────────────────────────────────────────────
 function ProjectHeader({ project }: { project: { id: string; name: string; description?: string; status?: string; slug?: string } }) {
   const status = project.status ?? "active";
@@ -1470,6 +1528,9 @@ export default function ProjectDetailPage(props: { params: Promise<{ id: string 
     <div className="flex h-full flex-col">
       {/* Project header */}
       <ProjectHeader project={project} />
+
+      {/* Stats bar */}
+      <ProjectStatsBar projectId={project.id} />
 
       {/* Tab bar */}
       <div className="flex shrink-0 items-center gap-0 overflow-x-auto border-b border-zinc-200 bg-white px-1 dark:border-[#2D2A45] dark:bg-transparent" style={{ scrollbarWidth: "none" }}>
