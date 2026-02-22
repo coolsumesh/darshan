@@ -735,17 +735,33 @@ const COL_HEADERS = [
 
 // ─── Table section ────────────────────────────────────────────────────────────
 function TableSection({
-  section, tasks, startIndex, acting, team, onUpdate, onDelete, onAddTask, onOpenTask,
+  section, tasks, startIndex, acting, team, onUpdate, onDelete, onAddTask, onQuickAdd, onOpenTask,
 }: {
   section: typeof TABLE_SECTIONS[number]; tasks: Task[]; startIndex: number;
   acting: string | null; team: TeamMemberWithAgent[];
   onUpdate: (id: string, patch: Partial<Task>) => void;
   onDelete: (id: string) => void;
   onAddTask: () => void;
+  onQuickAdd: (title: string) => Promise<void>;
   onOpenTask: (task: Task, index: number) => void;
 }) {
-  const [collapsed, setCollapsed] = React.useState(false);
+  const [collapsed,     setCollapsed]     = React.useState(false);
+  const [quickAdding,   setQuickAdding]   = React.useState(false);
+  const [quickTitle,    setQuickTitle]    = React.useState("");
+  const [quickSaving,   setQuickSaving]   = React.useState(false);
+  const quickInputRef = React.useRef<HTMLInputElement>(null);
   const spTotal = tasks.reduce((s, t) => s + (t.estimated_sp ?? 0), 0);
+
+  async function submitQuickAdd() {
+    const title = quickTitle.trim();
+    if (!title) { setQuickAdding(false); return; }
+    setQuickSaving(true);
+    await onQuickAdd(title);
+    setQuickTitle("");
+    setQuickSaving(false);
+    // keep input open for rapid entry
+    quickInputRef.current?.focus();
+  }
 
   return (
     <div className="mb-2">
@@ -791,11 +807,45 @@ function TableSection({
             />
           ))}
 
-          {/* Add task row */}
-          <button onClick={onAddTask}
-            className="flex w-full items-center gap-2 border-t border-dashed border-zinc-200 px-8 py-2.5 text-xs text-zinc-400 hover:bg-zinc-50 hover:text-zinc-600 dark:border-[#2D2A45] dark:hover:bg-white/5 transition-colors">
-            <Plus className="h-3.5 w-3.5" /> Add task
-          </button>
+          {/* Quick-add / Add task row */}
+          {quickAdding ? (
+            <div className="flex items-center gap-2 border-t border-dashed border-zinc-200 px-3 py-1.5 dark:border-[#2D2A45] bg-zinc-50 dark:bg-[#0F0D1E]">
+              <Plus className="h-3.5 w-3.5 shrink-0 text-zinc-400" />
+              <input
+                ref={quickInputRef}
+                autoFocus
+                value={quickTitle}
+                onChange={(e) => setQuickTitle(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") { e.preventDefault(); submitQuickAdd(); }
+                  if (e.key === "Escape") { setQuickAdding(false); setQuickTitle(""); }
+                }}
+                placeholder="Type a task name… (Enter to save, Esc to cancel)"
+                disabled={quickSaving}
+                className="flex-1 bg-transparent text-sm text-zinc-900 placeholder:text-zinc-400 focus:outline-none dark:text-white disabled:opacity-50"
+              />
+              <button
+                onClick={() => { setQuickAdding(false); setQuickTitle(""); }}
+                className="grid h-5 w-5 shrink-0 place-items-center rounded text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+              <button
+                onClick={onAddTask}
+                title="Open full form"
+                className="text-[11px] text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 whitespace-nowrap"
+              >
+                Full form
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => setQuickAdding(true)}
+              className="flex w-full items-center gap-2 border-t border-dashed border-zinc-200 px-8 py-2.5 text-xs text-zinc-400 hover:bg-zinc-50 hover:text-zinc-600 dark:border-[#2D2A45] dark:hover:bg-white/5 transition-colors"
+            >
+              <Plus className="h-3.5 w-3.5" /> Add task
+            </button>
+          )}
 
           {/* Sum row */}
           {spTotal > 0 && (
@@ -819,12 +869,13 @@ function TableSection({
 
 // ─── Main Table view ──────────────────────────────────────────────────────────
 function MainTableView({
-  tasks, acting, team, onUpdate, onDelete, onAddTask, onOpenTask,
+  tasks, acting, team, onUpdate, onDelete, onAddTask, onQuickAdd, onOpenTask,
 }: {
   tasks: Task[]; acting: string | null; team: TeamMemberWithAgent[];
   onUpdate: (id: string, patch: Partial<Task>) => void;
   onDelete: (id: string) => void;
   onAddTask: (status: TaskStatus) => void;
+  onQuickAdd: (title: string, status: TaskStatus) => Promise<void>;
   onOpenTask: (task: Task, index: number) => void;
 }) {
   let counter = 0;
@@ -838,6 +889,7 @@ function MainTableView({
           <TableSection key={section.status} section={section} tasks={st} startIndex={si}
             acting={acting} team={team} onUpdate={onUpdate} onDelete={onDelete}
             onAddTask={() => onAddTask(section.status)}
+            onQuickAdd={(title) => onQuickAdd(title, section.status)}
             onOpenTask={onOpenTask} />
         );
       })}
@@ -995,6 +1047,11 @@ function TaskBoardContent({
     setCreateIn(null);
   }
 
+  async function handleQuickAdd(title: string, status: TaskStatus) {
+    await createTask(projectId, { title, status, proposer: "Mithran ⚡", type: "Task", priority: "medium" });
+    // WebSocket task:created event is the single source of truth.
+  }
+
   return (
     <div className="flex min-h-0 flex-1 overflow-hidden">
       {/* Main content — hidden on mobile when detail panel is open */}
@@ -1003,6 +1060,7 @@ function TaskBoardContent({
           tasks={visibleTasks} acting={acting} team={team}
           onUpdate={patchTask} onDelete={removeTask}
           onAddTask={(status) => setCreateIn(status)}
+          onQuickAdd={handleQuickAdd}
           onOpenTask={(task, index) => setDetailTask({ task, index })}
         />
       </div>
