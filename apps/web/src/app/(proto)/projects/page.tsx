@@ -280,6 +280,35 @@ function NewProjectModal({
   );
 }
 
+// ── Sort config ────────────────────────────────────────────────────────────────
+type SortKey = "status" | "name" | "progress" | "team";
+
+const SORT_OPTIONS: { value: SortKey; label: string }[] = [
+  { value: "status",   label: "Status (active first)" },
+  { value: "name",     label: "Name"                  },
+  { value: "progress", label: "Progress"              },
+  { value: "team",     label: "Team size"             },
+];
+
+const STATUS_ORDER: Record<string, number> = { active: 0, review: 1, planned: 2 };
+
+function sortProjects(projects: Project[], key: SortKey): Project[] {
+  const sorted = [...projects];
+  sorted.sort((a, b) => {
+    switch (key) {
+      case "status":
+        return (STATUS_ORDER[a.status ?? ""] ?? 9) - (STATUS_ORDER[b.status ?? ""] ?? 9);
+      case "name":
+        return a.name.localeCompare(b.name);
+      case "progress":
+        return (b.progress ?? 0) - (a.progress ?? 0);
+      case "team":
+        return (b.teamSize ?? 0) - (a.teamSize ?? 0);
+    }
+  });
+  return sorted;
+}
+
 // ── Status filter tabs config ──────────────────────────────────────────────────
 type StatusFilter = "all" | "active" | "planned" | "review";
 
@@ -297,6 +326,7 @@ export default function ProjectsPage() {
   const [loading,       setLoading]       = React.useState(true);
   const [query,         setQuery]         = React.useState("");
   const [statusFilter,  setStatusFilter]  = React.useState<StatusFilter>("all");
+  const [sortKey,       setSortKey]       = React.useState<SortKey>("status");
   const [showModal,     setShowModal]     = React.useState(false);
 
   React.useEffect(() => {
@@ -314,10 +344,11 @@ export default function ProjectsPage() {
     review:  searchFiltered.filter((p) => p.status === "review").length,
   };
 
-  // Final filtered list
-  const filtered = statusFilter === "all"
+  // Final filtered + sorted list
+  const statusFiltered = statusFilter === "all"
     ? searchFiltered
     : searchFiltered.filter((p) => p.status === statusFilter);
+  const filtered = sortProjects(statusFiltered, sortKey);
 
   // Stat summary (over all projects, not filtered)
   const totalProjects  = projects.length;
@@ -384,20 +415,36 @@ export default function ProjectsPage() {
 
       {/* Search + Filter row */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        {/* Search */}
-        <div className="relative max-w-sm w-full">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
-          <input
-            type="text"
-            placeholder="Search projects…"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
+        {/* Search + Sort */}
+        <div className="flex items-center gap-2 w-full sm:max-w-md">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+            <input
+              type="text"
+              placeholder="Search projects…"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              className={cn(
+                "w-full rounded-xl border-0 bg-white py-2.5 pl-9 pr-4 text-sm ring-1 ring-zinc-200",
+                "placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-brand-500/40",
+                "dark:bg-[#16132A] dark:ring-[#2D2A45] dark:text-white"
+              )}
+            />
+          </div>
+          {/* Sort dropdown */}
+          <select
+            value={sortKey}
+            onChange={(e) => setSortKey(e.target.value as SortKey)}
             className={cn(
-              "w-full rounded-xl border-0 bg-white py-2.5 pl-9 pr-4 text-sm ring-1 ring-zinc-200",
-              "placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-brand-500/40",
-              "dark:bg-[#16132A] dark:ring-[#2D2A45] dark:text-white"
+              "shrink-0 rounded-xl border-0 bg-white py-2.5 pl-3 pr-8 text-sm ring-1 ring-zinc-200",
+              "focus:outline-none focus:ring-2 focus:ring-brand-500/40 text-zinc-700",
+              "dark:bg-[#16132A] dark:ring-[#2D2A45] dark:text-zinc-300"
             )}
-          />
+          >
+            {SORT_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
         </div>
 
         {/* Status filter tabs */}
