@@ -280,21 +280,44 @@ function NewProjectModal({
   );
 }
 
+// ── Status filter tabs config ──────────────────────────────────────────────────
+type StatusFilter = "all" | "active" | "planned" | "review";
+
+const STATUS_TABS: { id: StatusFilter; label: string }[] = [
+  { id: "all",     label: "All"     },
+  { id: "active",  label: "Active"  },
+  { id: "planned", label: "Planned" },
+  { id: "review",  label: "Review"  },
+];
+
 // ── Page ───────────────────────────────────────────────────────────────────────
 export default function ProjectsPage() {
   const router = useRouter();
-  const [projects, setProjects] = React.useState<Project[]>([]);
-  const [loading,  setLoading]  = React.useState(true);
-  const [query,    setQuery]    = React.useState("");
-  const [showModal, setShowModal] = React.useState(false);
+  const [projects,      setProjects]      = React.useState<Project[]>([]);
+  const [loading,       setLoading]       = React.useState(true);
+  const [query,         setQuery]         = React.useState("");
+  const [statusFilter,  setStatusFilter]  = React.useState<StatusFilter>("all");
+  const [showModal,     setShowModal]     = React.useState(false);
 
   React.useEffect(() => {
     fetchProjects().then((p) => { setProjects(p); setLoading(false); });
   }, []);
 
-  const filtered = projects.filter((p) =>
+  // Counts per tab (search-aware)
+  const searchFiltered = projects.filter((p) =>
     !query || p.name.toLowerCase().includes(query.toLowerCase())
   );
+  const counts: Record<StatusFilter, number> = {
+    all:     searchFiltered.length,
+    active:  searchFiltered.filter((p) => p.status === "active").length,
+    planned: searchFiltered.filter((p) => p.status === "planned").length,
+    review:  searchFiltered.filter((p) => p.status === "review").length,
+  };
+
+  // Final filtered list
+  const filtered = statusFilter === "all"
+    ? searchFiltered
+    : searchFiltered.filter((p) => p.status === statusFilter);
 
   function handleCreated(project: Project) {
     setShowModal(false);
@@ -317,20 +340,52 @@ export default function ProjectsPage() {
         </button>
       </div>
 
-      {/* Search */}
-      <div className="relative max-w-sm">
-        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
-        <input
-          type="text"
-          placeholder="Search projects…"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          className={cn(
-            "w-full rounded-xl border-0 bg-white py-2.5 pl-9 pr-4 text-sm ring-1 ring-zinc-200",
-            "placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-brand-500/40",
-            "dark:bg-[#16132A] dark:ring-[#2D2A45] dark:text-white"
-          )}
-        />
+      {/* Search + Filter row */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        {/* Search */}
+        <div className="relative max-w-sm w-full">
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+          <input
+            type="text"
+            placeholder="Search projects…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            className={cn(
+              "w-full rounded-xl border-0 bg-white py-2.5 pl-9 pr-4 text-sm ring-1 ring-zinc-200",
+              "placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-brand-500/40",
+              "dark:bg-[#16132A] dark:ring-[#2D2A45] dark:text-white"
+            )}
+          />
+        </div>
+
+        {/* Status filter tabs */}
+        <div className="flex items-center gap-1 rounded-xl bg-zinc-100 p-1 dark:bg-white/5 overflow-x-auto shrink-0">
+          {STATUS_TABS.map((tab) => {
+            const active = statusFilter === tab.id;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => setStatusFilter(tab.id)}
+                className={cn(
+                  "flex items-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors",
+                  active
+                    ? "bg-white text-zinc-900 shadow-sm dark:bg-[#1E1B35] dark:text-white"
+                    : "text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
+                )}
+              >
+                {tab.label}
+                <span className={cn(
+                  "grid min-w-[18px] place-items-center rounded-full px-1 text-[10px] font-bold",
+                  active
+                    ? "bg-brand-100 text-brand-700 dark:bg-brand-500/20 dark:text-brand-300"
+                    : "bg-zinc-200 text-zinc-500 dark:bg-white/10 dark:text-zinc-400"
+                )}>
+                  {counts[tab.id]}
+                </span>
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {/* Grid */}
@@ -344,9 +399,11 @@ export default function ProjectsPage() {
         <div className="flex flex-col items-center gap-4 py-20 text-center">
           <FolderKanban className="h-10 w-10 text-zinc-300 dark:text-zinc-600" />
           <p className="text-sm text-zinc-400">
-            {query ? "No projects match your search." : "No projects yet. Create your first one!"}
+            {query || statusFilter !== "all"
+              ? "No projects match your filters."
+              : "No projects yet. Create your first one!"}
           </p>
-          {!query && (
+          {!query && statusFilter === "all" && (
             <button
               onClick={() => setShowModal(true)}
               className="flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 transition-colors"
