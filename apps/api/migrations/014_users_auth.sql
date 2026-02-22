@@ -10,11 +10,11 @@ create table if not exists users (
 );
 
 -- Seed default admin user: Sumesh / password: darshan123
--- bcrypt hash of "darshan123" with cost 10
+-- bcrypt hash of "darshan123" with cost 10 (regenerated 2026-02-22)
 insert into users (email, name, password_hash, role)
 values (
   'sumesh@mithranLabs.com',
   'Sumesh',
-  '$2b$10$lxHwqMtCCvMzIY8.7HJKPe9VF6Dn7yHTDFWxnSQisRl6h45zE7Mpu',
+  '$2b$10$Gvvjdf9BdlXzRC/e1ZTPRO4ce5sFBWFLGAnxsBGdqzIqMDmVWuh72',
   'admin'
 ) on conflict (email) do nothing;
