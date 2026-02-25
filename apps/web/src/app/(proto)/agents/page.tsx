@@ -4,7 +4,7 @@ import * as React from "react";
 import { createPortal } from "react-dom";
 import {
   Bot, Check, ChevronDown, Plus, Search, X, Zap,
-  Activity, Trash2, Pencil, Building2, Users, Key, Copy,
+  Activity, Trash2, Pencil, Building2, Users, Key, Copy, Upload,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { Button } from "@/components/ui/button";
@@ -825,6 +825,135 @@ function OnboardAgentModal({ orgs, defaultOrgId, onDone, onClose }: {
   );
 }
 
+// ─── Import Agent Modal ───────────────────────────────────────────────────────
+type ImportPayload = {
+  name?: string; desc?: string; agent_type?: string;
+  provider?: string; model?: string;
+  capabilities?: string[]; endpoint_type?: string;
+};
+
+function ImportAgentModal({ orgs, onDone, onClose }: {
+  orgs: Org[]; onDone: () => void; onClose: () => void;
+}) {
+  const [raw,    setRaw]    = React.useState("");
+  const [orgId,  setOrgId]  = React.useState(orgs.find(o => o.type === "own")?.id ?? orgs[0]?.id ?? "");
+  const [saving, setSaving] = React.useState(false);
+  const [error,  setError]  = React.useState("");
+
+  // Parse JSON live
+  const parsed: ImportPayload | null = React.useMemo(() => {
+    if (!raw.trim()) return null;
+    try { return JSON.parse(raw) as ImportPayload; } catch { return null; }
+  }, [raw]);
+
+  const parseError = raw.trim() && !parsed ? "Invalid JSON — check the format." : "";
+  const caps = Array.isArray(parsed?.capabilities) ? parsed!.capabilities : [];
+
+  async function handleImport() {
+    if (!parsed?.name?.trim()) { setError("Name is required."); return; }
+    if (!orgId) { setError("Select an organisation."); return; }
+    setSaving(true); setError("");
+    const ok = await createOrgAgent(orgId, {
+      name:          parsed.name.trim(),
+      desc:          parsed.desc?.trim(),
+      agent_type:    parsed.agent_type ?? "ai_agent",
+      model:         parsed.model,
+      provider:      parsed.provider ?? "anthropic",
+      capabilities:  caps,
+      endpoint_type: parsed.endpoint_type ?? "openclaw_poll",
+    });
+    if (ok) onDone();
+    else { setError("Failed to create agent."); setSaving(false); }
+  }
+
+  const sel = "w-full rounded-xl border-0 bg-zinc-50 px-3 py-2.5 text-sm text-zinc-900 ring-1 ring-zinc-200 focus:outline-none dark:bg-zinc-900 dark:text-zinc-100 dark:ring-zinc-700";
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <button className="absolute inset-0 bg-zinc-950/50 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative z-10 flex w-full max-w-lg flex-col rounded-2xl bg-white shadow-xl ring-1 ring-zinc-200 dark:bg-[#16132A] dark:ring-[#2D2A45] max-h-[90vh]">
+
+        {/* Header */}
+        <div className="flex shrink-0 items-center justify-between border-b border-zinc-200 px-5 py-4 dark:border-[#2D2A45]">
+          <div>
+            <div className="font-display text-sm font-bold text-zinc-900 dark:text-white">Import Agent</div>
+            <div className="mt-0.5 text-xs text-zinc-500">Paste an agent card JSON to register instantly</div>
+          </div>
+          <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg text-zinc-400 hover:bg-zinc-100 dark:hover:bg-white/10">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-5 min-h-0">
+
+          {/* Paste area */}
+          <div>
+            <label className="mb-1.5 block text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+              Agent Card JSON
+            </label>
+            <textarea
+              autoFocus
+              rows={7}
+              value={raw}
+              onChange={e => { setRaw(e.target.value); setError(""); }}
+              placeholder={`{\n  "name": "Sanjaya",\n  "agent_type": "ai_agent",\n  "provider": "anthropic",\n  "model": "claude-sonnet-4-6",\n  "capabilities": ["code", "review", "plan"],\n  "endpoint_type": "openclaw_poll"\n}`}
+              className="w-full rounded-xl bg-zinc-50 px-3 py-2.5 font-mono text-xs text-zinc-800 ring-1 ring-zinc-200 focus:outline-none focus:ring-2 focus:ring-brand-400/40 dark:bg-zinc-900 dark:text-zinc-200 dark:ring-zinc-700 resize-none"
+            />
+            {parseError && <p className="mt-1 text-[11px] text-red-500">{parseError}</p>}
+          </div>
+
+          {/* Live preview */}
+          {parsed && (
+            <div className="rounded-xl bg-zinc-50 p-4 ring-1 ring-zinc-200 dark:bg-white/5 dark:ring-white/10">
+              <p className="mb-3 text-[10px] font-semibold uppercase tracking-wide text-zinc-400">Preview</p>
+              <div className="flex items-start gap-3">
+                <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-zinc-800 text-base font-bold text-white">
+                  {parsed.name?.[0]?.toUpperCase() ?? "?"}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="font-semibold text-zinc-900 dark:text-white">{parsed.name || <span className="text-zinc-400">No name</span>}</div>
+                  {parsed.desc && <div className="mt-0.5 text-xs text-zinc-500">{parsed.desc}</div>}
+                  <div className="mt-1.5 flex flex-wrap gap-1.5">
+                    {parsed.model && <span className="rounded bg-zinc-200 px-1.5 py-0.5 text-[11px] font-mono text-zinc-600 dark:bg-white/10 dark:text-zinc-400">{parsed.model}</span>}
+                    {parsed.provider && <span className="rounded bg-zinc-200 px-1.5 py-0.5 text-[11px] text-zinc-600 dark:bg-white/10 dark:text-zinc-400">{parsed.provider}</span>}
+                    {caps.map(c => <span key={c} className="rounded bg-brand-100 px-1.5 py-0.5 text-[11px] text-brand-700 dark:bg-brand-500/10 dark:text-brand-300">{c}</span>)}
+                  </div>
+                </div>
+                <Check className="h-4 w-4 shrink-0 text-emerald-500 mt-1" />
+              </div>
+            </div>
+          )}
+
+          {/* Org selector */}
+          <div>
+            <label className="mb-1.5 block text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+              Add to Organisation <span className="text-red-500">*</span>
+            </label>
+            <select value={orgId} onChange={e => setOrgId(e.target.value)} className={sel}>
+              {orgs.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+            </select>
+          </div>
+
+          {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-600 dark:bg-red-500/10">{error}</p>}
+        </div>
+
+        {/* Footer */}
+        <div className="flex shrink-0 justify-end gap-3 border-t border-zinc-200 px-5 py-4 dark:border-[#2D2A45]">
+          <Button variant="secondary" size="sm" onClick={onClose}>Cancel</Button>
+          <Button
+            variant="primary" size="sm"
+            onClick={handleImport}
+            disabled={!parsed?.name || !orgId || saving || !!parseError}
+          >
+            <Upload className="h-3.5 w-3.5" />
+            {saving ? "Importing…" : "Import Agent"}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Delete Confirm ───────────────────────────────────────────────────────────
 function DeleteAgentConfirm({ agent, onConfirm, onClose, deleting }: {
   agent: ExtAgent; onConfirm: () => void; onClose: () => void; deleting: boolean;
@@ -866,6 +995,7 @@ export default function AgentsPage() {
   const [detailAgent,  setDetailAgent]  = React.useState<ExtAgent | null>(null);
   const [showAgentModal,  setShowAgentModal]  = React.useState(false);
   const [agentModalOrgId, setAgentModalOrgId] = React.useState<string | undefined>();
+  const [showImportModal, setShowImportModal] = React.useState(false);
   const [deleteTarget,    setDeleteTarget]    = React.useState<ExtAgent | null>(null);
   const [deleting,        setDeleting]        = React.useState(false);
 
@@ -944,11 +1074,18 @@ export default function AgentsPage() {
                 {agents.length} agents · {totalOnline} online · {orgs.length} orgs
               </p>
             </div>
-            <button
-              onClick={() => openAgentModal(ownOrg?.id)}
-              className="flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 transition-colors">
-              <Plus className="h-4 w-4" /> New Agent
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setShowImportModal(true)}
+                className="flex items-center gap-2 rounded-xl border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 transition-colors dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700">
+                <Upload className="h-4 w-4" /> Import
+              </button>
+              <button
+                onClick={() => openAgentModal(ownOrg?.id)}
+                className="flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 transition-colors">
+                <Plus className="h-4 w-4" /> New Agent
+              </button>
+            </div>
           </div>
 
           {/* Stats */}
@@ -1078,6 +1215,15 @@ export default function AgentsPage() {
           onRemove={async id => { await handleDelete(id); }}
           onUpdated={() => { reload(); setDetailAgent(null); }}
           pinging={pingingIds.has(detailAgent.id)}
+        />
+      )}
+
+      {/* Import agent modal */}
+      {showImportModal && (
+        <ImportAgentModal
+          orgs={orgs}
+          onDone={() => { setShowImportModal(false); reload(); }}
+          onClose={() => setShowImportModal(false)}
         />
       )}
 
