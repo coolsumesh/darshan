@@ -832,10 +832,10 @@ function InviteAgentModal({ orgs, onClose }: { orgs: Org[]; onClose: () => void 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <button className="absolute inset-0 bg-zinc-950/50 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative z-10 w-full max-w-md rounded-2xl bg-white shadow-xl ring-1 ring-zinc-200 dark:bg-[#16132A] dark:ring-[#2D2A45]">
+      <div className="relative z-10 w-full max-w-md rounded-2xl bg-white shadow-xl ring-1 ring-zinc-200 dark:bg-[#16132A] dark:ring-[#2D2A45] flex flex-col max-h-[80vh]">
 
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-zinc-200 px-5 py-4 dark:border-[#2D2A45]">
+        <div className="flex shrink-0 items-center justify-between border-b border-zinc-200 px-5 py-4 dark:border-[#2D2A45]">
           <div>
             <div className="font-display text-sm font-bold text-zinc-900 dark:text-white">Invite Agent</div>
             <div className="mt-0.5 text-xs text-zinc-500">Generate a one-time link — valid 24 hours</div>
@@ -845,7 +845,7 @@ function InviteAgentModal({ orgs, onClose }: { orgs: Org[]; onClose: () => void 
           </button>
         </div>
 
-        <div className="flex flex-col gap-4 p-5">
+        <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-5 min-h-0">
           {!result ? (
             <>
               {/* Org */}
