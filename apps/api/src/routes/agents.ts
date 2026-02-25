@@ -507,4 +507,112 @@ ACK_URL: ${ackUrl}
     return { ok: true, projects: rows };
   });
 
+  // ── Create invite link for an org ──────────────────────────────────────────
+  server.post<{
+    Params: { id: string };
+    Body: { label?: string; expires_hours?: number };
+  }>("/api/v1/orgs/:id/invites", async (req, reply) => {
+    const { label, expires_hours = 24 } = req.body ?? {};
+    const { rows: orgs } = await db.query(
+      `select id from organisations where id::text = $1 or slug = $1`, [req.params.id]
+    );
+    if (!orgs.length) return reply.status(404).send({ ok: false, error: "org not found" });
+
+    const { rows } = await db.query(
+      `insert into agent_invites (org_id, label, expires_at)
+       values ($1, $2, now() + ($3 || ' hours')::interval)
+       returning id, token, label, expires_at`,
+      [orgs[0].id, label ?? null, expires_hours]
+    );
+    const invite = rows[0];
+    return {
+      ok: true,
+      token:      invite.token,
+      invite_url: `https://darshan.caringgems.in/invite/${invite.token}`,
+      expires_at: invite.expires_at,
+      label:      invite.label,
+    };
+  });
+
+  // ── Get invite info (public — no auth) ─────────────────────────────────────
+  server.get<{ Params: { token: string } }>("/api/v1/invites/:token", async (req, reply) => {
+    const { rows } = await db.query(
+      `select ai.id, ai.label, ai.expires_at, ai.accepted_at,
+              o.name as org_name, o.type as org_type
+       from agent_invites ai
+       join organisations o on o.id = ai.org_id
+       where ai.token = $1`,
+      [req.params.token]
+    );
+    if (!rows.length) return reply.status(404).send({ ok: false, error: "invalid or expired invite" });
+    const inv = rows[0];
+    if (new Date(inv.expires_at) < new Date()) return reply.status(410).send({ ok: false, error: "invite has expired" });
+    if (inv.accepted_at) return reply.status(409).send({ ok: false, error: "invite already used" });
+    return {
+      ok: true,
+      org:       { name: inv.org_name, type: inv.org_type },
+      label:     inv.label,
+      expires_at: inv.expires_at,
+    };
+  });
+
+  // ── Accept invite — self-register (public — no auth) ───────────────────────
+  server.post<{
+    Params: { token: string };
+    Body: {
+      name: string; desc?: string; agent_type?: string;
+      model?: string; provider?: string;
+      capabilities?: string[]; endpoint_type?: string;
+    };
+  }>("/api/v1/invites/:token/accept", async (req, reply) => {
+    const { name, desc, agent_type = "ai_agent", model, provider = "anthropic",
+            capabilities = [], endpoint_type = "openclaw_poll" } = req.body ?? {};
+    if (!name?.trim()) return reply.status(400).send({ ok: false, error: "name required" });
+
+    // Validate invite
+    const { rows: invites } = await db.query(
+      `select ai.id, ai.org_id, ai.expires_at, ai.accepted_at, o.name as org_name
+       from agent_invites ai join organisations o on o.id = ai.org_id
+       where ai.token = $1`,
+      [req.params.token]
+    );
+    if (!invites.length) return reply.status(404).send({ ok: false, error: "invalid invite" });
+    const inv = invites[0];
+    if (new Date(inv.expires_at) < new Date()) return reply.status(410).send({ ok: false, error: "invite expired" });
+    if (inv.accepted_at) return reply.status(409).send({ ok: false, error: "invite already used" });
+
+    // Create agent
+    const token = randomBytes(32).toString("hex");
+    const { rows } = await db.query(
+      `insert into agents (name, description, status, org_id, agent_type, model, provider,
+                           capabilities, endpoint_type, endpoint_config, callback_token, ping_status)
+       values ($1,$2,'offline',$3,$4,$5,$6,$7,$8,$9,$10,'unknown') returning *`,
+      [name.trim(), desc ?? null, inv.org_id, agent_type, model ?? null, provider,
+       JSON.stringify(capabilities), endpoint_type, JSON.stringify({}), token]
+    );
+    const agent = rows[0];
+
+    // Mark invite accepted
+    await db.query(
+      `update agent_invites set accepted_at = now(), agent_id = $1 where id = $2`,
+      [agent.id, inv.id]
+    );
+
+    const baseUrl = "https://darshan.caringgems.in/api/backend/api/v1";
+    const inbox_url = `${baseUrl}/agents/${agent.id}/inbox`;
+    const ack_url   = `${baseUrl}/agents/${agent.id}/inbox/ack`;
+
+    // Send welcome inbox item
+    await db.query(
+      `insert into agent_inbox (agent_id, type, payload) values ($1, 'welcome', $2)`,
+      [agent.id, JSON.stringify({
+        agent_id: agent.id, token,
+        inbox_url, ack_url,
+        message: `Welcome to Darshan, ${name}! You joined ${inv.org_name} via invite.`,
+      })]
+    );
+
+    return { ok: true, agent_id: agent.id, callback_token: token, inbox_url, ack_url, org: { name: inv.org_name } };
+  });
+
 }

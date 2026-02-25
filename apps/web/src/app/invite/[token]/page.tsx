@@ -1,0 +1,186 @@
+"use client";
+
+import * as React from "react";
+import { Bot, Check, Copy } from "lucide-react";
+
+const API = "/api/backend/api/v1";
+
+type InviteInfo = { org: { name: string; type: string }; label?: string; expires_at: string };
+type Credentials = { agent_id: string; callback_token: string; inbox_url: string; ack_url: string; org: { name: string } };
+
+function CopyBox({ label, value }: { label: string; value: string }) {
+  const [copied, setCopied] = React.useState(false);
+  function copy() {
+    navigator.clipboard.writeText(value);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
+  return (
+    <div className="rounded-xl bg-zinc-900 p-3 ring-1 ring-zinc-700">
+      <div className="mb-1 flex items-center justify-between">
+        <span className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500">{label}</span>
+        <button onClick={copy} className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-zinc-400 hover:bg-zinc-700 hover:text-white transition-colors">
+          {copied ? <Check className="h-3 w-3 text-emerald-400" /> : <Copy className="h-3 w-3" />}
+          {copied ? "Copied" : "Copy"}
+        </button>
+      </div>
+      <code className="break-all text-xs text-emerald-400">{value}</code>
+    </div>
+  );
+}
+
+export default function InvitePage({ params }: { params: { token: string } }) {
+  const { token } = params;
+
+  const [state, setState]           = React.useState<"loading" | "form" | "done" | "error">("loading");
+  const [invite, setInvite]         = React.useState<InviteInfo | null>(null);
+  const [errorMsg, setErrorMsg]     = React.useState("");
+  const [creds, setCreds]           = React.useState<Credentials | null>(null);
+  const [submitting, setSubmitting] = React.useState(false);
+
+  // Form fields
+  const [name,         setName]         = React.useState("");
+  const [desc,         setDesc]         = React.useState("");
+  const [agentType,    setAgentType]    = React.useState("ai_agent");
+  const [provider,     setProvider]     = React.useState("anthropic");
+  const [model,        setModel]        = React.useState("claude-sonnet-4-6");
+  const [capsRaw,      setCapsRaw]      = React.useState("");
+
+  React.useEffect(() => {
+    fetch(`${API}/invites/${token}`)
+      .then(r => r.json())
+      .then(data => {
+        if (!data.ok) { setErrorMsg(data.error ?? "Invalid invite"); setState("error"); return; }
+        setInvite(data);
+        setState("form");
+      })
+      .catch(() => { setErrorMsg("Could not reach Darshan."); setState("error"); });
+  }, [token]);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!name.trim()) return;
+    setSubmitting(true);
+    const caps = capsRaw.split(",").map(s => s.trim()).filter(Boolean);
+    const res = await fetch(`${API}/invites/${token}/accept`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: name.trim(), desc: desc.trim() || undefined, agent_type: agentType, provider, model, capabilities: caps }),
+    });
+    const data = await res.json();
+    if (!data.ok) { setErrorMsg(data.error ?? "Failed to register"); setSubmitting(false); return; }
+    setCreds(data);
+    setState("done");
+  }
+
+  const inp = "w-full rounded-xl bg-zinc-800 px-3 py-2.5 text-sm text-zinc-100 ring-1 ring-zinc-700 focus:outline-none focus:ring-2 focus:ring-violet-500/50 placeholder:text-zinc-600";
+  const sel = inp + " cursor-pointer";
+
+  return (
+    <div className="min-h-screen bg-[#0E0B20] flex flex-col items-center justify-center p-4">
+
+      {/* Logo */}
+      <div className="mb-8 flex items-center gap-2.5">
+        <div className="grid h-9 w-9 place-items-center rounded-xl bg-violet-600">
+          <Bot className="h-5 w-5 text-white" />
+        </div>
+        <div>
+          <div className="text-sm font-bold text-white">Darshan</div>
+          <div className="text-[10px] text-zinc-500">by MithranLabs</div>
+        </div>
+      </div>
+
+      <div className="w-full max-w-md rounded-2xl bg-[#16132A] p-6 ring-1 ring-white/10 shadow-2xl">
+
+        {/* Loading */}
+        {state === "loading" && (
+          <div className="text-center text-sm text-zinc-400">Checking invite…</div>
+        )}
+
+        {/* Error */}
+        {state === "error" && (
+          <div className="text-center">
+            <div className="mb-2 text-4xl">🔒</div>
+            <h1 className="font-bold text-white">Invite Unavailable</h1>
+            <p className="mt-1 text-sm text-zinc-400">{errorMsg}</p>
+          </div>
+        )}
+
+        {/* Form */}
+        {state === "form" && invite && (
+          <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+            <div className="text-center">
+              <div className="mb-1 inline-flex items-center gap-1.5 rounded-full bg-violet-500/10 px-3 py-1 text-xs font-semibold text-violet-300 ring-1 ring-violet-500/20">
+                Invite to {invite.org.name}
+              </div>
+              <h1 className="mt-3 text-xl font-bold text-white">
+                {invite.label ? `"${invite.label}"` : "You've been invited"}
+              </h1>
+              <p className="mt-1 text-sm text-zinc-400">Register your agent to join <strong className="text-white">{invite.org.name}</strong>.</p>
+              <p className="mt-0.5 text-xs text-zinc-600">Expires {new Date(invite.expires_at).toLocaleString()} · One-time use</p>
+            </div>
+
+            <div className="h-px bg-white/5" />
+
+            <div>
+              <label className="mb-1.5 block text-xs font-semibold text-zinc-400">Agent Name <span className="text-red-400">*</span></label>
+              <input value={name} onChange={e => setName(e.target.value)} required placeholder="e.g. Atlas" className={inp} />
+            </div>
+            <div>
+              <label className="mb-1.5 block text-xs font-semibold text-zinc-400">Description</label>
+              <input value={desc} onChange={e => setDesc(e.target.value)} placeholder="What does this agent do?" className={inp} />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="mb-1.5 block text-xs font-semibold text-zinc-400">Type</label>
+                <select value={agentType} onChange={e => setAgentType(e.target.value)} className={sel}>
+                  <option value="ai_agent">AI Agent</option>
+                  <option value="human">Human</option>
+                </select>
+              </div>
+              <div>
+                <label className="mb-1.5 block text-xs font-semibold text-zinc-400">Provider</label>
+                <input value={provider} onChange={e => setProvider(e.target.value)} placeholder="anthropic" className={inp} />
+              </div>
+            </div>
+            <div>
+              <label className="mb-1.5 block text-xs font-semibold text-zinc-400">Model</label>
+              <input value={model} onChange={e => setModel(e.target.value)} placeholder="claude-sonnet-4-6" className={inp} />
+            </div>
+            <div>
+              <label className="mb-1.5 block text-xs font-semibold text-zinc-400">Capabilities <span className="font-normal text-zinc-600">(comma-separated)</span></label>
+              <input value={capsRaw} onChange={e => setCapsRaw(e.target.value)} placeholder="code, review, plan" className={inp} />
+            </div>
+
+            {errorMsg && <p className="rounded-lg bg-red-500/10 px-3 py-2 text-xs text-red-400">{errorMsg}</p>}
+
+            <button type="submit" disabled={!name.trim() || submitting}
+              className="mt-1 w-full rounded-xl bg-violet-600 py-2.5 text-sm font-semibold text-white hover:bg-violet-700 disabled:opacity-50 transition-colors">
+              {submitting ? "Registering…" : "Join as Agent"}
+            </button>
+          </form>
+        )}
+
+        {/* Success */}
+        {state === "done" && creds && (
+          <div className="flex flex-col gap-4">
+            <div className="text-center">
+              <div className="mb-2 text-4xl">🎉</div>
+              <h1 className="font-bold text-white">You&apos;re in!</h1>
+              <p className="mt-1 text-sm text-zinc-400">You&apos;ve joined <strong className="text-white">{creds.org.name}</strong>. Save these credentials — they won&apos;t be shown again.</p>
+            </div>
+            <div className="h-px bg-white/5" />
+            <div className="flex flex-col gap-2">
+              <CopyBox label="Agent ID"    value={creds.agent_id} />
+              <CopyBox label="Token"       value={creds.callback_token} />
+              <CopyBox label="Inbox URL"   value={creds.inbox_url} />
+              <CopyBox label="Ack URL"     value={creds.ack_url} />
+            </div>
+            <p className="text-center text-xs text-zinc-500">Add these to your <code className="text-zinc-400">HEARTBEAT.md</code> to start receiving tasks from Darshan.</p>
+          </div>
+        )}
+
+      </div>
+    </div>
+  );
+}

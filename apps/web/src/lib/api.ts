@@ -359,3 +359,13 @@ export async function removeOrgMember(idOrSlug: string, agentId: string): Promis
   });
   return data?.ok ?? false;
 }
+
+export async function createInvite(
+  orgId: string, label?: string
+): Promise<{ token: string; invite_url: string; expires_at: string } | null> {
+  const data = await apiFetch<{ ok: boolean; token: string; invite_url: string; expires_at: string }>(
+    `/api/v1/orgs/${orgId}/invites`,
+    { method: "POST", body: JSON.stringify({ label }) }
+  );
+  return data?.ok ? data : null;
+}

@@ -4,7 +4,7 @@ import * as React from "react";
 import { createPortal } from "react-dom";
 import {
   Bot, Check, ChevronDown, Plus, Search, X, Zap,
-  Activity, Trash2, Pencil, Building2, Users, Key, Copy, Upload,
+  Activity, Trash2, Pencil, Building2, Users, Key, Copy, Upload, UserPlus, Link2,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { Button } from "@/components/ui/button";
@@ -12,7 +12,7 @@ import { Input } from "@/components/ui/input";
 import {
   fetchAgents, fetchOrgs, createOrg, createOrgAgent, pingAgent,
   fetchAgentProjects, deleteAgent, updateAgent, updateOrg, deleteOrg,
-  type Org, type AgentProject,
+  createInvite, type Org, type AgentProject,
 } from "@/lib/api";
 import type { Agent } from "@/lib/agents";
 
@@ -825,6 +825,124 @@ function OnboardAgentModal({ orgs, defaultOrgId, onDone, onClose }: {
   );
 }
 
+// ─── Invite Agent Modal ───────────────────────────────────────────────────────
+function InviteAgentModal({ orgs, onClose }: { orgs: Org[]; onClose: () => void }) {
+  const ownOrg = orgs.find(o => o.type === "own");
+  const [orgId,    setOrgId]    = React.useState(ownOrg?.id ?? orgs[0]?.id ?? "");
+  const [label,    setLabel]    = React.useState("");
+  const [loading,  setLoading]  = React.useState(false);
+  const [copied,   setCopied]   = React.useState(false);
+  const [result,   setResult]   = React.useState<{ invite_url: string; expires_at: string } | null>(null);
+  const [error,    setError]    = React.useState("");
+
+  async function handleGenerate() {
+    setLoading(true); setError("");
+    const data = await createInvite(orgId, label.trim() || undefined);
+    if (data) setResult(data);
+    else setError("Failed to create invite link.");
+    setLoading(false);
+  }
+
+  function copyLink() {
+    if (!result) return;
+    navigator.clipboard.writeText(result.invite_url);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
+
+  const inp = "w-full rounded-xl border-0 bg-zinc-50 px-3 py-2.5 text-sm text-zinc-900 ring-1 ring-zinc-200 focus:outline-none dark:bg-zinc-900 dark:text-zinc-100 dark:ring-zinc-700";
+  const sel = inp + " cursor-pointer";
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <button className="absolute inset-0 bg-zinc-950/50 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative z-10 w-full max-w-md rounded-2xl bg-white shadow-xl ring-1 ring-zinc-200 dark:bg-[#16132A] dark:ring-[#2D2A45]">
+
+        {/* Header */}
+        <div className="flex items-center justify-between border-b border-zinc-200 px-5 py-4 dark:border-[#2D2A45]">
+          <div>
+            <div className="font-display text-sm font-bold text-zinc-900 dark:text-white">Invite Agent</div>
+            <div className="mt-0.5 text-xs text-zinc-500">Generate a one-time link — valid 24 hours</div>
+          </div>
+          <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg text-zinc-400 hover:bg-zinc-100 dark:hover:bg-white/10">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="flex flex-col gap-4 p-5">
+          {!result ? (
+            <>
+              {/* Org */}
+              <div>
+                <label className="mb-1.5 block text-xs font-semibold text-zinc-700 dark:text-zinc-300">Organisation</label>
+                <select value={orgId} onChange={e => setOrgId(e.target.value)} className={sel}>
+                  {orgs.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+                </select>
+              </div>
+
+              {/* Label */}
+              <div>
+                <label className="mb-1.5 block text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+                  Label <span className="font-normal text-zinc-400">(optional — shown to the recipient)</span>
+                </label>
+                <input
+                  value={label}
+                  onChange={e => setLabel(e.target.value)}
+                  placeholder="e.g. For Alex's coding agent"
+                  className={inp}
+                />
+              </div>
+
+              {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-600 dark:bg-red-500/10">{error}</p>}
+            </>
+          ) : (
+            <>
+              {/* Invite URL */}
+              <div className="rounded-xl bg-emerald-50 p-4 ring-1 ring-emerald-200 dark:bg-emerald-500/5 dark:ring-emerald-500/20">
+                <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-emerald-700 dark:text-emerald-400">
+                  <Check className="h-3.5 w-3.5" /> Invite link generated
+                </p>
+                <code className="block break-all text-[11px] text-zinc-700 dark:text-zinc-300">{result.invite_url}</code>
+                <p className="mt-2 text-[10px] text-zinc-400">
+                  Expires {new Date(result.expires_at).toLocaleString()} · One-time use
+                </p>
+              </div>
+              <p className="text-xs text-zinc-500">
+                Send this link to your friend. Their agent registers directly and receives credentials that only they see.
+              </p>
+            </>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="flex justify-end gap-3 border-t border-zinc-200 px-5 py-4 dark:border-[#2D2A45]">
+          <button onClick={onClose} className="rounded-xl border border-zinc-200 px-4 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-white/5">
+            {result ? "Close" : "Cancel"}
+          </button>
+          {!result ? (
+            <button
+              onClick={handleGenerate}
+              disabled={!orgId || loading}
+              className="flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-50 transition-colors"
+            >
+              <Link2 className="h-3.5 w-3.5" />
+              {loading ? "Generating…" : "Generate Link"}
+            </button>
+          ) : (
+            <button
+              onClick={copyLink}
+              className="flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 transition-colors"
+            >
+              {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+              {copied ? "Copied!" : "Copy Link"}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Import Agent Modal ───────────────────────────────────────────────────────
 type ImportPayload = {
   name?: string; desc?: string; agent_type?: string;
@@ -996,6 +1114,7 @@ export default function AgentsPage() {
   const [showAgentModal,  setShowAgentModal]  = React.useState(false);
   const [agentModalOrgId, setAgentModalOrgId] = React.useState<string | undefined>();
   const [showImportModal, setShowImportModal] = React.useState(false);
+  const [showInviteModal, setShowInviteModal] = React.useState(false);
   const [deleteTarget,    setDeleteTarget]    = React.useState<ExtAgent | null>(null);
   const [deleting,        setDeleting]        = React.useState(false);
 
@@ -1075,6 +1194,11 @@ export default function AgentsPage() {
               </p>
             </div>
             <div className="flex items-center gap-2">
+              <button
+                onClick={() => setShowInviteModal(true)}
+                className="flex items-center gap-2 rounded-xl border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 transition-colors dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700">
+                <UserPlus className="h-4 w-4" /> Invite
+              </button>
               <button
                 onClick={() => setShowImportModal(true)}
                 className="flex items-center gap-2 rounded-xl border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 transition-colors dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700">
@@ -1215,6 +1339,14 @@ export default function AgentsPage() {
           onRemove={async id => { await handleDelete(id); }}
           onUpdated={() => { reload(); setDetailAgent(null); }}
           pinging={pingingIds.has(detailAgent.id)}
+        />
+      )}
+
+      {/* Invite agent modal */}
+      {showInviteModal && (
+        <InviteAgentModal
+          orgs={orgs}
+          onClose={() => setShowInviteModal(false)}
         />
       )}
 
