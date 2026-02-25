@@ -90,7 +90,7 @@ function AgentRow({ agent, onInspect, onPing, onDelete, pinging }: {
   const sm = STATUS_META[agent.status] ?? STATUS_META.offline;
   const pingKey = pinging ? "pending" : (agent.ping_status ?? "unknown");
   const pm = PING_META[pingKey] ?? PING_META.unknown;
-  const caps = agent.capabilities ?? [];
+  const caps = Array.isArray(agent.capabilities) ? agent.capabilities : [];
 
   return (
     <div
@@ -411,7 +411,7 @@ function AgentDetailPanel({ agent, onClose, onPing, onRemove, onUpdated, pinging
   const [editType, setEditType]         = React.useState<AgentType>((agent.agent_type as AgentType) ?? "ai_agent");
   const [editModel, setEditModel]       = React.useState(agent.model ?? "");
   const [editProvider, setEditProvider] = React.useState(agent.provider ?? "anthropic");
-  const [editCaps, setEditCaps]         = React.useState<string[]>(agent.capabilities ?? []);
+  const [editCaps, setEditCaps]         = React.useState<string[]>(Array.isArray(agent.capabilities) ? agent.capabilities : []);
   const [saving, setSaving]             = React.useState(false);
 
   function startEdit() {
@@ -419,7 +419,7 @@ function AgentDetailPanel({ agent, onClose, onPing, onRemove, onUpdated, pinging
     setEditName(agent.name); setEditDesc(agent.desc ?? "");
     setEditType((agent.agent_type as AgentType) ?? "ai_agent");
     setEditModel(agent.model ?? ""); setEditProvider(agent.provider ?? "anthropic");
-    setEditCaps(agent.capabilities ?? []); setEditing(true);
+    setEditCaps(Array.isArray(agent.capabilities) ? agent.capabilities : []); setEditing(true);
   }
   async function saveEdit() {
     setSaving(true);
@@ -617,9 +617,9 @@ function AgentDetailPanel({ agent, onClose, onPing, onRemove, onUpdated, pinging
             {/* Capabilities */}
             <div>
               <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-400">Capabilities</p>
-              {(agent.capabilities ?? []).length > 0 ? (
+              {(Array.isArray(agent.capabilities) ? agent.capabilities : []).length > 0 ? (
                 <div className="flex flex-wrap gap-1.5">
-                  {(agent.capabilities ?? []).map(c => (
+                  {(Array.isArray(agent.capabilities) ? agent.capabilities : []).map(c => (
                     <span key={c} className="rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-medium text-zinc-600 dark:bg-white/10 dark:text-zinc-400">{c}</span>
                   ))}
                 </div>
@@ -913,7 +913,7 @@ export default function AgentsPage() {
     if (statusFilter === "human"    && a.agent_type !== "human") return false;
     if (query) {
       const q = query.toLowerCase();
-      if (![a.name, a.desc ?? "", a.model ?? "", a.org_name ?? "", ...(a.capabilities ?? [])].some(s => s.toLowerCase().includes(q))) return false;
+      if (![a.name, a.desc ?? "", a.model ?? "", a.org_name ?? "", ...(Array.isArray(a.capabilities) ? a.capabilities : [])].some(s => s.toLowerCase().includes(q))) return false;
     }
     return true;
   });

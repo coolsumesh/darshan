@@ -186,7 +186,7 @@ export async function fetchAgents(): Promise<Agent[]> {
       agent_type:      (a as unknown as { agent_type?: string }).agent_type,
       model:           (a as unknown as { model?: string }).model,
       provider:        (a as unknown as { provider?: string }).provider,
-      capabilities:    (a as unknown as { capabilities?: string[] }).capabilities ?? [],
+      capabilities:    Array.isArray((a as unknown as { capabilities?: unknown }).capabilities) ? (a as unknown as { capabilities: string[] }).capabilities : [],
       ping_status:     (a as unknown as { ping_status?: string }).ping_status ?? "unknown",
       last_ping_at:    (a as unknown as { last_ping_at?: string }).last_ping_at,
       last_seen_at:    (a as unknown as { last_seen_at?: string }).last_seen_at,
