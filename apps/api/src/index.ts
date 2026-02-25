@@ -68,6 +68,8 @@ server.addHook("preHandler", async (req, reply) => {
   if (url.startsWith("/api/v1/auth/")) return;
   // Allow internal A2A callback token routes (they use their own auth)
   if (url.includes("/inbox")) return;
+  // Allow public invite routes (view + accept — no auth needed)
+  if (url.startsWith("/api/v1/invites/")) return;
 
   // 1. Try Bearer API key (for internal/agent calls)
   const authHeader = req.headers.authorization ?? "";
