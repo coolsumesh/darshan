@@ -899,9 +899,9 @@ function InviteAgentModal({ orgs, onClose }: { orgs: Org[]; onClose: () => void 
             <button
               onClick={handleGenerate}
               disabled={!orgId || loading}
-              className="flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-50 transition-colors"
+              className="flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-emerald-700 disabled:opacity-50 transition-colors shadow-lg"
             >
-              <Link2 className="h-3.5 w-3.5" />
+              <Link2 className="h-4 w-4" />
               {loading ? "Generating…" : "Generate Link"}
             </button>
           ) : (
