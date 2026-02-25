@@ -891,7 +891,7 @@ function InviteAgentModal({ orgs, onClose }: { orgs: Org[]; onClose: () => void 
         </div>
 
         {/* Footer */}
-        <div className="flex justify-end gap-3 border-t border-zinc-200 px-5 py-4 dark:border-[#2D2A45]">
+        <div className="flex shrink-0 justify-end gap-3 border-t border-zinc-200 px-5 py-4 dark:border-[#2D2A45]">
           <button onClick={onClose} className="rounded-xl border border-zinc-200 px-4 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-white/5">
             {result ? "Close" : "Cancel"}
           </button>
