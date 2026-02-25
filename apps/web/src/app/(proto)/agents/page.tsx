@@ -126,20 +126,28 @@ function AgentRow({ agent, onInspect, onPing, onDelete, pinging }: {
       {/* Model */}
       <div className="w-36 shrink-0">
         {agent.model
-          ? <span className="rounded bg-zinc-100 px-1.5 py-0.5 text-[11px] font-mono text-zinc-500 dark:bg-white/10 dark:text-zinc-400">{agent.model}</span>
+          ? <div className="flex flex-col gap-0.5">
+              <span className="rounded bg-zinc-100 px-1.5 py-0.5 text-[11px] font-mono text-zinc-500 dark:bg-white/10 dark:text-zinc-400">{agent.model}</span>
+              {agent.last_ping_at && <span className="text-[9px] text-zinc-400/60" title={`Last reported at ${new Date(agent.last_ping_at).toLocaleString()}`}>as of {relativeTime(agent.last_ping_at)}</span>}
+            </div>
           : <span className="text-xs text-zinc-300 dark:text-zinc-600">—</span>
         }
       </div>
 
       {/* Capabilities */}
-      <div className="w-48 shrink-0 flex flex-wrap gap-1">
-        {caps.slice(0, 3).map(c => (
-          <span key={c} className="rounded bg-zinc-100 px-1.5 py-0.5 text-[10px] text-zinc-500 dark:bg-white/10 dark:text-zinc-400">{c}</span>
-        ))}
-        {caps.length > 3 && (
-          <span className="text-[10px] text-zinc-400">+{caps.length - 3}</span>
+      <div className="w-48 shrink-0">
+        <div className="flex flex-wrap gap-1">
+          {caps.slice(0, 3).map(c => (
+            <span key={c} className="rounded bg-zinc-100 px-1.5 py-0.5 text-[10px] text-zinc-500 dark:bg-white/10 dark:text-zinc-400">{c}</span>
+          ))}
+          {caps.length > 3 && (
+            <span className="text-[10px] text-zinc-400">+{caps.length - 3}</span>
+          )}
+          {caps.length === 0 && <span className="text-xs text-zinc-300 dark:text-zinc-600">—</span>}
+        </div>
+        {caps.length > 0 && agent.last_ping_at && (
+          <span className="text-[9px] text-zinc-400/60">as of {relativeTime(agent.last_ping_at)}</span>
         )}
-        {caps.length === 0 && <span className="text-xs text-zinc-300 dark:text-zinc-600">—</span>}
       </div>
 
       {/* Ping */}
@@ -704,22 +712,16 @@ function OnboardAgentModal({ orgs, defaultOrgId, onDone, onClose }: {
   const [name,        setName]        = React.useState("");
   const [desc,        setDesc]        = React.useState("");
   const [agentType,   setAgentType]   = React.useState<AgentType>("ai_agent");
-  const [model,       setModel]       = React.useState("");
-  const [provider,    setProvider]    = React.useState("anthropic");
-  const [caps,        setCaps]        = React.useState<string[]>([]);
   const [endpointType, setEndpointType] = React.useState("openclaw_poll");
   const [saving,      setSaving]      = React.useState(false);
   const [error,       setError]       = React.useState("");
-
-  function toggleCap(c: string) { setCaps(p => p.includes(c) ? p.filter(x => x !== c) : [...p, c]); }
 
   async function handleSave() {
     if (!name.trim() || !orgId) { setError("Name and organisation are required."); return; }
     setSaving(true); setError("");
     const ok = await createOrgAgent(orgId, {
       name: name.trim(), desc: desc.trim() || undefined,
-      agent_type: agentType, model: model || undefined,
-      provider, capabilities: caps, endpoint_type: endpointType,
+      agent_type: agentType, endpoint_type: endpointType,
     });
     if (ok) onDone();
     else { setError("Failed to onboard agent."); setSaving(false); }
@@ -771,36 +773,10 @@ function OnboardAgentModal({ orgs, defaultOrgId, onDone, onClose }: {
             <Input placeholder="What does this agent do?" value={desc} onChange={e => setDesc(e.target.value)} />
           </div>
           {agentType === "ai_agent" && (
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="mb-1.5 block text-xs font-semibold text-zinc-700 dark:text-zinc-300">Provider</label>
-                <select value={provider} onChange={e => setProvider(e.target.value)} className={sel}>
-                  {PROVIDERS.map(p => <option key={p}>{p}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="mb-1.5 block text-xs font-semibold text-zinc-700 dark:text-zinc-300">Model</label>
-                <select value={model} onChange={e => setModel(e.target.value)} className={sel}>
-                  <option value="">— select —</option>
-                  {POPULAR_MODELS.map(m => <option key={m} value={m}>{m}</option>)}
-                </select>
-              </div>
+            <div className="rounded-xl bg-zinc-50 px-4 py-3 text-xs text-zinc-500 ring-1 ring-zinc-200 dark:bg-white/5 dark:ring-white/10">
+              <span className="font-semibold text-zinc-700 dark:text-zinc-300">Model &amp; capabilities</span> are self-reported by the agent on its first ping — no need to set them here.
             </div>
           )}
-          <div>
-            <label className="mb-1.5 block text-xs font-semibold text-zinc-700 dark:text-zinc-300">Capabilities</label>
-            <div className="flex flex-wrap gap-2 mt-1">
-              {CAPABILITIES.map(c => (
-                <button key={c} onClick={() => toggleCap(c)}
-                  className={cn("flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium ring-1 transition-colors",
-                    caps.includes(c)
-                      ? "bg-brand-600 text-white ring-brand-600"
-                      : "bg-zinc-100 text-zinc-600 ring-zinc-200 hover:bg-zinc-200 dark:bg-white/10 dark:text-zinc-400 dark:ring-white/10")}>
-                  {caps.includes(c) && <Check className="h-3 w-3" />}{c}
-                </button>
-              ))}
-            </div>
-          </div>
           {agentType === "ai_agent" && (
             <div>
               <label className="mb-1.5 block text-xs font-semibold text-zinc-700 dark:text-zinc-300">Connection type</label>

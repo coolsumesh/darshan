@@ -303,9 +303,12 @@ ACK_URL: ${ackUrl}
   // ── Agent acknowledges inbox item (Mithran calls this) ─────────────────────
   server.post<{
     Params: { id: string };
-    Body: { inbox_id: string; callback_token: string; response?: string };
+    Body: {
+      inbox_id: string; callback_token: string; response?: string;
+      status?: { model?: string; capabilities?: string[]; provider?: string; version?: string };
+    };
   }>("/api/v1/agents/:id/inbox/ack", async (req, reply) => {
-    const { inbox_id, callback_token, response } = req.body;
+    const { inbox_id, callback_token, response, status } = req.body;
 
     // Verify token
     const { rows: agents } = await db.query(
@@ -327,15 +330,33 @@ ACK_URL: ${ackUrl}
       ? Math.round(Date.now() - new Date(inboxRows[0].created_at).getTime())
       : null;
 
-    // Update agent status with latency
-    await db.query(
-      `update agents set ping_status = 'ok', last_ping_at = now(), last_seen_at = now(),
-              status = 'online', last_ping_ms = $2
-       where id = $1`,
-      [agents[0].id, pingMs]
-    );
+    // Update agent status with latency + self-reported model/capabilities if provided
+    if (status?.model || status?.capabilities || status?.provider) {
+      await db.query(
+        `update agents set
+          ping_status  = 'ok',  last_ping_at = now(), last_seen_at = now(),
+          status       = 'online', last_ping_ms = $2,
+          model        = coalesce($3, model),
+          capabilities = coalesce($4::jsonb, capabilities),
+          provider     = coalesce($5, provider)
+         where id = $1`,
+        [
+          agents[0].id, pingMs,
+          status.model        ?? null,
+          status.capabilities ? JSON.stringify(status.capabilities) : null,
+          status.provider     ?? null,
+        ]
+      );
+    } else {
+      await db.query(
+        `update agents set ping_status = 'ok', last_ping_at = now(), last_seen_at = now(),
+                status = 'online', last_ping_ms = $2
+         where id = $1`,
+        [agents[0].id, pingMs]
+      );
+    }
 
-    broadcast("agent:ping_ack", { agentId: agents[0].id, response, pingMs });
+    broadcast("agent:ping_ack", { agentId: agents[0].id, response, pingMs, status });
     return { ok: true, ping_ms: pingMs };
   });
 

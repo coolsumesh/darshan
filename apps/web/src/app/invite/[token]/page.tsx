@@ -42,9 +42,6 @@ export default function InvitePage({ params }: { params: { token: string } }) {
   const [name,         setName]         = React.useState("");
   const [desc,         setDesc]         = React.useState("");
   const [agentType,    setAgentType]    = React.useState("ai_agent");
-  const [provider,     setProvider]     = React.useState("anthropic");
-  const [model,        setModel]        = React.useState("claude-sonnet-4-6");
-  const [capsRaw,      setCapsRaw]      = React.useState("");
 
   React.useEffect(() => {
     fetch(`${API}/invites/${token}`)
@@ -61,11 +58,10 @@ export default function InvitePage({ params }: { params: { token: string } }) {
     e.preventDefault();
     if (!name.trim()) return;
     setSubmitting(true);
-    const caps = capsRaw.split(",").map(s => s.trim()).filter(Boolean);
     const res = await fetch(`${API}/invites/${token}/accept`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: name.trim(), desc: desc.trim() || undefined, agent_type: agentType, provider, model, capabilities: caps }),
+      body: JSON.stringify({ name: name.trim(), desc: desc.trim() || undefined, agent_type: agentType }),
     });
     const data = await res.json();
     if (!data.ok) { setErrorMsg(data.error ?? "Failed to register"); setSubmitting(false); return; }
@@ -130,26 +126,15 @@ export default function InvitePage({ params }: { params: { token: string } }) {
               <label className="mb-1.5 block text-xs font-semibold text-zinc-400">Description</label>
               <input value={desc} onChange={e => setDesc(e.target.value)} placeholder="What does this agent do?" className={inp} />
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="mb-1.5 block text-xs font-semibold text-zinc-400">Type</label>
-                <select value={agentType} onChange={e => setAgentType(e.target.value)} className={sel}>
-                  <option value="ai_agent">AI Agent</option>
-                  <option value="human">Human</option>
-                </select>
-              </div>
-              <div>
-                <label className="mb-1.5 block text-xs font-semibold text-zinc-400">Provider</label>
-                <input value={provider} onChange={e => setProvider(e.target.value)} placeholder="anthropic" className={inp} />
-              </div>
-            </div>
             <div>
-              <label className="mb-1.5 block text-xs font-semibold text-zinc-400">Model</label>
-              <input value={model} onChange={e => setModel(e.target.value)} placeholder="claude-sonnet-4-6" className={inp} />
+              <label className="mb-1.5 block text-xs font-semibold text-zinc-400">Type</label>
+              <select value={agentType} onChange={e => setAgentType(e.target.value)} className={sel}>
+                <option value="ai_agent">AI Agent</option>
+                <option value="human">Human</option>
+              </select>
             </div>
-            <div>
-              <label className="mb-1.5 block text-xs font-semibold text-zinc-400">Capabilities <span className="font-normal text-zinc-600">(comma-separated)</span></label>
-              <input value={capsRaw} onChange={e => setCapsRaw(e.target.value)} placeholder="code, review, plan" className={inp} />
+            <div className="rounded-xl bg-white/5 px-4 py-3 text-xs text-zinc-500 ring-1 ring-white/10">
+              <span className="font-semibold text-zinc-300">Model &amp; capabilities</span> will be reported automatically when your agent first pings Darshan.
             </div>
 
             {errorMsg && <p className="rounded-lg bg-red-500/10 px-3 py-2 text-xs text-red-400">{errorMsg}</p>}
