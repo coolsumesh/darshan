@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import * as React from "react";
+import { authLogout } from "@/lib/api";
 import {
   Activity,
   Bell,
@@ -16,6 +17,7 @@ import {
   FileText,
   HelpCircle,
   FolderKanban,
+  LogOut,
   Menu,
   MessageSquareText,
   Plus,
@@ -211,9 +213,29 @@ function Sidebar({
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const router = useRouter();
   const { prefs } = useUIPreferences();
-  const [collapsed,   setCollapsed]   = React.useState(false);
-  const [mobileOpen,  setMobileOpen]  = React.useState(false);
+  const [collapsed,     setCollapsed]     = React.useState(false);
+  const [mobileOpen,    setMobileOpen]    = React.useState(false);
+  const [userMenuOpen,  setUserMenuOpen]  = React.useState(false);
+  const userMenuRef = React.useRef<HTMLDivElement>(null);
+
+  // Close user menu on outside click
+  React.useEffect(() => {
+    function handleOutsideClick(e: MouseEvent) {
+      if (userMenuRef.current && !userMenuRef.current.contains(e.target as Node)) {
+        setUserMenuOpen(false);
+      }
+    }
+    if (userMenuOpen) document.addEventListener("mousedown", handleOutsideClick);
+    return () => document.removeEventListener("mousedown", handleOutsideClick);
+  }, [userMenuOpen]);
+
+  async function handleLogout() {
+    setUserMenuOpen(false);
+    await authLogout();
+    router.replace("/login");
+  }
 
   React.useEffect(() => {
     try { applyPrefsToDom(prefs); } catch { /* no-op */ }
@@ -312,20 +334,48 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           {/* Divider */}
           <div className="mx-2 h-5 w-px bg-white/10" />
 
-          {/* User avatar */}
-          <button className="flex items-center gap-2 rounded-lg px-2 py-1 transition-colors hover:bg-white/10">
-            <div
-              className="grid h-7 w-7 place-items-center rounded-full text-xs font-bold text-white"
-              style={{ background: "linear-gradient(135deg,#7C3AED,#6366F1)" }}
+          {/* User avatar + dropdown */}
+          <div className="relative" ref={userMenuRef}>
+            <button
+              onClick={() => setUserMenuOpen((v) => !v)}
+              className="flex items-center gap-2 rounded-lg px-2 py-1 transition-colors hover:bg-white/10"
             >
-              S
-            </div>
-            <div className="hidden sm:flex flex-col items-start leading-tight">
-              <span className="text-xs font-semibold text-white">Sumesh</span>
-              <span className="text-[10px] text-white/40">Admin</span>
-            </div>
-            <ChevronDown className="hidden sm:block h-3 w-3 text-white/30" />
-          </button>
+              <div
+                className="grid h-7 w-7 place-items-center rounded-full text-xs font-bold text-white"
+                style={{ background: "linear-gradient(135deg,#7C3AED,#6366F1)" }}
+              >
+                S
+              </div>
+              <div className="hidden sm:flex flex-col items-start leading-tight">
+                <span className="text-xs font-semibold text-white">Sumesh</span>
+                <span className="text-[10px] text-white/40">Admin</span>
+              </div>
+              <ChevronDown className={cn("hidden sm:block h-3 w-3 text-white/30 transition-transform", userMenuOpen && "rotate-180")} />
+            </button>
+
+            {/* Dropdown menu */}
+            {userMenuOpen && (
+              <div
+                className="absolute right-0 top-full mt-2 w-52 rounded-xl border border-white/10 py-1 shadow-xl z-50"
+                style={{ backgroundColor: "#1E0A3C" }}
+              >
+                {/* User info header */}
+                <div className="px-4 py-3 border-b border-white/10">
+                  <p className="text-xs font-semibold text-white">Sumesh</p>
+                  <p className="text-[10px] text-white/40 mt-0.5">Admin</p>
+                </div>
+
+                {/* Logout */}
+                <button
+                  onClick={handleLogout}
+                  className="flex w-full items-center gap-2.5 px-4 py-2.5 text-sm text-red-400 hover:bg-white/5 hover:text-red-300 transition-colors"
+                >
+                  <LogOut className="h-4 w-4" />
+                  Sign out
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </header>
 
