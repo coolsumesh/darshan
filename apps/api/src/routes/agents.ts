@@ -16,7 +16,11 @@ export async function registerAgents(server: FastifyInstance, db: pg.Pool) {
       select a.*,
              o.name  as org_name,
              o.slug  as org_slug,
-             o.type  as org_type
+             o.type  as org_type,
+             (select count(*)::int from tasks t
+              where lower(t.assignee) = lower(a.name)
+                and t.status in ('proposed','approved','in-progress','review')
+             ) as open_task_count
       from agents a
       left join organisations o on o.id = a.org_id
       order by o.type asc, lower(a.name) asc
@@ -27,7 +31,11 @@ export async function registerAgents(server: FastifyInstance, db: pg.Pool) {
   // ── Get single agent ────────────────────────────────────────────────────────
   server.get<{ Params: { id: string } }>("/api/v1/agents/:id", async (req, reply) => {
     const { rows } = await db.query(
-      `select a.*, o.name as org_name, o.slug as org_slug
+      `select a.*, o.name as org_name, o.slug as org_slug,
+              (select count(*)::int from tasks t
+               where lower(t.assignee) = lower(a.name)
+                 and t.status in ('proposed','approved','in-progress','review')
+              ) as open_task_count
        from agents a left join organisations o on o.id = a.org_id
        where a.id::text = $1`,
       [req.params.id]

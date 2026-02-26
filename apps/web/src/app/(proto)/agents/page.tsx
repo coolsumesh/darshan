@@ -23,6 +23,7 @@ type ExtAgent = Agent & {
   capabilities?: string[]; ping_status?: string;
   last_ping_at?: string; last_seen_at?: string; callback_token?: string;
   last_ping_ms?: number;
+  open_task_count?: number;
 };
 type StatusFilter = "all" | "online" | "offline" | "ai_agent" | "human";
 
@@ -76,6 +77,7 @@ const COLS = [
   { label: "Capabilities", cls: "w-48 shrink-0"   },
   { label: "Ping",         cls: "w-24 shrink-0"   },
   { label: "Last seen",    cls: "w-24 shrink-0"   },
+  { label: "Tasks",        cls: "w-14 shrink-0 text-center" },
   { label: "",             cls: "w-16 shrink-0"   },
 ];
 
@@ -161,6 +163,17 @@ function AgentRow({ agent, onInspect, onPing, onDelete, pinging }: {
       {/* Last seen */}
       <div className="w-24 shrink-0 text-[11px] text-zinc-400">
         {relativeTime(agent.last_seen_at)}
+      </div>
+
+      {/* Open tasks */}
+      <div className="w-14 shrink-0 flex items-center justify-center">
+        {(agent.open_task_count ?? 0) > 0 ? (
+          <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-700 dark:bg-amber-500/15 dark:text-amber-400">
+            {agent.open_task_count}
+          </span>
+        ) : (
+          <span className="text-[11px] text-zinc-300 dark:text-zinc-600">—</span>
+        )}
       </div>
 
       {/* Row actions — show on hover */}
@@ -657,6 +670,22 @@ function AgentDetailPanel({ agent, onClose, onPing, onRemove, onUpdated, pinging
               ) : (
                 <p className="text-sm text-zinc-400">No capabilities listed</p>
               )}
+            </div>
+
+            {/* Open tasks */}
+            <div className="flex items-center justify-between rounded-xl bg-zinc-50 px-4 py-3 dark:bg-white/5">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Open Tasks</p>
+                <p className="text-[11px] text-zinc-400 mt-0.5">backlog · approved · in-progress · review</p>
+              </div>
+              <span className={cn(
+                "rounded-full px-3 py-1 text-sm font-bold",
+                (agent.open_task_count ?? 0) > 0
+                  ? "bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400"
+                  : "bg-zinc-100 text-zinc-400 dark:bg-white/10"
+              )}>
+                {agent.open_task_count ?? 0}
+              </span>
             </div>
 
             {/* Connectivity */}
