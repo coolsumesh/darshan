@@ -29,8 +29,8 @@ function CopyBox({ label, value }: { label: string; value: string }) {
   );
 }
 
-export default function InvitePage({ params }: { params: { token: string } }) {
-  const { token } = params;
+export default function InvitePage({ params }: { params: Promise<{ token: string }> }) {
+  const { token } = React.use(params);
 
   const [state, setState]           = React.useState<"loading" | "form" | "done" | "error">("loading");
   const [invite, setInvite]         = React.useState<InviteInfo | null>(null);
