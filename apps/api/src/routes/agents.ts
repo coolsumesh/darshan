@@ -267,10 +267,12 @@ ACK_URL: ${ackUrl}
     );
     if (!rows.length) return reply.status(404).send({ ok: false, error: "agent not found" });
 
-    // Remove from project teams, clear inbox, then delete agent
-    await db.query(`delete from project_team where agent_id = $1`, [rows[0].id]);
-    await db.query(`delete from agent_inbox  where agent_id = $1`, [rows[0].id]);
-    await db.query(`delete from agents       where id = $1`,       [rows[0].id]);
+    // Remove from project teams, inbox, invites, org membership, then delete agent
+    await db.query(`delete from project_team  where agent_id = $1`, [rows[0].id]);
+    await db.query(`delete from agent_inbox   where agent_id = $1`, [rows[0].id]);
+    await db.query(`delete from agent_invites where agent_id = $1`, [rows[0].id]);
+    await db.query(`delete from org_members   where agent_id = $1`, [rows[0].id]);
+    await db.query(`delete from agents        where id = $1`,       [rows[0].id]);
 
     broadcast("agent:removed", { agentId: rows[0].id, name: rows[0].name });
     return { ok: true };
