@@ -31,7 +31,9 @@ function CopyBox({ label, value }: { label: string; value: string }) {
 }
 
 export default function InvitePage() {
-  const { token } = useParams<{ token: string }>();
+  const params = useParams<{ token: string }>();
+  // Strip any non-hex characters that messaging apps may append (e.g. markdown **)
+  const token = (params.token ?? "").replace(/[^0-9a-f]/gi, "");
 
   const [state, setState]           = React.useState<"loading" | "form" | "done" | "error">("loading");
   const [invite, setInvite]         = React.useState<InviteInfo | null>(null);
