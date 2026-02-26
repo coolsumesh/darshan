@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useParams } from "next/navigation";
 import { Bot, Check, Copy, Download } from "lucide-react";
 
 const API = "/api/backend/api/v1";
@@ -29,8 +30,8 @@ function CopyBox({ label, value }: { label: string; value: string }) {
   );
 }
 
-export default function InvitePage({ params }: { params: Promise<{ token: string }> }) {
-  const { token } = React.use(params);
+export default function InvitePage() {
+  const { token } = useParams<{ token: string }>();
 
   const [state, setState]           = React.useState<"loading" | "form" | "done" | "error">("loading");
   const [invite, setInvite]         = React.useState<InviteInfo | null>(null);
