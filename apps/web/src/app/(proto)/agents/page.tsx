@@ -396,6 +396,28 @@ ACK_URL:   ${ackUrl}
   );
 }
 
+// ─── Agent ID Row ─────────────────────────────────────────────────────────────
+function AgentIdRow({ id }: { id: string }) {
+  const [copied, setCopied] = React.useState(false);
+  function copy() {
+    navigator.clipboard.writeText(id);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  }
+  return (
+    <div className="mt-1.5 flex items-center gap-1.5">
+      <span className="text-[10px] font-semibold uppercase tracking-wide text-zinc-400">ID</span>
+      <code className="flex-1 truncate rounded bg-zinc-100 px-1.5 py-0.5 text-[10px] font-mono text-zinc-500 dark:bg-white/10 dark:text-zinc-400">
+        {id}
+      </code>
+      <button onClick={copy} title="Copy ID"
+        className="shrink-0 rounded px-1 py-0.5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-white/10 transition-colors">
+        {copied ? <Check className="h-3 w-3 text-emerald-400" /> : <Copy className="h-3 w-3" />}
+      </button>
+    </div>
+  );
+}
+
 // ─── Agent Detail Panel ───────────────────────────────────────────────────────
 function AgentDetailPanel({ agent, onClose, onPing, onRemove, onUpdated, pinging }: {
   agent: ExtAgent; onClose: () => void;
@@ -600,6 +622,7 @@ function AgentDetailPanel({ agent, onClose, onPing, onRemove, onUpdated, pinging
                   {agent.model && <span className="rounded bg-zinc-100 px-2 py-0.5 text-xs font-mono text-zinc-500 dark:bg-white/10">{agent.model}</span>}
                   {agent.provider && <span className="rounded bg-zinc-100 px-2 py-0.5 text-xs text-zinc-500 dark:bg-white/10">{agent.provider}</span>}
                 </div>
+                <AgentIdRow id={agent.id} />
               </div>
             </div>
 
