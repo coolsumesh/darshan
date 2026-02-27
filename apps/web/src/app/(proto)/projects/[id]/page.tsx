@@ -1164,20 +1164,29 @@ function TechSpecTab({ projectId }: { projectId: string }) {
 const TEAM_ROLES = ["Member", "Coordinator", "Developer", "Reviewer", "Observer"];
 
 function AgentRegistryPanel({ agents, onAdd, onClose, alreadyAdded }: {
-  agents: TeamMemberWithAgent["agent"][]; onAdd: (id: string, role: string) => void; onClose: () => void; alreadyAdded: Set<string>;
+  agents: TeamMemberWithAgent["agent"][]; onAdd: (id: string, role: string) => Promise<boolean>; onClose: () => void; alreadyAdded: Set<string>;
 }) {
   const [q,           setQ]           = React.useState("");
   const [role,        setRole]        = React.useState("Member");
   const [justAdded,   setJustAdded]   = React.useState<string | null>(null);
+  const [failedId,    setFailedId]    = React.useState<string | null>(null);
+  const [adding,      setAdding]      = React.useState<string | null>(null);
 
   const filtered = (agents ?? []).filter((a): a is NonNullable<typeof a> =>
     !!a && (!q || a.name.toLowerCase().includes(q.toLowerCase()))
   );
 
   async function handleAdd(agentId: string) {
-    await onAdd(agentId, role);
-    setJustAdded(agentId);
-    setTimeout(() => onClose(), 800);
+    setAdding(agentId);
+    setFailedId(null);
+    const ok = await onAdd(agentId, role);
+    setAdding(null);
+    if (ok) {
+      setJustAdded(agentId);
+      setTimeout(() => onClose(), 800);
+    } else {
+      setFailedId(agentId);
+    }
   }
 
   return (
@@ -1224,18 +1233,22 @@ function AgentRegistryPanel({ agents, onAdd, onClose, alreadyAdded }: {
                   </p>
                 </div>
                 <button
-                  disabled={isAdded}
+                  disabled={isAdded || adding === a.id}
                   onClick={() => !isAdded && handleAdd(a.id)}
                   className={cn(
                     "shrink-0 rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors",
                     isSuccess
                       ? "bg-emerald-500 text-white"
+                      : failedId === a.id
+                      ? "bg-red-500 text-white"
                       : isAdded
                       ? "bg-zinc-100 text-zinc-400 cursor-not-allowed dark:bg-white/10"
+                      : adding === a.id
+                      ? "bg-zinc-300 text-zinc-500 cursor-wait"
                       : "text-white"
                   )}
-                  style={!isAdded && !isSuccess ? { backgroundColor: "#7C3AED" } : undefined}>
-                  {isSuccess ? "✓ Added" : isAdded ? "In team" : "Add"}
+                  style={!isAdded && !isSuccess && failedId !== a.id && adding !== a.id ? { backgroundColor: "#7C3AED" } : undefined}>
+                  {isSuccess ? "✓ Added" : failedId === a.id ? "✗ Failed" : isAdded ? "In team" : adding === a.id ? "Adding…" : "Add"}
                 </button>
               </div>
             );
@@ -1371,9 +1384,10 @@ function TeamTab({ projectId }: { projectId: string }) {
 
   const addedIds = new Set(team.map((m) => m.agentId));
 
-  async function handleAdd(agentId: string, role = "Member") {
-    await addTeamMember(projectId, agentId, role);
-    fetchTeam(projectId).then(setTeam);
+  async function handleAdd(agentId: string, role = "Member"): Promise<boolean> {
+    const ok = await addTeamMember(projectId, agentId, role);
+    if (ok) fetchTeam(projectId).then(setTeam);
+    return ok;
   }
   async function handleRemove(agentId: string) {
     await removeTeamMember(projectId, agentId);
