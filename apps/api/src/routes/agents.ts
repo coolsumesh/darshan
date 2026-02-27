@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import type pg from "pg";
+import { getRequestUser } from "./auth.js";
 import { broadcast } from "../broadcast.js";
 import { writeFileSync, unlinkSync, existsSync } from "fs";
 import { fileURLToPath } from "url";
@@ -12,7 +13,7 @@ export async function registerAgents(server: FastifyInstance, db: pg.Pool) {
 
   // ── List all agents (with org info) ────────────────────────────────────────
   server.get("/api/v1/agents", async (req) => {
-    const userId = ((req as unknown as Record<string, unknown>).authUser as { userId?: string } | undefined)?.userId ?? null;
+    const userId = getRequestUser(req)?.userId ?? null;
     const { rows } = await db.query(`
       select a.*,
              o.name  as org_name,
@@ -48,7 +49,7 @@ export async function registerAgents(server: FastifyInstance, db: pg.Pool) {
 
   // ── List organisations ──────────────────────────────────────────────────────
   server.get("/api/v1/orgs", async (req) => {
-    const userId = ((req as unknown as Record<string, unknown>).authUser as { userId?: string } | undefined)?.userId ?? null;
+    const userId = getRequestUser(req)?.userId ?? null;
     const { rows: orgs } = await db.query(
       `select o.*,
               count(distinct a.id)::int as agent_count,
@@ -71,7 +72,7 @@ export async function registerAgents(server: FastifyInstance, db: pg.Pool) {
     async (req, reply) => {
       const { name, slug, description, type = "partner" } = req.body;
       if (!name || !slug) return reply.status(400).send({ ok: false, error: "name and slug required" });
-      const userId = ((req as unknown as Record<string, unknown>).authUser as { userId?: string } | undefined)?.userId ?? null;
+      const userId = getRequestUser(req)?.userId ?? null;
       const { rows } = await db.query(
         `insert into organisations (name, slug, description, type, owner_user_id)
          values ($1, $2, $3, $4, $5) returning *`,

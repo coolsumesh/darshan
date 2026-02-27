@@ -1,12 +1,13 @@
 import type { FastifyInstance } from "fastify";
 import type pg from "pg";
 import { broadcast } from "../broadcast.js";
+import { getRequestUser } from "./auth.js";
 
 export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
 
   // ── List all projects ──────────────────────────────────────────────────────
   server.get("/api/v1/projects", async (req) => {
-    const userId = ((req as unknown as Record<string, unknown>).authUser as { userId?: string } | undefined)?.userId ?? null;
+    const userId = getRequestUser(req)?.userId ?? null;
     const { rows: projects } = await db.query(
       `select p.*,
               count(distinct pt.agent_id)::int as team_size,
@@ -49,7 +50,7 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
     async (req, reply) => {
       const { slug, name, description = "", status = "active" } = req.body;
       if (!slug || !name) return reply.status(400).send({ ok: false, error: "slug and name required" });
-      const userId = ((req as unknown as Record<string, unknown>).authUser as { userId?: string } | undefined)?.userId ?? null;
+      const userId = getRequestUser(req)?.userId ?? null;
       const { rows } = await db.query(
         `insert into projects (slug, name, description, status, owner_user_id)
          values ($1, $2, $3, $4, $5) returning *`,
@@ -205,7 +206,7 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
       if (!title) return reply.status(400).send({ ok: false, error: "title required" });
 
       // Resolve requestor from auth user (cookie session) or fallback to body proposer
-      const authUser = (req as unknown as Record<string, unknown>).authUser as { userId?: string; name?: string } | undefined;
+      const authUser = getRequestUser(req);
       const requestorName = authUser?.name ?? req.body.proposer ?? null;
       let requestorOrg: string | null = null;
       if (authUser?.userId) {
