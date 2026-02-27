@@ -82,9 +82,9 @@ export async function registerAuth(server: FastifyInstance) {
   // ── Google OAuth 2.0 ────────────────────────────────────────────────────────
 
   // GET /api/v1/auth/google — redirect to Google consent screen
-  server.get("/api/v1/auth/google", async (req, reply) => {
+  server.get("/api/v1/auth/google", async (_req, reply) => {
     if (!GOOGLE_CLIENT_ID) {
-      return reply.redirect(302, `${APP_BASE_URL}/login?error=google_not_configured`);
+      return reply.redirect(`${APP_BASE_URL}/login?error=google_not_configured`, 302);
     }
     const params = new URLSearchParams({
       client_id:     GOOGLE_CLIENT_ID,
@@ -94,7 +94,7 @@ export async function registerAuth(server: FastifyInstance) {
       access_type:   "offline",
       prompt:        "select_account",
     });
-    return reply.redirect(302, `https://accounts.google.com/o/oauth2/v2/auth?${params}`);
+    return reply.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${params}`, 302);
   });
 
   // GET /api/v1/auth/google/callback — exchange code, set cookie, redirect to app
@@ -103,7 +103,7 @@ export async function registerAuth(server: FastifyInstance) {
     async (req, reply) => {
       const { code, error } = req.query;
       if (error || !code) {
-        return reply.redirect(302, `${APP_BASE_URL}/login?error=google_denied`);
+        return reply.redirect(`${APP_BASE_URL}/login?error=google_denied`, 302);
       }
 
       // 1. Exchange code for tokens
@@ -123,7 +123,7 @@ export async function registerAuth(server: FastifyInstance) {
         if (!tokenRes.ok) throw new Error("token exchange failed");
         tokens = await tokenRes.json() as { access_token?: string };
       } catch {
-        return reply.redirect(302, `${APP_BASE_URL}/login?error=google_token`);
+        return reply.redirect(`${APP_BASE_URL}/login?error=google_token`, 302);
       }
 
       // 2. Get Google user info
@@ -135,12 +135,12 @@ export async function registerAuth(server: FastifyInstance) {
         if (!userRes.ok) throw new Error("userinfo failed");
         googleUser = await userRes.json() as { sub?: string; email?: string; name?: string };
       } catch {
-        return reply.redirect(302, `${APP_BASE_URL}/login?error=google_userinfo`);
+        return reply.redirect(`${APP_BASE_URL}/login?error=google_userinfo`, 302);
       }
 
       const { sub: googleId, email, name } = googleUser;
       if (!email || !googleId) {
-        return reply.redirect(302, `${APP_BASE_URL}/login?error=google_no_email`);
+        return reply.redirect(`${APP_BASE_URL}/login?error=google_no_email`, 302);
       }
 
       // 3. Find existing user by google_id or email, or auto-create
@@ -177,7 +177,7 @@ export async function registerAuth(server: FastifyInstance) {
         path:     "/",
       });
 
-      return reply.redirect(302, `${APP_BASE_URL}/dashboard`);
+      return reply.redirect(`${APP_BASE_URL}/dashboard`, 302);
     }
   );
 }
