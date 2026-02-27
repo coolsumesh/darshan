@@ -11,7 +11,8 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 export async function registerAgents(server: FastifyInstance, db: pg.Pool) {
 
   // ── List all agents (with org info) ────────────────────────────────────────
-  server.get("/api/v1/agents", async () => {
+  server.get("/api/v1/agents", async (req) => {
+    const userId = ((req as unknown as Record<string, unknown>).authUser as { userId?: string } | undefined)?.userId ?? null;
     const { rows } = await db.query(`
       select a.*,
              o.name  as org_name,
@@ -23,8 +24,9 @@ export async function registerAgents(server: FastifyInstance, db: pg.Pool) {
              ) as open_task_count
       from agents a
       left join organisations o on o.id = a.org_id
+      where ($1::uuid is null or o.owner_user_id = $1::uuid or a.org_id is null)
       order by o.type asc, lower(a.name) asc
-    `);
+    `, [userId]);
     return { ok: true, agents: rows };
   });
 
@@ -45,7 +47,8 @@ export async function registerAgents(server: FastifyInstance, db: pg.Pool) {
   });
 
   // ── List organisations ──────────────────────────────────────────────────────
-  server.get("/api/v1/orgs", async () => {
+  server.get("/api/v1/orgs", async (req) => {
+    const userId = ((req as unknown as Record<string, unknown>).authUser as { userId?: string } | undefined)?.userId ?? null;
     const { rows: orgs } = await db.query(
       `select o.*,
               count(distinct a.id)::int as agent_count,
@@ -54,8 +57,10 @@ export async function registerAgents(server: FastifyInstance, db: pg.Pool) {
        from organisations o
        left join agents   a on a.org_id = o.id
        left join projects p on p.org_id = o.id
+       where ($1::uuid is null or o.owner_user_id = $1::uuid)
        group by o.id
-       order by o.type asc, o.name asc`
+       order by o.type asc, o.name asc`,
+      [userId]
     );
     return { ok: true, orgs };
   });
@@ -66,10 +71,11 @@ export async function registerAgents(server: FastifyInstance, db: pg.Pool) {
     async (req, reply) => {
       const { name, slug, description, type = "partner" } = req.body;
       if (!name || !slug) return reply.status(400).send({ ok: false, error: "name and slug required" });
+      const userId = ((req as unknown as Record<string, unknown>).authUser as { userId?: string } | undefined)?.userId ?? null;
       const { rows } = await db.query(
-        `insert into organisations (name, slug, description, type)
-         values ($1, $2, $3, $4) returning *`,
-        [name, slug, description ?? null, type]
+        `insert into organisations (name, slug, description, type, owner_user_id)
+         values ($1, $2, $3, $4, $5) returning *`,
+        [name, slug, description ?? null, type, userId]
       );
       return { ok: true, org: rows[0] };
     }

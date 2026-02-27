@@ -87,6 +87,8 @@ server.addHook("preHandler", async (req, reply) => {
   if (!payload) {
     return reply.status(401).send({ ok: false, error: "invalid token" });
   }
+  // Attach decoded user to request for use in route handlers
+  (req as unknown as Record<string, unknown>).authUser = payload;
 });
 
 await registerAgents(server, db);

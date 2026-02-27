@@ -5,7 +5,8 @@ import { broadcast } from "../broadcast.js";
 export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
 
   // ── List all projects ──────────────────────────────────────────────────────
-  server.get("/api/v1/projects", async () => {
+  server.get("/api/v1/projects", async (req) => {
+    const userId = ((req as unknown as Record<string, unknown>).authUser as { userId?: string } | undefined)?.userId ?? null;
     const { rows: projects } = await db.query(
       `select p.*,
               count(distinct pt.agent_id)::int as team_size,
@@ -14,8 +15,10 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
        left join project_team pt on pt.project_id = p.id
        left join tasks t on t.project_id = p.id
        where p.status != 'archived'
+         and ($1::uuid is null or p.owner_user_id = $1::uuid)
        group by p.id
-       order by p.created_at asc`
+       order by p.created_at asc`,
+      [userId]
     );
     return { ok: true, projects };
   });
@@ -46,10 +49,11 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
     async (req, reply) => {
       const { slug, name, description = "", status = "active" } = req.body;
       if (!slug || !name) return reply.status(400).send({ ok: false, error: "slug and name required" });
+      const userId = ((req as unknown as Record<string, unknown>).authUser as { userId?: string } | undefined)?.userId ?? null;
       const { rows } = await db.query(
-        `insert into projects (slug, name, description, status)
-         values ($1, $2, $3, $4) returning *`,
-        [slug, name, description, status]
+        `insert into projects (slug, name, description, status, owner_user_id)
+         values ($1, $2, $3, $4, $5) returning *`,
+        [slug, name, description, status, userId]
       );
       return reply.status(201).send({ ok: true, project: rows[0] });
     }
