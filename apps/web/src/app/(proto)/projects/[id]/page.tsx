@@ -495,19 +495,26 @@ function TaskDetailPanel({
           {task.completed_at && propRow("Completed", <span className="text-xs text-emerald-600 dark:text-emerald-400">{new Date(task.completed_at).toLocaleDateString()}</span>)}
         </div>
 
-        {/* Completion summary — shown when done */}
-        {task.status === "done" && (
+        {/* Completion summary — shown when in review or done */}
+        {(task.status === "review" || task.status === "done") && (
           <div className="mb-4">
             <div className="mb-2 flex items-center gap-2">
-              <span className="h-2 w-2 rounded-full bg-emerald-400" />
-              <span className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Completion Summary</span>
+              <span className={cn("h-2 w-2 rounded-full", task.status === "done" ? "bg-emerald-400" : "bg-sky-400")} />
+              <span className="text-xs font-semibold uppercase tracking-wide text-zinc-400">
+                {task.status === "done" ? "Completion Summary" : "What was completed?"}
+              </span>
             </div>
             <textarea
               value={task.completion_note ?? ""}
               onChange={(e) => onUpdate(task.id, { completion_note: e.target.value })}
               rows={4}
-              placeholder="What was completed? List deliverables, decisions, and outcomes..."
-              className="w-full resize-none rounded-xl bg-emerald-50 p-3 text-sm text-zinc-700 placeholder:text-zinc-400 ring-1 ring-emerald-200 focus:outline-none focus:ring-emerald-400 dark:bg-emerald-500/5 dark:text-zinc-300 dark:ring-emerald-500/20"
+              placeholder="Describe what was completed — deliverables, decisions, outcomes…"
+              className={cn(
+                "w-full resize-none rounded-xl p-3 text-sm text-zinc-700 placeholder:text-zinc-400 ring-1 focus:outline-none dark:text-zinc-300",
+                task.status === "done"
+                  ? "bg-emerald-50 ring-emerald-200 focus:ring-emerald-400 dark:bg-emerald-500/5 dark:ring-emerald-500/20"
+                  : "bg-sky-50 ring-sky-200 focus:ring-sky-400 dark:bg-sky-500/5 dark:ring-sky-500/20"
+              )}
             />
           </div>
         )}
