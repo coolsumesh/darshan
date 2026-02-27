@@ -361,6 +361,22 @@ export async function removeOrgMember(idOrSlug: string, agentId: string): Promis
   return data?.ok ?? false;
 }
 
+export type Invite = {
+  id: string; token: string; label?: string;
+  org_id: string; org_name: string; org_slug: string;
+  expires_at: string; accepted_at?: string; created_at: string;
+  accepted_by?: string;
+  invite_url?: string;
+};
+
+export async function fetchInvites(): Promise<Invite[]> {
+  const data = await apiFetch<{ ok: boolean; invites: Invite[] }>("/api/v1/invites");
+  return data?.ok ? data.invites.map((i) => ({
+    ...i,
+    invite_url: `https://darshan.caringgems.in/invite/${i.token}`,
+  })) : [];
+}
+
 export async function createInvite(
   orgId: string, label?: string
 ): Promise<{ token: string; invite_url: string; expires_at: string } | null> {

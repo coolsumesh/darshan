@@ -14,15 +14,18 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ClipboardList,
   FileText,
   HelpCircle,
   FolderKanban,
+  Link2,
   LogOut,
   Menu,
   MessageSquareText,
-  Plus,
   Search,
   Settings,
+  Users,
+  Zap,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { applyPrefsToDom, loadPrefs, useUIPreferences } from "@/components/proto/ui-preferences";
@@ -30,13 +33,19 @@ import { applyPrefsToDom, loadPrefs, useUIPreferences } from "@/components/proto
 // ─── Nav config ───────────────────────────────────────────────────────────────
 
 const PRIMARY_NAV = [
-  { href: "/dashboard",     label: "Dashboard",      icon: Activity         },
-  { href: "/projects",      label: "Projects",       icon: FolderKanban     },
-  { href: "/agents",        label: "Agents",         icon: Bot              },
-  { href: "/organisations", label: "Organisations",  icon: Building2        },
-  { href: "/threads",       label: "Threads",        icon: MessageSquareText },
-  { href: "/calendar",      label: "Calendar",       icon: CalendarDays     },
-  { href: "/how-it-works",  label: "How it Works",   icon: BookOpen         },
+  { href: "/dashboard",     label: "Dashboard",      icon: Activity          },
+  { href: "/projects",      label: "Projects",       icon: FolderKanban      },
+  { href: "/organisations", label: "Organisations",  icon: Building2         },
+  { href: "/threads",       label: "Threads",        icon: MessageSquareText  },
+  { href: "/calendar",      label: "Calendar",       icon: CalendarDays      },
+  { href: "/how-it-works",  label: "How it Works",   icon: BookOpen          },
+] as const;
+
+const AGENTS_NAV = [
+  { href: "/agents",          label: "Registry",  icon: Users          },
+  { href: "/agents/tasks",    label: "Tasks",     icon: ClipboardList  },
+  { href: "/agents/activity", label: "Activity",  icon: Zap            },
+  { href: "/agents/invites",  label: "Invites",   icon: Link2          },
 ] as const;
 
 const TOOL_NAV = [
@@ -138,6 +147,13 @@ function Sidebar({
               active={isActive(item.href, item.href === "/dashboard")}
               collapsed={collapsed}
             />
+          ))}
+        </div>
+
+        <SectionLabel label="Agents" collapsed={collapsed} />
+        <div className="flex flex-col gap-0.5">
+          {AGENTS_NAV.map((item) => (
+            <NavItem key={item.href} {...item} active={isActive(item.href, item.href === "/agents")} collapsed={collapsed} />
           ))}
         </div>
 

@@ -565,6 +565,21 @@ ACK_URL: ${ackUrl}
     };
   });
 
+  // ── List all invites (auth required) ──────────────────────────────────────
+  server.get("/api/v1/invites", async () => {
+    const { rows } = await db.query(
+      `select ai.id, ai.token, ai.label, ai.expires_at, ai.accepted_at, ai.created_at,
+              o.id as org_id, o.name as org_name, o.slug as org_slug,
+              a.name as accepted_by
+       from agent_invites ai
+       join organisations o on o.id = ai.org_id
+       left join agents a on a.id = ai.agent_id
+       order by ai.created_at desc
+       limit 200`
+    );
+    return { ok: true, invites: rows };
+  });
+
   // ── Get invite info (public — no auth) ─────────────────────────────────────
   server.get<{ Params: { token: string } }>("/api/v1/invites/:token", async (req, reply) => {
     const { rows } = await db.query(
