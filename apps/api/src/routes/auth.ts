@@ -89,10 +89,12 @@ export async function registerAuth(server: FastifyInstance) {
   // ── Google OAuth 2.0 ────────────────────────────────────────────────────────
 
   // GET /api/v1/auth/google — redirect to Google consent screen
-  server.get("/api/v1/auth/google", async (_req, reply) => {
+  server.get<{ Querystring: { next?: string } }>("/api/v1/auth/google", async (req, reply) => {
     if (!GOOGLE_CLIENT_ID) {
       return reply.redirect(`${APP_BASE_URL}/login?error=google_not_configured`, 302);
     }
+    // Encode the post-login destination in the OAuth state so the callback can redirect there
+    const state = req.query.next ? Buffer.from(req.query.next).toString("base64url") : "";
     const params = new URLSearchParams({
       client_id:     GOOGLE_CLIENT_ID,
       redirect_uri:  GOOGLE_REDIRECT_URI,
@@ -100,15 +102,25 @@ export async function registerAuth(server: FastifyInstance) {
       scope:         "openid email profile",
       access_type:   "offline",
       prompt:        "select_account",
+      ...(state ? { state } : {}),
     });
     return reply.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${params}`, 302);
   });
 
   // GET /api/v1/auth/google/callback — exchange code, set cookie, redirect to app
-  server.get<{ Querystring: { code?: string; error?: string } }>(
+  server.get<{ Querystring: { code?: string; error?: string; state?: string } }>(
     "/api/v1/auth/google/callback",
     async (req, reply) => {
-      const { code, error } = req.query;
+      const { code, error, state } = req.query;
+      // Decode the post-login destination from state (if any)
+      let redirectAfter = `${APP_BASE_URL}/dashboard`;
+      if (state) {
+        try {
+          const decoded = Buffer.from(state, "base64url").toString("utf8");
+          // Only allow relative paths starting with / for safety
+          if (decoded.startsWith("/")) redirectAfter = `${APP_BASE_URL}${decoded}`;
+        } catch { /* ignore malformed state */ }
+      }
       if (error || !code) {
         return reply.redirect(`${APP_BASE_URL}/login?error=google_denied`, 302);
       }
@@ -199,7 +211,7 @@ export async function registerAuth(server: FastifyInstance) {
         path:     "/",
       });
 
-      return reply.redirect(`${APP_BASE_URL}/dashboard`, 302);
+      return reply.redirect(redirectAfter, 302);
     }
   );
 }

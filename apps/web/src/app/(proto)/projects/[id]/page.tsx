@@ -9,7 +9,7 @@ import {
   ArrowLeft, BookOpen, Calendar, ChevronDown, ExternalLink,
   FileCode2, Filter, GripVertical, LayoutList, Zap,
   MoreHorizontal, Plus, Search, SortAsc, UserPlus, Users, X, Trash2, Check,
-  Mail, Crown, UserCircle,
+  Mail, Crown, UserCircle, Copy, Link as LinkIcon,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -24,9 +24,11 @@ import {
   fetchArchitecture, fetchTechSpec,
   pingAgent,
   fetchUserMembers, addUserMember, removeUserMember,
+  fetchProjectInvites, createProjectInvite, revokeProjectInvite,
   authMe,
   type TeamMemberWithAgent,
   type UserMember,
+  type ProjectInvite,
 } from "@/lib/api";
 import { type Agent } from "@/lib/agents";
 
@@ -1151,19 +1153,28 @@ function TechSpecTab({ projectId }: { projectId: string }) {
 const USER_ROLES = ["member", "admin"] as const;
 
 function UserMembersSection({ projectId, canAdmin }: { projectId: string; canAdmin: boolean }) {
-  const [members,  setMembers]  = React.useState<UserMember[]>([]);
-  const [me,       setMe]       = React.useState<{ id: string } | null>(null);
-  const [showAdd,  setShowAdd]  = React.useState(false);
-  const [email,    setEmail]    = React.useState("");
-  const [role,     setRole]     = React.useState<"member" | "admin">("member");
-  const [adding,   setAdding]   = React.useState(false);
-  const [addError, setAddError] = React.useState<string | null>(null);
-  const [removing, setRemoving] = React.useState<string | null>(null);
+  const [members,        setMembers]        = React.useState<UserMember[]>([]);
+  const [me,             setMe]             = React.useState<{ id: string } | null>(null);
+  const [showAdd,        setShowAdd]        = React.useState(false);
+  const [showInvite,     setShowInvite]     = React.useState(false);
+  const [email,          setEmail]          = React.useState("");
+  const [role,           setRole]           = React.useState<"member" | "admin">("member");
+  const [adding,         setAdding]         = React.useState(false);
+  const [addError,       setAddError]       = React.useState<string | null>(null);
+  const [removing,       setRemoving]       = React.useState<string | null>(null);
+  const [inviteEmail,    setInviteEmail]    = React.useState("");
+  const [inviteRole,     setInviteRole]     = React.useState<"member" | "admin">("member");
+  const [generating,     setGenerating]     = React.useState(false);
+  const [generatedInvite, setGeneratedInvite] = React.useState<ProjectInvite | null>(null);
+  const [copied,         setCopied]         = React.useState(false);
+  const [activeInvites,  setActiveInvites]  = React.useState<ProjectInvite[]>([]);
+  const [revoking,       setRevoking]       = React.useState<string | null>(null);
 
   React.useEffect(() => {
     fetchUserMembers(projectId).then(setMembers);
     authMe().then((u) => setMe(u ? { id: u.id } : null));
-  }, [projectId]);
+    if (canAdmin) fetchProjectInvites(projectId).then((inv) => setActiveInvites(inv.filter((i) => !i.accepted_at && !i.declined_at && new Date(i.expires_at) > new Date())));
+  }, [projectId, canAdmin]);
 
   async function handleAdd() {
     if (!email.trim()) return;
@@ -1185,6 +1196,31 @@ function UserMembersSection({ projectId, canAdmin }: { projectId: string; canAdm
     setRemoving(null);
   }
 
+  async function handleGenerateInvite() {
+    setGenerating(true);
+    const inv = await createProjectInvite(projectId, inviteEmail.trim() || undefined, inviteRole);
+    if (inv) {
+      setGeneratedInvite(inv);
+      setActiveInvites((prev) => [inv, ...prev]);
+      setInviteEmail("");
+    }
+    setGenerating(false);
+  }
+
+  async function handleCopy(url: string) {
+    await navigator.clipboard.writeText(url);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
+
+  async function handleRevoke(inviteId: string) {
+    setRevoking(inviteId);
+    await revokeProjectInvite(projectId, inviteId);
+    setActiveInvites((prev) => prev.filter((i) => i.id !== inviteId));
+    if (generatedInvite?.id === inviteId) setGeneratedInvite(null);
+    setRevoking(null);
+  }
+
   const ROLE_META: Record<string, { label: string; bg: string; text: string }> = {
     owner:  { label: "Owner",  bg: "bg-amber-100",  text: "text-amber-700"  },
     admin:  { label: "Admin",  bg: "bg-violet-100", text: "text-violet-700" },
@@ -1199,12 +1235,20 @@ function UserMembersSection({ projectId, canAdmin }: { projectId: string; canAdm
           <p className="text-xs text-zinc-400">{members.length} user{members.length !== 1 ? "s" : ""} with access</p>
         </div>
         {canAdmin && (
-          <button
-            onClick={() => { setShowAdd((v) => !v); setAddError(null); }}
-            className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-violet-600 hover:bg-violet-50 dark:hover:bg-violet-500/10 transition-colors"
-          >
-            <UserPlus className="h-3.5 w-3.5" /> Add
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => { setShowAdd((v) => !v); setShowInvite(false); setAddError(null); }}
+              className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-violet-600 hover:bg-violet-50 dark:hover:bg-violet-500/10 transition-colors"
+            >
+              <UserPlus className="h-3.5 w-3.5" /> Add
+            </button>
+            <button
+              onClick={() => { setShowInvite((v) => !v); setShowAdd(false); setGeneratedInvite(null); }}
+              className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-sky-600 hover:bg-sky-50 dark:hover:bg-sky-500/10 transition-colors"
+            >
+              <LinkIcon className="h-3.5 w-3.5" /> Invite
+            </button>
+          </div>
         )}
       </div>
 
@@ -1240,6 +1284,105 @@ function UserMembersSection({ projectId, canAdmin }: { projectId: string; canAdm
             </button>
           </div>
           {addError && <p className="mt-2 text-xs text-red-500">{addError}</p>}
+        </div>
+      )}
+
+      {/* ── Invite by link panel ── */}
+      {showInvite && canAdmin && (
+        <div className="mb-3 rounded-xl border border-sky-200 bg-sky-50 p-3 dark:border-sky-500/20 dark:bg-sky-900/10">
+          <p className="mb-2 text-xs font-semibold text-sky-700 dark:text-sky-400">Generate invite link</p>
+          {!generatedInvite ? (
+            <>
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <Mail className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-400" />
+                  <input
+                    type="email"
+                    placeholder="Email (optional — restricts who can accept)"
+                    value={inviteEmail}
+                    onChange={(e) => setInviteEmail(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") handleGenerateInvite(); if (e.key === "Escape") setShowInvite(false); }}
+                    className="w-full rounded-lg border-0 bg-white py-2 pl-8 pr-3 text-sm ring-1 ring-zinc-200 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-sky-400/40 dark:bg-zinc-900 dark:ring-zinc-700 dark:text-zinc-100"
+                  />
+                </div>
+                <select
+                  value={inviteRole}
+                  onChange={(e) => setInviteRole(e.target.value as "member" | "admin")}
+                  className="rounded-lg border-0 bg-white px-2 py-2 text-sm ring-1 ring-zinc-200 focus:outline-none focus:ring-2 focus:ring-sky-400/40 dark:bg-zinc-900 dark:ring-zinc-700 dark:text-zinc-100"
+                >
+                  {USER_ROLES.map((r) => <option key={r} value={r}>{r.charAt(0).toUpperCase() + r.slice(1)}</option>)}
+                </select>
+                <button
+                  onClick={handleGenerateInvite}
+                  disabled={generating}
+                  className="rounded-lg bg-sky-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-sky-700 disabled:opacity-50"
+                >
+                  {generating ? "…" : "Generate"}
+                </button>
+              </div>
+              <p className="mt-1.5 text-[11px] text-sky-600/70 dark:text-sky-400/60">
+                Link expires in 7 days. Leave email blank to share with anyone.
+              </p>
+            </>
+          ) : (
+            <div className="flex flex-col gap-2">
+              <p className="text-xs text-sky-700 dark:text-sky-400">
+                ✓ Link generated — share it with {generatedInvite.invitee_email ?? "anyone"}
+              </p>
+              <div className="flex items-center gap-2">
+                <code className="flex-1 truncate rounded-lg bg-white px-3 py-2 text-xs font-mono text-sky-800 ring-1 ring-sky-200 dark:bg-zinc-900 dark:text-sky-300 dark:ring-sky-700">
+                  {generatedInvite.invite_url}
+                </code>
+                <button
+                  onClick={() => handleCopy(generatedInvite.invite_url)}
+                  className="flex items-center gap-1.5 rounded-lg bg-sky-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-sky-700"
+                >
+                  <Copy className="h-3.5 w-3.5" />
+                  {copied ? "Copied!" : "Copy"}
+                </button>
+              </div>
+              <button
+                onClick={() => setGeneratedInvite(null)}
+                className="self-start text-xs text-sky-600 hover:underline dark:text-sky-400"
+              >
+                Generate another
+              </button>
+            </div>
+          )}
+
+          {/* Active invites list */}
+          {activeInvites.length > 0 && (
+            <div className="mt-3 border-t border-sky-200/60 pt-3 dark:border-sky-500/20">
+              <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-sky-600/70 dark:text-sky-500">Active links</p>
+              <div className="flex flex-col gap-1.5">
+                {activeInvites.map((inv) => (
+                  <div key={inv.id} className="flex items-center gap-2">
+                    <div className="flex-1 min-w-0">
+                      <span className="text-xs text-sky-800 dark:text-sky-300 truncate block">
+                        {inv.invitee_email ?? "Anyone"} · {inv.role}
+                      </span>
+                      <span className="text-[10px] text-sky-600/60 dark:text-sky-500/60">
+                        expires {new Date(inv.expires_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => handleCopy(inv.invite_url)}
+                      className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold text-sky-600 hover:bg-sky-100 dark:text-sky-400 dark:hover:bg-sky-900/30"
+                    >
+                      Copy
+                    </button>
+                    <button
+                      onClick={() => handleRevoke(inv.id)}
+                      disabled={revoking === inv.id}
+                      className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-40"
+                    >
+                      Revoke
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
 

@@ -27,6 +27,7 @@ function LoginContent() {
   const router       = useRouter();
   const searchParams = useSearchParams();
   const oauthError   = searchParams.get("error");
+  const nextUrl      = searchParams.get("next") ?? "/dashboard";
 
   const [email,    setEmail]    = React.useState("");
   const [password, setPassword] = React.useState("");
@@ -43,7 +44,7 @@ function LoginContent() {
     setError("");
     const user = await authLogin(email.trim(), password);
     if (user) {
-      router.replace("/dashboard");
+      router.replace(nextUrl);
     } else {
       setError("Invalid email or password. Please try again.");
       setLoading(false);
@@ -56,7 +57,9 @@ function LoginContent() {
     "dark:bg-white/5 dark:text-white dark:ring-white/10 dark:placeholder:text-zinc-500"
   );
 
-  const googleHref = "/api/backend/api/v1/auth/google";
+  const googleHref = nextUrl !== "/dashboard"
+    ? `/api/backend/api/v1/auth/google?next=${encodeURIComponent(nextUrl)}`
+    : "/api/backend/api/v1/auth/google";
 
   return (
     <div className="w-full max-w-sm">

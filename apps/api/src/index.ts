@@ -23,6 +23,7 @@ import { registerAuditRoute } from "./routes/auditRoute.js";
 import { registerWs } from "./routes/ws.js";
 import { startConnector } from "./connector.js";
 import { registerProjects } from "./routes/projects.js";
+import { registerInvites } from "./routes/invites.js";
 import { registerAuth, verifyToken } from "./routes/auth.js";
 
 const PORT = Number(process.env.PORT ?? 4000);
@@ -98,6 +99,7 @@ await registerA2A(server, db);
 await registerAuditRoute(server, db);
 await registerOpsRateLimits(server, db);
 await registerProjects(server, db);
+await registerInvites(server, db);
 await registerWs(server);
 
 startConnector(db);

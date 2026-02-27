@@ -422,3 +422,70 @@ export async function removeUserMember(projectId: string, userId: string): Promi
   });
   return data?.ok ?? false;
 }
+
+// ── Project invite links ───────────────────────────────────────────────────────
+
+export type ProjectInvite = {
+  id: string;
+  token: string;
+  role: "admin" | "member";
+  project_id: string;
+  project_name: string;
+  project_slug: string;
+  invited_by_name?: string;
+  invitee_email?: string;
+  expires_at: string;
+  accepted_at?: string;
+  declined_at?: string;
+  accepted_by_name?: string;
+  invite_url: string;
+};
+
+/** Pending invites addressed to the current user's email (notification bell) */
+export async function fetchMyInvites(): Promise<ProjectInvite[]> {
+  const data = await apiFetch<{ ok: boolean; invites: ProjectInvite[] }>("/api/v1/me/invites");
+  return data?.ok ? data.invites : [];
+}
+
+/** Preview an invite by token (public) */
+export async function fetchInviteByToken(token: string): Promise<ProjectInvite | null> {
+  const data = await apiFetch<{ ok: boolean; invite: ProjectInvite }>(`/api/v1/invites/project/${token}`);
+  return data?.ok ? data.invite : null;
+}
+
+/** Accept an invite */
+export async function acceptProjectInvite(token: string): Promise<{ project_slug: string; project_name: string } | null> {
+  const data = await apiFetch<{ ok: boolean; project_slug: string; project_name: string }>(
+    `/api/v1/invites/project/${token}/accept`, { method: "POST" }
+  );
+  return data?.ok ? { project_slug: data.project_slug, project_name: data.project_name } : null;
+}
+
+/** Decline an invite */
+export async function declineProjectInvite(token: string): Promise<boolean> {
+  const data = await apiFetch<{ ok: boolean }>(`/api/v1/invites/project/${token}/decline`, { method: "POST" });
+  return data?.ok ?? false;
+}
+
+/** Generate an invite link for a project (admin+) */
+export async function createProjectInvite(
+  projectId: string, email?: string, role?: string
+): Promise<ProjectInvite | null> {
+  const data = await apiFetch<{ ok: boolean; invite: ProjectInvite }>(`/api/v1/projects/${projectId}/invites`, {
+    method: "POST",
+    body: JSON.stringify({ email: email || undefined, role: role || "member" }),
+  });
+  return data?.ok ? data.invite : null;
+}
+
+/** List invites for a project (admin+) */
+export async function fetchProjectInvites(projectId: string): Promise<ProjectInvite[]> {
+  const data = await apiFetch<{ ok: boolean; invites: ProjectInvite[] }>(`/api/v1/projects/${projectId}/invites`);
+  return data?.ok ? data.invites : [];
+}
+
+/** Revoke an invite (admin+) */
+export async function revokeProjectInvite(projectId: string, inviteId: string): Promise<boolean> {
+  const data = await apiFetch<{ ok: boolean }>(`/api/v1/projects/${projectId}/invites/${inviteId}`, { method: "DELETE" });
+  return data?.ok ?? false;
+}

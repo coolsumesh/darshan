@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import * as React from "react";
-import { authLogout } from "@/lib/api";
+import { Suspense } from "react";
+import { authLogout, fetchMyInvites, fetchInviteByToken, acceptProjectInvite, declineProjectInvite, type ProjectInvite } from "@/lib/api";
 import {
   Activity,
   Bell,
@@ -11,13 +12,14 @@ import {
   Bot,
   Building2,
   CalendarDays,
+  CheckCircle,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
   ClipboardList,
   FileText,
-  HelpCircle,
   FolderKanban,
+  HelpCircle,
   Link2,
   LogOut,
   Menu,
@@ -25,6 +27,8 @@ import {
   Search,
   Settings,
   Users,
+  X,
+  XCircle,
   Zap,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
@@ -225,6 +229,178 @@ function Sidebar({
   );
 }
 
+// ─── Notification Bell + Panel ────────────────────────────────────────────────
+
+function NotificationBellInner() {
+  const router       = useRouter();
+  const searchParams = useSearchParams();
+  const [open,       setOpen]       = React.useState(false);
+  const [invites,    setInvites]    = React.useState<ProjectInvite[]>([]);
+  const [acting,     setActing]     = React.useState<string | null>(null);
+  const panelRef = React.useRef<HTMLDivElement>(null);
+
+  // Fetch email-based pending invites
+  React.useEffect(() => {
+    fetchMyInvites().then(setInvites);
+  }, []);
+
+  // Handle ?invite=TOKEN in URL — fetch that specific invite and open panel
+  React.useEffect(() => {
+    const token = searchParams.get("invite");
+    if (!token) return;
+    fetchInviteByToken(token).then((inv) => {
+      if (!inv) return;
+      setInvites((prev) => {
+        const exists = prev.some((i) => i.token === inv.token);
+        return exists ? prev : [inv, ...prev];
+      });
+      setOpen(true);
+      // Clean up URL param without reload
+      const url = new URL(window.location.href);
+      url.searchParams.delete("invite");
+      window.history.replaceState({}, "", url.toString());
+    });
+  }, [searchParams]);
+
+  // Close panel on outside click
+  React.useEffect(() => {
+    function handler(e: MouseEvent) {
+      if (panelRef.current && !panelRef.current.contains(e.target as Node)) setOpen(false);
+    }
+    if (open) document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  async function handleAccept(invite: ProjectInvite) {
+    setActing(invite.token);
+    const result = await acceptProjectInvite(invite.token);
+    if (result) {
+      setInvites((prev) => prev.filter((i) => i.token !== invite.token));
+      setOpen(false);
+      router.push(`/projects/${result.project_slug}`);
+    }
+    setActing(null);
+  }
+
+  async function handleDecline(invite: ProjectInvite) {
+    setActing(invite.token);
+    await declineProjectInvite(invite.token);
+    setInvites((prev) => prev.filter((i) => i.token !== invite.token));
+    setActing(null);
+  }
+
+  const count = invites.length;
+
+  return (
+    <div className="relative" ref={panelRef}>
+      {/* Bell button */}
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="relative grid h-8 w-8 place-items-center rounded-lg text-white/50 hover:bg-white/10 hover:text-white transition-colors"
+      >
+        <Bell className="h-4 w-4" />
+        {count > 0 && (
+          <span className="absolute right-1 top-1 flex h-4 w-4 items-center justify-center rounded-full bg-brand-500 text-[10px] font-bold text-white leading-none">
+            {count > 9 ? "9+" : count}
+          </span>
+        )}
+      </button>
+
+      {/* Notification panel */}
+      {open && (
+        <div
+          className="absolute right-0 top-full mt-2 w-80 rounded-2xl border border-white/10 shadow-2xl z-50 overflow-hidden"
+          style={{ backgroundColor: "#1A0F2E" }}
+        >
+          {/* Header */}
+          <div className="flex items-center justify-between border-b border-white/8 px-4 py-3">
+            <span className="text-sm font-semibold text-white">Notifications</span>
+            {count > 0 && (
+              <span className="rounded-full bg-brand-500/20 px-2 py-0.5 text-xs font-bold text-brand-300">
+                {count} pending
+              </span>
+            )}
+          </div>
+
+          {/* Content */}
+          <div className="max-h-[360px] overflow-y-auto">
+            {invites.length === 0 ? (
+              <div className="flex flex-col items-center gap-2 py-10 text-center">
+                <CheckCircle className="h-8 w-8 text-white/20" />
+                <p className="text-sm text-white/40">You're all caught up</p>
+              </div>
+            ) : (
+              invites.map((inv) => {
+                const isActing = acting === inv.token;
+                return (
+                  <div key={inv.token} className="border-b border-white/5 px-4 py-4 last:border-0">
+                    {/* Icon + text */}
+                    <div className="flex items-start gap-3">
+                      <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-brand-500/15">
+                        <FolderKanban className="h-4 w-4 text-brand-400" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-white leading-snug">
+                          Project invitation
+                        </p>
+                        <p className="mt-0.5 text-xs text-white/50 leading-snug">
+                          <span className="text-white/70">{inv.invited_by_name ?? "Someone"}</span>
+                          {" "}invited you to join{" "}
+                          <span className="text-white/70">{inv.project_name}</span>
+                          {" "}as{" "}
+                          <span className={cn(
+                            "font-semibold",
+                            inv.role === "admin" ? "text-violet-400" : "text-brand-400"
+                          )}>
+                            {inv.role}
+                          </span>
+                        </p>
+                        <p className="mt-1 text-[11px] text-white/30">
+                          Expires {new Date(inv.expires_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                        </p>
+                      </div>
+                    </div>
+                    {/* Actions */}
+                    <div className="mt-3 flex items-center gap-2">
+                      <button
+                        onClick={() => handleAccept(inv)}
+                        disabled={isActing}
+                        className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-brand-600 py-1.5 text-xs font-semibold text-white transition hover:bg-brand-500 disabled:opacity-50"
+                      >
+                        {isActing ? <span className="h-3 w-3 animate-spin rounded-full border-2 border-white/40 border-t-white inline-block" /> : <CheckCircle className="h-3.5 w-3.5" />}
+                        Accept
+                      </button>
+                      <button
+                        onClick={() => handleDecline(inv)}
+                        disabled={isActing}
+                        className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-white/5 py-1.5 text-xs font-semibold text-white/60 transition hover:bg-white/10 disabled:opacity-50"
+                      >
+                        <XCircle className="h-3.5 w-3.5" /> Decline
+                      </button>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function NotificationBell() {
+  return (
+    <Suspense fallback={
+      <button className="relative grid h-8 w-8 place-items-center rounded-lg text-white/50">
+        <Bell className="h-4 w-4" />
+      </button>
+    }>
+      <NotificationBellInner />
+    </Suspense>
+  );
+}
+
 // ─── App Shell ────────────────────────────────────────────────────────────────
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
@@ -336,11 +512,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           </button>
 
           {/* Notifications */}
-          <button className="relative grid h-8 w-8 place-items-center rounded-lg text-white/50 hover:bg-white/10 hover:text-white transition-colors">
-            <Bell className="h-4 w-4" />
-            {/* Unread dot */}
-            <span className="absolute top-1.5 right-1.5 h-1.5 w-1.5 rounded-full bg-brand-400" />
-          </button>
+          <NotificationBell />
 
           {/* Help */}
           <button className="grid h-8 w-8 place-items-center rounded-lg text-white/50 hover:bg-white/10 hover:text-white transition-colors">

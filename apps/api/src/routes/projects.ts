@@ -467,4 +467,66 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
       return { ok: true };
     }
   );
+
+  // ── Generate invite — admin+ ───────────────────────────────────────────────
+  const APP_BASE = process.env.APP_BASE_URL ?? "https://darshan.caringgems.in";
+
+  server.post<{ Params: { id: string }; Body: { email?: string; role?: string } }>(
+    "/api/v1/projects/:id/invites",
+    async (req, reply) => {
+      const access = await checkAccess(req.params.id, req, "admin");
+      if ("deny" in access) return reply.status(access.deny).send({ ok: false, error: access.deny === 404 ? "project not found" : "forbidden" });
+
+      const { email, role = "member" } = req.body ?? {};
+      const invitedBy = getRequestUser(req)?.userId ?? null;
+
+      const { rows } = await db.query(
+        `insert into project_invites (project_id, role, invited_by, invitee_email)
+         values ($1, $2, $3, $4) returning *`,
+        [access.projectId, role, invitedBy, email?.trim().toLowerCase() ?? null]
+      );
+      return reply.status(201).send({
+        ok: true,
+        invite: { ...rows[0], invite_url: `${APP_BASE}/invite/project/${rows[0].token}` },
+      });
+    }
+  );
+
+  // ── List invites — admin+ ──────────────────────────────────────────────────
+  server.get<{ Params: { id: string } }>(
+    "/api/v1/projects/:id/invites",
+    async (req, reply) => {
+      const access = await checkAccess(req.params.id, req, "admin");
+      if ("deny" in access) return reply.status(access.deny).send({ ok: false, error: access.deny === 404 ? "project not found" : "forbidden" });
+
+      const { rows } = await db.query(
+        `select pi.*, u.name as invited_by_name, au.name as accepted_by_name
+         from project_invites pi
+         left join users u  on u.id  = pi.invited_by
+         left join users au on au.id = pi.accepted_by
+         where pi.project_id = $1
+         order by pi.created_at desc`,
+        [access.projectId]
+      );
+      return {
+        ok: true,
+        invites: rows.map((r) => ({ ...r, invite_url: `${APP_BASE}/invite/project/${r.token}` })),
+      };
+    }
+  );
+
+  // ── Revoke invite — admin+ ─────────────────────────────────────────────────
+  server.delete<{ Params: { id: string; inviteId: string } }>(
+    "/api/v1/projects/:id/invites/:inviteId",
+    async (req, reply) => {
+      const access = await checkAccess(req.params.id, req, "admin");
+      if ("deny" in access) return reply.status(access.deny).send({ ok: false, error: access.deny === 404 ? "project not found" : "forbidden" });
+
+      await db.query(
+        `delete from project_invites where id = $1 and project_id = $2`,
+        [req.params.inviteId, access.projectId]
+      );
+      return { ok: true };
+    }
+  );
 }
