@@ -387,3 +387,37 @@ export async function createInvite(
   );
   return data?.ok ? data : null;
 }
+
+// ── Project user members (human collaborators) ────────────────────────────────
+
+export type UserMember = {
+  id: string;
+  user_id: string;
+  email: string;
+  name: string;
+  role: "owner" | "admin" | "member";
+  joined_at: string;
+  invited_by_name?: string;
+};
+
+export async function fetchUserMembers(projectId: string): Promise<UserMember[]> {
+  const data = await apiFetch<{ ok: boolean; members: UserMember[] }>(`/api/v1/projects/${projectId}/user-members`);
+  return data?.ok ? data.members : [];
+}
+
+export async function addUserMember(
+  projectId: string, email: string, role: string
+): Promise<UserMember | null> {
+  const data = await apiFetch<{ ok: boolean; member: UserMember }>(`/api/v1/projects/${projectId}/user-members`, {
+    method: "POST",
+    body: JSON.stringify({ email, role }),
+  });
+  return data?.ok ? data.member : null;
+}
+
+export async function removeUserMember(projectId: string, userId: string): Promise<boolean> {
+  const data = await apiFetch<{ ok: boolean }>(`/api/v1/projects/${projectId}/user-members/${userId}`, {
+    method: "DELETE",
+  });
+  return data?.ok ?? false;
+}

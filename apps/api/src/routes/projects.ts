@@ -11,12 +11,24 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
     const { rows: projects } = await db.query(
       `select p.*,
               count(distinct pt.agent_id)::int as team_size,
-              max(t.updated_at) as last_activity
+              max(t.updated_at) as last_activity,
+              case
+                when $1::uuid is null        then null
+                when p.owner_user_id = $1    then 'owner'
+                else                              'member'
+              end as my_role
        from projects p
        left join project_team pt on pt.project_id = p.id
        left join tasks t on t.project_id = p.id
        where p.status != 'archived'
-         and ($1::uuid is null or p.owner_user_id = $1::uuid)
+         and (
+           $1::uuid is null
+           or p.owner_user_id = $1::uuid
+           or exists (
+             select 1 from project_user_members pum
+             where pum.project_id = p.id and pum.user_id = $1::uuid
+           )
+         )
        group by p.id
        order by p.created_at asc`,
       [userId]
@@ -359,6 +371,78 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
       await db.query(
         `delete from project_team where project_id = $1 and agent_id = $2`,
         [project[0].id, req.params.agentId]
+      );
+      return { ok: true };
+    }
+  );
+
+  // ── List user members (human collaborators) ────────────────────────────────
+  server.get<{ Params: { id: string } }>(
+    "/api/v1/projects/:id/user-members",
+    async (req, reply) => {
+      const { rows: project } = await db.query(
+        `select id from projects where id::text = $1 or lower(slug) = lower($1)`,
+        [req.params.id]
+      );
+      if (!project[0]) return reply.status(404).send({ ok: false, error: "project not found" });
+      const { rows } = await db.query(
+        `select pum.id, pum.role, pum.joined_at,
+                u.id as user_id, u.email, u.name,
+                inv.name as invited_by_name
+         from project_user_members pum
+         join users u on u.id = pum.user_id
+         left join users inv on inv.id = pum.invited_by
+         where pum.project_id = $1
+         order by pum.joined_at asc`,
+        [project[0].id]
+      );
+      return { ok: true, members: rows };
+    }
+  );
+
+  // ── Add user member by email ───────────────────────────────────────────────
+  server.post<{ Params: { id: string }; Body: { email: string; role?: string } }>(
+    "/api/v1/projects/:id/user-members",
+    async (req, reply) => {
+      const { rows: project } = await db.query(
+        `select id from projects where id::text = $1 or lower(slug) = lower($1)`,
+        [req.params.id]
+      );
+      if (!project[0]) return reply.status(404).send({ ok: false, error: "project not found" });
+
+      const { email, role = "member" } = req.body;
+      if (!email) return reply.status(400).send({ ok: false, error: "email required" });
+
+      const { rows: users } = await db.query(
+        `select id, name, email from users where lower(email) = lower($1)`,
+        [email.trim()]
+      );
+      if (!users[0]) return reply.status(404).send({ ok: false, error: "no user found with that email" });
+
+      const invitedBy = getRequestUser(req)?.userId ?? null;
+      const { rows } = await db.query(
+        `insert into project_user_members (project_id, user_id, role, invited_by)
+         values ($1, $2, $3, $4)
+         on conflict (project_id, user_id) do update set role = excluded.role
+         returning *`,
+        [project[0].id, users[0].id, role, invitedBy]
+      );
+      return reply.status(201).send({ ok: true, member: { ...rows[0], user_id: users[0].id, email: users[0].email, name: users[0].name } });
+    }
+  );
+
+  // ── Remove user member ─────────────────────────────────────────────────────
+  server.delete<{ Params: { id: string; userId: string } }>(
+    "/api/v1/projects/:id/user-members/:userId",
+    async (req, reply) => {
+      const { rows: project } = await db.query(
+        `select id from projects where id::text = $1 or lower(slug) = lower($1)`,
+        [req.params.id]
+      );
+      if (!project[0]) return reply.status(404).send({ ok: false, error: "project not found" });
+      await db.query(
+        `delete from project_user_members where project_id = $1 and user_id = $2`,
+        [project[0].id, req.params.userId]
       );
       return { ok: true };
     }

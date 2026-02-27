@@ -3,7 +3,7 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Plus, Search, FolderKanban, Users, TrendingUp, X } from "lucide-react";
+import { Plus, Search, FolderKanban, Users, TrendingUp, X, Share2 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { type Project } from "@/lib/projects";
 import { fetchProjects, createProject } from "@/lib/api";
@@ -28,7 +28,8 @@ function ProgressBar({ value }: { value: number }) {
 
 function ProjectCard({ project }: { project: Project }) {
   const { label, cls } = statusLabel(project.status);
-  const progress = project.progress ?? 0;
+  const progress  = project.progress ?? 0;
+  const isShared  = (project as unknown as { my_role?: string }).my_role === "member";
 
   return (
     <Link
@@ -46,9 +47,16 @@ function ProjectCard({ project }: { project: Project }) {
             <FolderKanban className="h-5 w-5 text-brand-600 dark:text-brand-400" />
           </div>
           <div>
-            <p className="font-display font-bold text-zinc-900 dark:text-white group-hover:text-brand-600 dark:group-hover:text-brand-400 transition-colors">
-              {project.name}
-            </p>
+            <div className="flex items-center gap-2">
+              <p className="font-display font-bold text-zinc-900 dark:text-white group-hover:text-brand-600 dark:group-hover:text-brand-400 transition-colors">
+                {project.name}
+              </p>
+              {isShared && (
+                <span className="flex items-center gap-1 rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-semibold text-sky-700 dark:bg-sky-500/10 dark:text-sky-400">
+                  <Share2 className="h-2.5 w-2.5" /> Shared
+                </span>
+              )}
+            </div>
             <p className="text-xs text-zinc-400">/{project.slug ?? project.id}</p>
           </div>
         </div>

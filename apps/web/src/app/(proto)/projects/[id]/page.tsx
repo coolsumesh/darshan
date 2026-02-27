@@ -9,6 +9,7 @@ import {
   ArrowLeft, BookOpen, Calendar, ChevronDown, ExternalLink,
   FileCode2, Filter, GripVertical, LayoutList, Zap,
   MoreHorizontal, Plus, Search, SortAsc, UserPlus, Users, X, Trash2, Check,
+  Mail, Crown, UserCircle,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -22,7 +23,10 @@ import {
   addTeamMember, removeTeamMember,
   fetchArchitecture, fetchTechSpec,
   pingAgent,
+  fetchUserMembers, addUserMember, removeUserMember,
+  authMe,
   type TeamMemberWithAgent,
+  type UserMember,
 } from "@/lib/api";
 import { type Agent } from "@/lib/agents";
 
@@ -1143,6 +1147,148 @@ function TechSpecTab({ projectId }: { projectId: string }) {
   return <Card><CardHeader><CardTitle>Technical Specification</CardTitle></CardHeader><CardContent><MarkdownContent content={content} /></CardContent></Card>;
 }
 
+// ─── User Members Section (human collaborators) ───────────────────────────────
+const USER_ROLES = ["member", "admin"] as const;
+
+function UserMembersSection({ projectId }: { projectId: string }) {
+  const [members,  setMembers]  = React.useState<UserMember[]>([]);
+  const [me,       setMe]       = React.useState<{ id: string } | null>(null);
+  const [showAdd,  setShowAdd]  = React.useState(false);
+  const [email,    setEmail]    = React.useState("");
+  const [role,     setRole]     = React.useState<"member" | "admin">("member");
+  const [adding,   setAdding]   = React.useState(false);
+  const [addError, setAddError] = React.useState<string | null>(null);
+  const [removing, setRemoving] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    fetchUserMembers(projectId).then(setMembers);
+    authMe().then((u) => setMe(u ? { id: u.id } : null));
+  }, [projectId]);
+
+  async function handleAdd() {
+    if (!email.trim()) return;
+    setAdding(true); setAddError(null);
+    const result = await addUserMember(projectId, email.trim(), role);
+    if (result) {
+      setMembers((prev) => [...prev.filter((m) => m.user_id !== result.user_id), result]);
+      setEmail(""); setShowAdd(false);
+    } else {
+      setAddError("No account found with that email, or they're already a member.");
+    }
+    setAdding(false);
+  }
+
+  async function handleRemove(userId: string) {
+    setRemoving(userId);
+    await removeUserMember(projectId, userId);
+    setMembers((prev) => prev.filter((m) => m.user_id !== userId));
+    setRemoving(null);
+  }
+
+  const ROLE_META: Record<string, { label: string; bg: string; text: string }> = {
+    owner:  { label: "Owner",  bg: "bg-amber-100",  text: "text-amber-700"  },
+    admin:  { label: "Admin",  bg: "bg-violet-100", text: "text-violet-700" },
+    member: { label: "Member", bg: "bg-zinc-100",   text: "text-zinc-600"   },
+  };
+
+  return (
+    <div className="mb-6">
+      <div className="mb-3 flex items-center justify-between">
+        <div>
+          <h3 className="text-sm font-semibold text-zinc-900 dark:text-white">Collaborators</h3>
+          <p className="text-xs text-zinc-400">{members.length} user{members.length !== 1 ? "s" : ""} with access</p>
+        </div>
+        <button
+          onClick={() => { setShowAdd((v) => !v); setAddError(null); }}
+          className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-violet-600 hover:bg-violet-50 dark:hover:bg-violet-500/10 transition-colors"
+        >
+          <UserPlus className="h-3.5 w-3.5" /> Add
+        </button>
+      </div>
+
+      {showAdd && (
+        <div className="mb-3 rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-[#2D2A45] dark:bg-[#0F0D1E]">
+          <p className="mb-2 text-xs font-semibold text-zinc-600 dark:text-zinc-300">Add collaborator by email</p>
+          <div className="flex gap-2">
+            <div className="relative flex-1">
+              <Mail className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-400" />
+              <input
+                autoFocus
+                type="email"
+                placeholder="name@example.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") handleAdd(); if (e.key === "Escape") setShowAdd(false); }}
+                className="w-full rounded-lg border-0 bg-white py-2 pl-8 pr-3 text-sm ring-1 ring-zinc-200 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-brand-400/40 dark:bg-zinc-900 dark:ring-zinc-700 dark:text-zinc-100"
+              />
+            </div>
+            <select
+              value={role}
+              onChange={(e) => setRole(e.target.value as "member" | "admin")}
+              className="rounded-lg border-0 bg-white px-2 py-2 text-sm ring-1 ring-zinc-200 focus:outline-none focus:ring-2 focus:ring-brand-400/40 dark:bg-zinc-900 dark:ring-zinc-700 dark:text-zinc-100"
+            >
+              {USER_ROLES.map((r) => <option key={r} value={r}>{r.charAt(0).toUpperCase() + r.slice(1)}</option>)}
+            </select>
+            <button
+              onClick={handleAdd}
+              disabled={adding || !email.trim()}
+              className="rounded-lg bg-violet-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:opacity-50"
+            >
+              {adding ? "Adding…" : "Add"}
+            </button>
+          </div>
+          {addError && <p className="mt-2 text-xs text-red-500">{addError}</p>}
+        </div>
+      )}
+
+      <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white dark:border-[#2D2A45] dark:bg-[#16132A]">
+        {members.length === 0 ? (
+          <div className="py-6 text-center text-sm text-zinc-400">
+            Only you have access. Add collaborators above.
+          </div>
+        ) : (
+          members.map((m, i) => {
+            const meta  = ROLE_META[m.role] ?? ROLE_META.member;
+            const isMe  = me?.id === m.user_id;
+            return (
+              <div key={m.user_id} className={cn(
+                "flex items-center gap-3 px-4 py-3",
+                i !== 0 && "border-t border-zinc-100 dark:border-[#2D2A45]"
+              )}>
+                <div className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-brand-100 text-sm font-bold text-brand-700 dark:bg-brand-500/10 dark:text-brand-400 uppercase">
+                  {m.name.charAt(0)}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-semibold text-zinc-900 dark:text-white truncate">{m.name}</span>
+                    {isMe && <span className="rounded-full bg-zinc-100 px-1.5 py-px text-[10px] font-semibold text-zinc-500 dark:bg-white/10">you</span>}
+                  </div>
+                  <span className="text-xs text-zinc-400 truncate">{m.email}</span>
+                </div>
+                <span className={cn("rounded-full px-2.5 py-0.5 text-xs font-semibold shrink-0", meta.bg, meta.text)}>
+                  {meta.label}
+                </span>
+                {m.role !== "owner" && !isMe && (
+                  <button
+                    onClick={() => handleRemove(m.user_id)}
+                    disabled={removing === m.user_id}
+                    className="grid h-7 w-7 shrink-0 place-items-center rounded-lg text-zinc-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-500/10 transition-colors disabled:opacity-40"
+                    title="Remove access"
+                  >
+                    {removing === m.user_id
+                      ? <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-zinc-300 border-t-transparent inline-block" />
+                      : <X className="h-3.5 w-3.5" />}
+                  </button>
+                )}
+              </div>
+            );
+          })
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── Team Tab ──────────────────────────────────────────────────────────────────
 const TEAM_ROLES = ["Member", "Coordinator", "Developer", "Reviewer", "Observer"];
 
@@ -1395,12 +1541,22 @@ function TeamTab({ projectId }: { projectId: string }) {
 
   return (
     <>
+      {/* Human collaborators */}
+      <UserMembersSection projectId={projectId} />
+
+      {/* Divider */}
+      <div className="mb-4 flex items-center gap-3">
+        <div className="h-px flex-1 bg-zinc-100 dark:bg-[#2D2A45]" />
+        <span className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Agents</span>
+        <div className="h-px flex-1 bg-zinc-100 dark:bg-[#2D2A45]" />
+      </div>
+
       {/* Header */}
       <div className="mb-4 flex items-center justify-between">
         <div>
-          <h2 className="font-display text-lg font-bold text-zinc-900 dark:text-white">Team</h2>
+          <h2 className="font-display text-lg font-bold text-zinc-900 dark:text-white">Agent Team</h2>
           <p className="text-xs text-zinc-500">
-            {team.length} member{team.length !== 1 ? "s" : ""} · {team.filter(m => m.agent?.status === "online").length} online
+            {team.length} agent{team.length !== 1 ? "s" : ""} · {team.filter(m => m.agent?.status === "online").length} online
           </p>
         </div>
         <button
