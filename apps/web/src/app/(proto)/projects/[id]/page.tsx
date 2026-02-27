@@ -1150,7 +1150,7 @@ function TechSpecTab({ projectId }: { projectId: string }) {
 // ─── User Members Section (human collaborators) ───────────────────────────────
 const USER_ROLES = ["member", "admin"] as const;
 
-function UserMembersSection({ projectId }: { projectId: string }) {
+function UserMembersSection({ projectId, canAdmin }: { projectId: string; canAdmin: boolean }) {
   const [members,  setMembers]  = React.useState<UserMember[]>([]);
   const [me,       setMe]       = React.useState<{ id: string } | null>(null);
   const [showAdd,  setShowAdd]  = React.useState(false);
@@ -1198,15 +1198,17 @@ function UserMembersSection({ projectId }: { projectId: string }) {
           <h3 className="text-sm font-semibold text-zinc-900 dark:text-white">Collaborators</h3>
           <p className="text-xs text-zinc-400">{members.length} user{members.length !== 1 ? "s" : ""} with access</p>
         </div>
-        <button
-          onClick={() => { setShowAdd((v) => !v); setAddError(null); }}
-          className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-violet-600 hover:bg-violet-50 dark:hover:bg-violet-500/10 transition-colors"
-        >
-          <UserPlus className="h-3.5 w-3.5" /> Add
-        </button>
+        {canAdmin && (
+          <button
+            onClick={() => { setShowAdd((v) => !v); setAddError(null); }}
+            className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-violet-600 hover:bg-violet-50 dark:hover:bg-violet-500/10 transition-colors"
+          >
+            <UserPlus className="h-3.5 w-3.5" /> Add
+          </button>
+        )}
       </div>
 
-      {showAdd && (
+      {showAdd && canAdmin && (
         <div className="mb-3 rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-[#2D2A45] dark:bg-[#0F0D1E]">
           <p className="mb-2 text-xs font-semibold text-zinc-600 dark:text-zinc-300">Add collaborator by email</p>
           <div className="flex gap-2">
@@ -1244,7 +1246,7 @@ function UserMembersSection({ projectId }: { projectId: string }) {
       <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white dark:border-[#2D2A45] dark:bg-[#16132A]">
         {members.length === 0 ? (
           <div className="py-6 text-center text-sm text-zinc-400">
-            Only you have access. Add collaborators above.
+            {canAdmin ? "Only you have access. Add collaborators above." : "No other collaborators on this project."}
           </div>
         ) : (
           members.map((m, i) => {
@@ -1278,7 +1280,7 @@ function UserMembersSection({ projectId }: { projectId: string }) {
                 <span className={cn("rounded-full px-2.5 py-0.5 text-xs font-semibold shrink-0", meta.bg, meta.text)}>
                   {meta.label}
                 </span>
-                {m.role !== "owner" && !isMe && (
+                {canAdmin && m.role !== "owner" && !isMe && (
                   <button
                     onClick={() => handleRemove(m.user_id)}
                     disabled={removing === m.user_id}
@@ -1398,8 +1400,8 @@ function AgentRegistryPanel({ agents, onAdd, onClose, alreadyAdded }: {
   );
 }
 
-function TeamMemberRow({ m, projectId, pinging, pingMeta, onPing, onRemove, onRoleChange }: {
-  m: TeamMemberWithAgent; projectId: string; pinging: boolean;
+function TeamMemberRow({ m, projectId, pinging, pingMeta, onPing, onRemove, onRoleChange, canAdmin }: {
+  m: TeamMemberWithAgent; projectId: string; pinging: boolean; canAdmin: boolean;
   pingMeta: Record<string, { dot: string; label: string }>;
   onPing: () => void; onRemove: () => void; onRoleChange: (role: string) => void;
 }) {
@@ -1460,7 +1462,7 @@ function TeamMemberRow({ m, projectId, pinging, pingMeta, onPing, onRemove, onRo
         </div>
         {/* Role */}
         <div className="w-28 shrink-0">
-          {editingRole ? (
+          {canAdmin && editingRole ? (
             <select autoFocus defaultValue={m.role}
               onBlur={() => setEditingRole(false)}
               onChange={(e) => { onRoleChange(e.target.value); setEditingRole(false); }}
@@ -1468,8 +1470,9 @@ function TeamMemberRow({ m, projectId, pinging, pingMeta, onPing, onRemove, onRo
               {TEAM_ROLES.map(r => <option key={r}>{r}</option>)}
             </select>
           ) : (
-            <button onClick={() => setEditingRole(true)}
-              className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-semibold text-zinc-600 hover:bg-violet-100 hover:text-violet-700 transition-colors dark:bg-white/10 dark:text-zinc-400 capitalize">
+            <button onClick={() => canAdmin && setEditingRole(true)}
+              className={cn("rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-semibold text-zinc-600 dark:bg-white/10 dark:text-zinc-400 capitalize",
+                canAdmin && "hover:bg-violet-100 hover:text-violet-700 transition-colors")}>
               {m.role}
             </button>
           )}
@@ -1500,17 +1503,19 @@ function TeamMemberRow({ m, projectId, pinging, pingMeta, onPing, onRemove, onRo
             className="grid h-6 w-6 place-items-center rounded text-zinc-400 hover:bg-zinc-200 hover:text-zinc-700 dark:hover:bg-white/10 transition-colors disabled:opacity-40">
             <Zap className="h-3.5 w-3.5" />
           </button>
-          <button onClick={onRemove} title="Remove"
-            className="grid h-6 w-6 place-items-center rounded text-zinc-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-500/10 transition-colors">
-            <Trash2 className="h-3.5 w-3.5" />
-          </button>
+          {canAdmin && (
+            <button onClick={onRemove} title="Remove"
+              className="grid h-6 w-6 place-items-center rounded text-zinc-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-500/10 transition-colors">
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          )}
         </div>
       </div>
     </div>
   );
 }
 
-function TeamTab({ projectId }: { projectId: string }) {
+function TeamTab({ projectId, canAdmin }: { projectId: string; canAdmin: boolean }) {
   const [team,         setTeam]         = React.useState<TeamMemberWithAgent[]>([]);
   const [allAgents,    setAllAgents]    = React.useState<NonNullable<TeamMemberWithAgent["agent"]>[]>([]);
   const [showRegistry, setShowRegistry] = React.useState(false);
@@ -1552,7 +1557,7 @@ function TeamTab({ projectId }: { projectId: string }) {
   return (
     <>
       {/* Human collaborators */}
-      <UserMembersSection projectId={projectId} />
+      <UserMembersSection projectId={projectId} canAdmin={canAdmin} />
 
       {/* Divider */}
       <div className="mb-4 flex items-center gap-3">
@@ -1569,12 +1574,14 @@ function TeamTab({ projectId }: { projectId: string }) {
             {team.length} agent{team.length !== 1 ? "s" : ""} · {team.filter(m => m.agent?.status === "online").length} online
           </p>
         </div>
-        <button
-          onClick={() => setShowRegistry(true)}
-          className="flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold text-white transition-colors"
-          style={{ backgroundColor: "#7C3AED" }}>
-          <UserPlus className="h-4 w-4" /> Add Agent
-        </button>
+        {canAdmin && (
+          <button
+            onClick={() => setShowRegistry(true)}
+            className="flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold text-white transition-colors"
+            style={{ backgroundColor: "#7C3AED" }}>
+            <UserPlus className="h-4 w-4" /> Add Agent
+          </button>
+        )}
       </div>
 
       {/* Table */}
@@ -1595,8 +1602,10 @@ function TeamTab({ projectId }: { projectId: string }) {
           <div className="flex flex-col items-center gap-3 py-12 text-center">
             <Users className="h-8 w-8 text-zinc-300 dark:text-zinc-600" />
             <p className="text-sm font-medium text-zinc-600 dark:text-zinc-300">No agents yet</p>
-            <button onClick={() => setShowRegistry(true)}
-              className="text-sm font-semibold text-violet-600 hover:underline">Add from registry</button>
+            {canAdmin && (
+              <button onClick={() => setShowRegistry(true)}
+                className="text-sm font-semibold text-violet-600 hover:underline">Add from registry</button>
+            )}
           </div>
         ) : (
           team.map((m) => (
@@ -1606,6 +1615,7 @@ function TeamTab({ projectId }: { projectId: string }) {
               projectId={projectId}
               pinging={pingingIds.has(m.agentId)}
               pingMeta={PING_STATUS_META}
+              canAdmin={canAdmin}
               onPing={() => handlePing(m.agentId)}
               onRemove={() => handleRemove(m.agentId)}
               onRoleChange={async (role) => {
@@ -1616,11 +1626,13 @@ function TeamTab({ projectId }: { projectId: string }) {
           ))
         )}
 
-        {/* Add row */}
-        <button onClick={() => setShowRegistry(true)}
-          className="flex w-full items-center gap-2 border-t border-dashed border-zinc-200 px-6 py-2.5 text-xs text-zinc-400 hover:bg-zinc-50 hover:text-zinc-600 dark:border-[#2D2A45] dark:hover:bg-white/5 transition-colors">
-          <Plus className="h-3.5 w-3.5" /> Add agent
-        </button>
+        {/* Add row — admin only */}
+        {canAdmin && (
+          <button onClick={() => setShowRegistry(true)}
+            className="flex w-full items-center gap-2 border-t border-dashed border-zinc-200 px-6 py-2.5 text-xs text-zinc-400 hover:bg-zinc-50 hover:text-zinc-600 dark:border-[#2D2A45] dark:hover:bg-white/5 transition-colors">
+            <Plus className="h-3.5 w-3.5" /> Add agent
+          </button>
+        )}
       </div>
 
       {showRegistry && (
@@ -1840,7 +1852,7 @@ export default function ProjectDetailPage(props: { params: Promise<{ id: string 
             newTaskSignal={newTaskSignal}
           />
         )}
-        {activeTab === "team"          && <TeamTab         projectId={project.id} />}
+        {activeTab === "team"          && <TeamTab         projectId={project.id} canAdmin={(project as unknown as { my_role?: string }).my_role !== "member"} />}
         {activeTab === "architecture"  && <ArchitectureTab projectId={project.slug ?? project.id} />}
         {activeTab === "tech-spec"     && <TechSpecTab     projectId={project.slug ?? project.id} />}
       </div>

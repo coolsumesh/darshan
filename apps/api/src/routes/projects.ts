@@ -3,7 +3,47 @@ import type pg from "pg";
 import { broadcast } from "../broadcast.js";
 import { getRequestUser } from "./auth.js";
 
+// ── Role hierarchy ─────────────────────────────────────────────────────────────
+type ProjectRole = "owner" | "admin" | "member";
+const ROLE_RANK: Record<ProjectRole, number> = { owner: 3, admin: 2, member: 1 };
+
 export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
+
+  // ── Access helper ──────────────────────────────────────────────────────────
+  // Resolves project by id/slug AND checks caller's role in one shot.
+  // Returns { projectId, role } on success, or { deny: 404|403 } on failure.
+  // API-key / unauthenticated callers (no cookie) are treated as owner-level
+  // so agent workflows continue to work unimpeded.
+  async function checkAccess(
+    idOrSlug: string,
+    req: { cookies?: unknown },
+    minRole: ProjectRole = "member"
+  ): Promise<{ projectId: string; role: ProjectRole } | { deny: 404 | 403 }> {
+    const { rows } = await db.query(
+      `select id, owner_user_id from projects where id::text = $1 or lower(slug) = lower($1)`,
+      [idOrSlug]
+    );
+    if (!rows[0]) return { deny: 404 };
+
+    const userId = getRequestUser(req)?.userId ?? null;
+    // No cookie = API-key request → full owner-level access
+    if (!userId) return { projectId: rows[0].id, role: "owner" };
+
+    let role: ProjectRole;
+    if (rows[0].owner_user_id === userId) {
+      role = "owner";
+    } else {
+      const { rows: mr } = await db.query(
+        `select role from project_user_members where project_id = $1 and user_id = $2`,
+        [rows[0].id, userId]
+      );
+      if (!mr[0]) return { deny: 403 };
+      role = mr[0].role as ProjectRole;
+    }
+
+    if (ROLE_RANK[role] < ROLE_RANK[minRole]) return { deny: 403 };
+    return { projectId: rows[0].id, role };
+  }
 
   // ── List all projects ──────────────────────────────────────────────────────
   server.get("/api/v1/projects", async (req) => {
@@ -40,6 +80,8 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
   server.get<{ Params: { id: string } }>(
     "/api/v1/projects/:id",
     async (req, reply) => {
+      const access = await checkAccess(req.params.id, req, "member");
+      if ("deny" in access) return reply.status(access.deny).send({ ok: false, error: access.deny === 404 ? "project not found" : "forbidden" });
       const { rows } = await db.query(
         `select p.*,
                 count(distinct pt.agent_id)::int as team_size,
@@ -47,12 +89,11 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
          from projects p
          left join project_team pt on pt.project_id = p.id
          left join tasks t on t.project_id = p.id
-         where p.id::text = $1 or lower(p.slug) = lower($1)
+         where p.id = $1
          group by p.id`,
-        [req.params.id]
+        [access.projectId]
       );
-      if (!rows[0]) return reply.status(404).send({ ok: false, error: "project not found" });
-      return { ok: true, project: rows[0] };
+      return { ok: true, project: { ...rows[0], my_role: access.role } };
     }
   );
 
@@ -72,10 +113,13 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
     }
   );
 
-  // ── Update project ─────────────────────────────────────────────────────────
+  // ── Update project — admin+ ────────────────────────────────────────────────
   server.patch<{ Params: { id: string }; Body: Record<string, unknown> }>(
     "/api/v1/projects/:id",
     async (req, reply) => {
+      const access = await checkAccess(req.params.id, req, "admin");
+      if ("deny" in access) return reply.status(access.deny).send({ ok: false, error: access.deny === 404 ? "project not found" : "forbidden" });
+
       const allowed = ["name", "description", "status", "progress"];
       const sets: string[] = [];
       const vals: unknown[] = [];
@@ -86,82 +130,80 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
         }
       }
       if (!sets.length) return reply.status(400).send({ ok: false, error: "nothing to update" });
-      vals.push(req.params.id);
+      vals.push(access.projectId);
       const { rows } = await db.query(
-        `update projects set ${sets.join(", ")}, updated_at = now()
-         where id::text = $${vals.length} or lower(slug) = lower($${vals.length}) returning *`,
+        `update projects set ${sets.join(", ")}, updated_at = now() where id = $${vals.length} returning *`,
         vals
       );
-      if (!rows[0]) return reply.status(404).send({ ok: false, error: "project not found" });
       return { ok: true, project: rows[0] };
     }
   );
 
-  // ── Get architecture doc ───────────────────────────────────────────────────
+  // ── Get architecture doc — member+ ─────────────────────────────────────────
   server.get<{ Params: { id: string } }>(
     "/api/v1/projects/:id/architecture",
     async (req, reply) => {
+      const access = await checkAccess(req.params.id, req, "member");
+      if ("deny" in access) return reply.status(access.deny).send({ ok: false, error: access.deny === 404 ? "project not found" : "forbidden" });
       const { rows } = await db.query(
-        `select architecture_doc as content from projects where id::text = $1 or lower(slug) = lower($1)`,
-        [req.params.id]
+        `select architecture_doc as content from projects where id = $1`,
+        [access.projectId]
       );
-      if (!rows[0]) return reply.status(404).send({ ok: false, error: "project not found" });
-      return { ok: true, content: rows[0].content };
+      return { ok: true, content: rows[0]?.content ?? null };
     }
   );
 
-  // ── Update architecture doc ────────────────────────────────────────────────
+  // ── Update architecture doc — admin+ ──────────────────────────────────────
   server.patch<{ Params: { id: string }; Body: { content: string } }>(
     "/api/v1/projects/:id/architecture",
     async (req, reply) => {
-      const { rows } = await db.query(
-        `update projects set architecture_doc = $1, updated_at = now()
-         where id::text = $2 or lower(slug) = lower($2) returning id`,
-        [req.body.content, req.params.id]
+      const access = await checkAccess(req.params.id, req, "admin");
+      if ("deny" in access) return reply.status(access.deny).send({ ok: false, error: access.deny === 404 ? "project not found" : "forbidden" });
+      await db.query(
+        `update projects set architecture_doc = $1, updated_at = now() where id = $2`,
+        [req.body.content, access.projectId]
       );
-      if (!rows[0]) return reply.status(404).send({ ok: false, error: "project not found" });
       return { ok: true };
     }
   );
 
-  // ── Get tech spec doc ──────────────────────────────────────────────────────
+  // ── Get tech spec doc — member+ ────────────────────────────────────────────
   server.get<{ Params: { id: string } }>(
     "/api/v1/projects/:id/tech-spec",
     async (req, reply) => {
+      const access = await checkAccess(req.params.id, req, "member");
+      if ("deny" in access) return reply.status(access.deny).send({ ok: false, error: access.deny === 404 ? "project not found" : "forbidden" });
       const { rows } = await db.query(
-        `select tech_spec_doc as content from projects where id::text = $1 or lower(slug) = lower($1)`,
-        [req.params.id]
+        `select tech_spec_doc as content from projects where id = $1`,
+        [access.projectId]
       );
-      if (!rows[0]) return reply.status(404).send({ ok: false, error: "project not found" });
-      return { ok: true, content: rows[0].content };
+      return { ok: true, content: rows[0]?.content ?? null };
     }
   );
 
-  // ── Update tech spec doc ───────────────────────────────────────────────────
+  // ── Update tech spec doc — admin+ ─────────────────────────────────────────
   server.patch<{ Params: { id: string }; Body: { content: string } }>(
     "/api/v1/projects/:id/tech-spec",
     async (req, reply) => {
-      const { rows } = await db.query(
-        `update projects set tech_spec_doc = $1, updated_at = now()
-         where id::text = $2 or lower(slug) = lower($2) returning id`,
-        [req.body.content, req.params.id]
+      const access = await checkAccess(req.params.id, req, "admin");
+      if ("deny" in access) return reply.status(access.deny).send({ ok: false, error: access.deny === 404 ? "project not found" : "forbidden" });
+      await db.query(
+        `update projects set tech_spec_doc = $1, updated_at = now() where id = $2`,
+        [req.body.content, access.projectId]
       );
-      if (!rows[0]) return reply.status(404).send({ ok: false, error: "project not found" });
       return { ok: true };
     }
   );
 
-  // ── List tasks for project ─────────────────────────────────────────────────
+  // ── List tasks — member+ ───────────────────────────────────────────────────
   server.get<{ Params: { id: string }; Querystring: { status?: string; assignee?: string } }>(
     "/api/v1/projects/:id/tasks",
     async (req, reply) => {
-      const { rows: project } = await db.query(
-        `select id from projects where id::text = $1 or lower(slug) = lower($1)`,
-        [req.params.id]
-      );
-      if (!project[0]) return reply.status(404).send({ ok: false, error: "project not found" });
+      const access = await checkAccess(req.params.id, req, "member");
+      if ("deny" in access) return reply.status(access.deny).send({ ok: false, error: access.deny === 404 ? "project not found" : "forbidden" });
+
       const conditions = ["project_id = $1"];
-      const vals: unknown[] = [project[0].id];
+      const vals: unknown[] = [access.projectId];
       if (req.query.status) {
         vals.push(req.query.status);
         conditions.push(`status = $${vals.length}`);
@@ -178,7 +220,7 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
     }
   );
 
-  // ── Helper: write task_assigned to agent inbox by agent name ───────────────
+  // ── Helper: write task_assigned to agent inbox ─────────────────────────────
   async function notifyAgentInbox(agentName: string, task: Record<string, unknown>) {
     if (!agentName) return;
     const { rows: agents } = await db.query(
@@ -187,8 +229,7 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
     );
     if (!agents[0]) return;
     await db.query(
-      `insert into agent_inbox (agent_id, type, payload)
-       values ($1, 'task_assigned', $2)`,
+      `insert into agent_inbox (agent_id, type, payload) values ($1, 'task_assigned', $2)`,
       [
         agents[0].id,
         JSON.stringify({
@@ -205,19 +246,16 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
     );
   }
 
-  // ── Create task ────────────────────────────────────────────────────────────
+  // ── Create task — member+ ──────────────────────────────────────────────────
   server.post<{ Params: { id: string }; Body: { title: string; description?: string; proposer?: string; assignee?: string; status?: string; priority?: string; type?: string; estimated_sp?: number; due_date?: string } }>(
     "/api/v1/projects/:id/tasks",
     async (req, reply) => {
-      const { rows: project } = await db.query(
-        `select id from projects where id::text = $1 or lower(slug) = lower($1)`,
-        [req.params.id]
-      );
-      if (!project[0]) return reply.status(404).send({ ok: false, error: "project not found" });
+      const access = await checkAccess(req.params.id, req, "member");
+      if ("deny" in access) return reply.status(access.deny).send({ ok: false, error: access.deny === 404 ? "project not found" : "forbidden" });
+
       const { title, description = "", assignee, status = "proposed", priority = "medium", type = "Task", due_date } = req.body;
       if (!title) return reply.status(400).send({ ok: false, error: "title required" });
 
-      // Resolve requestor from auth user (cookie session) or fallback to body proposer
       const authUser = getRequestUser(req);
       const requestorName = authUser?.name ?? req.body.proposer ?? null;
       let requestorOrg: string | null = null;
@@ -232,7 +270,7 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
       const { rows } = await db.query(
         `insert into tasks (project_id, title, description, proposer, requestor_org, assignee, status, priority, type, due_date)
          values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) returning *`,
-        [project[0].id, title, description, requestorName, requestorOrg, assignee ?? null, status, priority, type, due_date ?? null]
+        [access.projectId, title, description, requestorName, requestorOrg, assignee ?? null, status, priority, type, due_date ?? null]
       );
       broadcast("task:created", { task: rows[0] });
       if (assignee) await notifyAgentInbox(assignee, rows[0]);
@@ -240,20 +278,20 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
     }
   );
 
-  // ── Delete task ────────────────────────────────────────────────────────────
+  // ── Delete task — admin+ ───────────────────────────────────────────────────
   server.delete<{ Params: { id: string; taskId: string } }>(
     "/api/v1/projects/:id/tasks/:taskId",
     async (req, reply) => {
+      const access = await checkAccess(req.params.id, req, "admin");
+      if ("deny" in access) return reply.status(access.deny).send({ ok: false, error: access.deny === 404 ? "project not found" : "forbidden" });
+
       const { rowCount } = await db.query(
-        `delete from tasks where id = $1 returning id`,
-        [req.params.taskId]
+        `delete from tasks where id = $1 and project_id = $2 returning id`,
+        [req.params.taskId, access.projectId]
       );
       if (!rowCount) return reply.status(404).send({ ok: false, error: "task not found" });
-      // Remove all inbox items for this task so agents don't act on deleted tasks
       await db.query(
-        `delete from agent_inbox
-         where type = 'task_assigned'
-           and payload->>'task_id' = $1`,
+        `delete from agent_inbox where type = 'task_assigned' and payload->>'task_id' = $1`,
         [req.params.taskId]
       );
       broadcast("task:deleted", { taskId: req.params.taskId });
@@ -261,10 +299,13 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
     }
   );
 
-  // ── Update task ────────────────────────────────────────────────────────────
+  // ── Update task — member+ ──────────────────────────────────────────────────
   server.patch<{ Params: { id: string; taskId: string }; Body: Record<string, unknown> }>(
     "/api/v1/projects/:id/tasks/:taskId",
     async (req, reply) => {
+      const access = await checkAccess(req.params.id, req, "member");
+      if ("deny" in access) return reply.status(access.deny).send({ ok: false, error: access.deny === 404 ? "project not found" : "forbidden" });
+
       const allowed = ["title", "description", "status", "assignee", "proposer", "type", "estimated_sp", "priority", "due_date"];
       const sets: string[] = [];
       const vals: unknown[] = [];
@@ -276,25 +317,22 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
       }
       if (!sets.length) return reply.status(400).send({ ok: false, error: "nothing to update" });
 
-      // Fetch old task so we can detect assignee changes
       const { rows: before } = await db.query(
-        `select assignee from tasks where id = $1`, [req.params.taskId]
+        `select assignee from tasks where id = $1 and project_id = $2`,
+        [req.params.taskId, access.projectId]
       );
+      if (!before[0]) return reply.status(404).send({ ok: false, error: "task not found" });
       const oldAssignee: string | null = before[0]?.assignee ?? null;
 
       vals.push(req.params.taskId);
       const { rows } = await db.query(
-        `update tasks set ${sets.join(", ")}, updated_at = now()
-         where id = $${vals.length} returning *`,
+        `update tasks set ${sets.join(", ")}, updated_at = now() where id = $${vals.length} returning *`,
         vals
       );
-      if (!rows[0]) return reply.status(404).send({ ok: false, error: "task not found" });
       broadcast("task:updated", { task: rows[0] });
 
-      // Handle assignee change
       const newAssignee = req.body.assignee as string | undefined;
       if (newAssignee !== undefined) {
-        // Remove old agent's pending inbox item for this task (if any)
         if (oldAssignee) {
           await db.query(
             `delete from agent_inbox
@@ -304,22 +342,18 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
             [req.params.taskId, oldAssignee]
           );
         }
-        // Notify new agent (if set)
         if (newAssignee) await notifyAgentInbox(newAssignee, rows[0]);
       }
       return { ok: true, task: rows[0] };
     }
   );
 
-  // ── Get team for project ───────────────────────────────────────────────────
+  // ── Get agent team — member+ ───────────────────────────────────────────────
   server.get<{ Params: { id: string } }>(
     "/api/v1/projects/:id/team",
     async (req, reply) => {
-      const { rows: project } = await db.query(
-        `select id from projects where id::text = $1 or lower(slug) = lower($1)`,
-        [req.params.id]
-      );
-      if (!project[0]) return reply.status(404).send({ ok: false, error: "project not found" });
+      const access = await checkAccess(req.params.id, req, "member");
+      if ("deny" in access) return reply.status(access.deny).send({ ok: false, error: access.deny === 404 ? "project not found" : "forbidden" });
       const { rows } = await db.query(
         `select pt.id, pt.role, pt.joined_at,
                 a.id as agent_id, a.name, a.status, a.description,
@@ -331,21 +365,19 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
          left join organisations o on o.id = a.org_id
          where pt.project_id = $1
          order by pt.joined_at asc`,
-        [project[0].id]
+        [access.projectId]
       );
       return { ok: true, team: rows };
     }
   );
 
-  // ── Add agent to project team ──────────────────────────────────────────────
+  // ── Add agent to team — admin+ ─────────────────────────────────────────────
   server.post<{ Params: { id: string }; Body: { agent_id: string; role?: string } }>(
     "/api/v1/projects/:id/team",
     async (req, reply) => {
-      const { rows: project } = await db.query(
-        `select id from projects where id::text = $1 or lower(slug) = lower($1)`,
-        [req.params.id]
-      );
-      if (!project[0]) return reply.status(404).send({ ok: false, error: "project not found" });
+      const access = await checkAccess(req.params.id, req, "admin");
+      if ("deny" in access) return reply.status(access.deny).send({ ok: false, error: access.deny === 404 ? "project not found" : "forbidden" });
+
       const { agent_id, role = "Member" } = req.body;
       if (!agent_id) return reply.status(400).send({ ok: false, error: "agent_id required" });
       const { rows } = await db.query(
@@ -353,38 +385,32 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
          values ($1, $2, $3)
          on conflict (project_id, agent_id) do update set role = excluded.role
          returning *`,
-        [project[0].id, agent_id, role]
+        [access.projectId, agent_id, role]
       );
       return reply.status(201).send({ ok: true, member: rows[0] });
     }
   );
 
-  // ── Remove agent from project team ────────────────────────────────────────
+  // ── Remove agent from team — admin+ ───────────────────────────────────────
   server.delete<{ Params: { id: string; agentId: string } }>(
     "/api/v1/projects/:id/team/:agentId",
     async (req, reply) => {
-      const { rows: project } = await db.query(
-        `select id from projects where id::text = $1 or lower(slug) = lower($1)`,
-        [req.params.id]
-      );
-      if (!project[0]) return reply.status(404).send({ ok: false, error: "project not found" });
+      const access = await checkAccess(req.params.id, req, "admin");
+      if ("deny" in access) return reply.status(access.deny).send({ ok: false, error: access.deny === 404 ? "project not found" : "forbidden" });
       await db.query(
         `delete from project_team where project_id = $1 and agent_id = $2`,
-        [project[0].id, req.params.agentId]
+        [access.projectId, req.params.agentId]
       );
       return { ok: true };
     }
   );
 
-  // ── List user members (human collaborators) ────────────────────────────────
+  // ── List user members — member+ ────────────────────────────────────────────
   server.get<{ Params: { id: string } }>(
     "/api/v1/projects/:id/user-members",
     async (req, reply) => {
-      const { rows: project } = await db.query(
-        `select id from projects where id::text = $1 or lower(slug) = lower($1)`,
-        [req.params.id]
-      );
-      if (!project[0]) return reply.status(404).send({ ok: false, error: "project not found" });
+      const access = await checkAccess(req.params.id, req, "member");
+      if ("deny" in access) return reply.status(access.deny).send({ ok: false, error: access.deny === 404 ? "project not found" : "forbidden" });
       const { rows } = await db.query(
         `select pum.id, pum.role, pum.joined_at,
                 u.id as user_id, u.email, u.name, u.avatar_url,
@@ -394,21 +420,18 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
          left join users inv on inv.id = pum.invited_by
          where pum.project_id = $1
          order by pum.joined_at asc`,
-        [project[0].id]
+        [access.projectId]
       );
       return { ok: true, members: rows };
     }
   );
 
-  // ── Add user member by email ───────────────────────────────────────────────
+  // ── Add user member by email — admin+ ─────────────────────────────────────
   server.post<{ Params: { id: string }; Body: { email: string; role?: string } }>(
     "/api/v1/projects/:id/user-members",
     async (req, reply) => {
-      const { rows: project } = await db.query(
-        `select id from projects where id::text = $1 or lower(slug) = lower($1)`,
-        [req.params.id]
-      );
-      if (!project[0]) return reply.status(404).send({ ok: false, error: "project not found" });
+      const access = await checkAccess(req.params.id, req, "admin");
+      if ("deny" in access) return reply.status(access.deny).send({ ok: false, error: access.deny === 404 ? "project not found" : "forbidden" });
 
       const { email, role = "member" } = req.body;
       if (!email) return reply.status(400).send({ ok: false, error: "email required" });
@@ -425,24 +448,21 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
          values ($1, $2, $3, $4)
          on conflict (project_id, user_id) do update set role = excluded.role
          returning *`,
-        [project[0].id, users[0].id, role, invitedBy]
+        [access.projectId, users[0].id, role, invitedBy]
       );
       return reply.status(201).send({ ok: true, member: { ...rows[0], user_id: users[0].id, email: users[0].email, name: users[0].name } });
     }
   );
 
-  // ── Remove user member ─────────────────────────────────────────────────────
+  // ── Remove user member — admin+ ────────────────────────────────────────────
   server.delete<{ Params: { id: string; userId: string } }>(
     "/api/v1/projects/:id/user-members/:userId",
     async (req, reply) => {
-      const { rows: project } = await db.query(
-        `select id from projects where id::text = $1 or lower(slug) = lower($1)`,
-        [req.params.id]
-      );
-      if (!project[0]) return reply.status(404).send({ ok: false, error: "project not found" });
+      const access = await checkAccess(req.params.id, req, "admin");
+      if ("deny" in access) return reply.status(access.deny).send({ ok: false, error: access.deny === 404 ? "project not found" : "forbidden" });
       await db.query(
         `delete from project_user_members where project_id = $1 and user_id = $2`,
-        [project[0].id, req.params.userId]
+        [access.projectId, req.params.userId]
       );
       return { ok: true };
     }
