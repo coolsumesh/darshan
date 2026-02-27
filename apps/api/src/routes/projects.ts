@@ -387,7 +387,7 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
       if (!project[0]) return reply.status(404).send({ ok: false, error: "project not found" });
       const { rows } = await db.query(
         `select pum.id, pum.role, pum.joined_at,
-                u.id as user_id, u.email, u.name,
+                u.id as user_id, u.email, u.name, u.avatar_url,
                 inv.name as invited_by_name
          from project_user_members pum
          join users u on u.id = pum.user_id

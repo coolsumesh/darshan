@@ -397,6 +397,7 @@ export type UserMember = {
   name: string;
   role: "owner" | "admin" | "member";
   joined_at: string;
+  avatar_url?: string;
   invited_by_name?: string;
 };
 

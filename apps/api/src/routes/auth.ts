@@ -134,18 +134,18 @@ export async function registerAuth(server: FastifyInstance) {
       }
 
       // 2. Get Google user info
-      let googleUser: { sub?: string; email?: string; name?: string };
+      let googleUser: { sub?: string; email?: string; name?: string; picture?: string };
       try {
         const userRes = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
           headers: { Authorization: `Bearer ${tokens.access_token}` },
         });
         if (!userRes.ok) throw new Error("userinfo failed");
-        googleUser = await userRes.json() as { sub?: string; email?: string; name?: string };
+        googleUser = await userRes.json() as { sub?: string; email?: string; name?: string; picture?: string };
       } catch {
         return reply.redirect(`${APP_BASE_URL}/login?error=google_userinfo`, 302);
       }
 
-      const { sub: googleId, email, name } = googleUser;
+      const { sub: googleId, email, name, picture } = googleUser;
       if (!email || !googleId) {
         return reply.redirect(`${APP_BASE_URL}/login?error=google_no_email`, 302);
       }
@@ -158,16 +158,17 @@ export async function registerAuth(server: FastifyInstance) {
 
       let user: { id: string; email: string; name: string; role: string };
       if (existing.rows.length) {
-        // Link google_id if they previously signed up with password
-        if (!existing.rows[0].google_id) {
-          await db.query(`update users set google_id = $1, updated_at = now() where id = $2`, [googleId, existing.rows[0].id]);
-        }
+        // Link google_id and refresh avatar on every login
+        await db.query(
+          `update users set google_id = $1, avatar_url = coalesce($2, avatar_url), updated_at = now() where id = $3`,
+          [googleId, picture ?? null, existing.rows[0].id]
+        );
         user = existing.rows[0];
       } else {
         // Auto-create — Google-only user, no password
         const { rows } = await db.query(
-          `insert into users (email, name, google_id, role) values ($1, $2, $3, 'admin') returning *`,
-          [email, name ?? email.split("@")[0], googleId]
+          `insert into users (email, name, google_id, avatar_url, role) values ($1, $2, $3, $4, 'admin') returning *`,
+          [email, name ?? email.split("@")[0], googleId, picture ?? null]
         );
         user = rows[0];
       }

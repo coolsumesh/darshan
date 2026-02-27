@@ -1255,9 +1255,19 @@ function UserMembersSection({ projectId }: { projectId: string }) {
                 "flex items-center gap-3 px-4 py-3",
                 i !== 0 && "border-t border-zinc-100 dark:border-[#2D2A45]"
               )}>
-                <div className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-brand-100 text-sm font-bold text-brand-700 dark:bg-brand-500/10 dark:text-brand-400 uppercase">
-                  {m.name.charAt(0)}
-                </div>
+                {m.avatar_url ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={m.avatar_url}
+                    alt={m.name}
+                    referrerPolicy="no-referrer"
+                    className="h-8 w-8 shrink-0 rounded-full object-cover ring-1 ring-zinc-200 dark:ring-white/10"
+                  />
+                ) : (
+                  <div className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-brand-100 text-sm font-bold text-brand-700 dark:bg-brand-500/10 dark:text-brand-400 uppercase">
+                    {m.name.charAt(0)}
+                  </div>
+                )}
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-semibold text-zinc-900 dark:text-white truncate">{m.name}</span>
