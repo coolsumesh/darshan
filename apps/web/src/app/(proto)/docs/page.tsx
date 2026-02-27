@@ -1,10 +1,11 @@
 "use client";
-import { FileText, BookOpen, Cpu, ArrowRight } from "lucide-react";
+import { FileText, BookOpen, Cpu, Rocket, ArrowRight } from "lucide-react";
 import Link from "next/link";
 
 const SECTIONS = [
-  { href: "/docs/api",    icon: Cpu,      title: "API Reference",   desc: "REST endpoints for tasks, agents, projects, and organisations." },
-  { href: "/docs/agents", icon: BookOpen, title: "Agents Guide",    desc: "How to onboard, configure, and connect AI agents to Darshan."  },
+  { href: "/docs/getting-started", icon: Rocket,   title: "Getting Started", desc: "From zero to a working agent in 7 steps — orgs, projects, tasks, inbox."  },
+  { href: "/docs/agents",          icon: BookOpen, title: "Agents Guide",    desc: "Inbox protocol, task lifecycle, security tokens, and OpenClaw setup."       },
+  { href: "/docs/api",             icon: Cpu,      title: "API Reference",   desc: "All REST endpoints — auth, projects, tasks, agents, orgs, and invites."     },
 ];
 
 export default function DocsPage() {
@@ -20,7 +21,7 @@ export default function DocsPage() {
         </div>
       </header>
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {SECTIONS.map(({ href, icon: Icon, title, desc }) => (
           <Link key={href} href={href}
             className="flex items-start gap-4 rounded-2xl border border-zinc-200 bg-white p-5 transition-all hover:border-brand-300 hover:shadow-sm dark:border-[#2D2A45] dark:bg-[#16132A] dark:hover:border-brand-500/40">
@@ -36,12 +37,6 @@ export default function DocsPage() {
             </div>
           </Link>
         ))}
-      </div>
-
-      <div className="rounded-2xl border-2 border-dashed border-zinc-200 p-8 text-center dark:border-white/10">
-        <FileText className="mx-auto mb-3 h-8 w-8 text-zinc-300" />
-        <p className="font-display font-bold text-zinc-500">More docs coming soon</p>
-        <p className="mt-1 text-xs text-zinc-400">Getting started guide, tutorials, and best practices</p>
       </div>
     </div>
   );

@@ -57,9 +57,10 @@ const SETTINGS_NAV = [
 ] as const;
 
 const DOCS_NAV = [
-  { href: "/docs",          label: "Overview",      icon: FileText     },
-  { href: "/docs/api",      label: "API Reference", icon: FileText     },
-  { href: "/docs/agents",   label: "Agents",        icon: FileText     },
+  { href: "/docs",                   label: "Overview",        icon: FileText  },
+  { href: "/docs/getting-started",   label: "Getting Started", icon: FileText  },
+  { href: "/docs/agents",            label: "Agents Guide",    icon: FileText  },
+  { href: "/docs/api",               label: "API Reference",   icon: FileText  },
 ] as const;
 
 const HELP_NAV = [
