@@ -165,7 +165,21 @@ export async function registerAuth(server: FastifyInstance) {
         user = rows[0];
       }
 
-      // 4. Issue JWT cookie and redirect to dashboard
+      // 4. Ensure the user has a linked human agent (create once if missing)
+      const existing_agent = await db.query(
+        `select id from agents where user_id = $1 limit 1`,
+        [user.id]
+      );
+      if (!existing_agent.rows.length) {
+        await db.query(
+          `insert into agents (name, status, agent_type, user_id, ping_status, endpoint_type, endpoint_config, capabilities, callback_token)
+           values ($1, 'online', 'human', $2, 'unknown', 'manual', '{}', '[]', gen_random_uuid()::text)
+           on conflict do nothing`,
+          [user.name, user.id]
+        );
+      }
+
+      // 5. Issue JWT cookie and redirect to dashboard
       const payload: JwtPayload = { userId: user.id, email: user.email, name: user.name, role: user.role };
       const jwtToken = jwt.sign(payload, JWT_SECRET, { expiresIn: "7d" });
 

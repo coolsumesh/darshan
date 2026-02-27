@@ -201,15 +201,27 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
         [req.params.id]
       );
       if (!project[0]) return reply.status(404).send({ ok: false, error: "project not found" });
-      const { title, description = "", proposer, assignee, status = "proposed" } = req.body;
+      const { title, description = "", assignee, status = "proposed", priority = "medium", type = "Task", due_date } = req.body;
       if (!title) return reply.status(400).send({ ok: false, error: "title required" });
+
+      // Resolve requestor from auth user (cookie session) or fallback to body proposer
+      const authUser = (req as unknown as Record<string, unknown>).authUser as { userId?: string; name?: string } | undefined;
+      const requestorName = authUser?.name ?? req.body.proposer ?? null;
+      let requestorOrg: string | null = null;
+      if (authUser?.userId) {
+        const orgRes = await db.query(
+          `select name from organisations where owner_user_id = $1 order by created_at limit 1`,
+          [authUser.userId]
+        );
+        requestorOrg = orgRes.rows[0]?.name ?? null;
+      }
+
       const { rows } = await db.query(
-        `insert into tasks (project_id, title, description, proposer, assignee, status)
-         values ($1, $2, $3, $4, $5, $6) returning *`,
-        [project[0].id, title, description, proposer ?? null, assignee ?? null, status]
+        `insert into tasks (project_id, title, description, proposer, requestor_org, assignee, status, priority, type, due_date)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) returning *`,
+        [project[0].id, title, description, requestorName, requestorOrg, assignee ?? null, status, priority, type, due_date ?? null]
       );
       broadcast("task:created", { task: rows[0] });
-      // Notify assigned agent's inbox
       if (assignee) await notifyAgentInbox(assignee, rows[0]);
       return reply.status(201).send({ ok: true, task: rows[0] });
     }

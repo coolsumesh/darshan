@@ -20,14 +20,17 @@ export type Task = {
   title: string;
   description?: string;
   status: TaskStatus;
-  proposer?: string;
+  proposer?: string;        // requestor name (set from auth user on create)
+  requestor_org?: string;   // org of the requestor
   assignee?: string;
   type?: string;
-  estimated_sp?: number;
+  estimated_sp?: number;    // kept for backwards compat, hidden from UI
   priority?: Priority;
-  due_date?: string; // ISO date "YYYY-MM-DD"
+  due_date?: string;        // ISO date "YYYY-MM-DD"
   completion_note?: string;
   completed_at?: string;
+  in_progress_at?: string;  // set when status first moves to in-progress
+  review_at?: string;       // set when status moves to review
 };
 
 export type TeamMember = {

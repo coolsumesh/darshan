@@ -455,7 +455,7 @@ function TaskDetailPanel({
               )}
             </div>
           )}
-          {propRow("Owner",
+          {propRow("Assigned to",
             <div className="relative">
               <button onClick={(e) => openPop === "owner" ? closePopover() : openPopover("owner", e.currentTarget as HTMLElement)}
                 className="flex items-center gap-1.5 rounded-full hover:opacity-80 transition-opacity">
@@ -488,12 +488,10 @@ function TaskDetailPanel({
               onChange={(v) => onUpdate(task.id, { due_date: v || undefined })}
             />
           )}
-          {propRow("Story Pts",
-            <input type="number" min={0} max={100} value={task.estimated_sp ?? 0}
-              onChange={(e) => onUpdate(task.id, { estimated_sp: Number(e.target.value) })}
-              className="w-16 rounded-lg bg-white px-2 py-0.5 text-xs ring-1 ring-zinc-200 focus:outline-none dark:bg-white/10 dark:ring-white/10 dark:text-white" />
-          )}
-          {task.proposer && propRow("Created by", <span className="text-xs text-zinc-500">{task.proposer}</span>)}
+          {task.proposer && propRow("Requestor", <span className="text-xs font-medium text-zinc-700 dark:text-zinc-300">{task.proposer}</span>)}
+          {(task as unknown as {requestor_org?: string}).requestor_org && propRow("Org", <span className="text-xs text-zinc-500">{(task as unknown as {requestor_org?: string}).requestor_org}</span>)}
+          {(task as unknown as {in_progress_at?: string}).in_progress_at && propRow("Started", <span className="text-xs text-zinc-500">{new Date((task as unknown as {in_progress_at: string}).in_progress_at).toLocaleDateString()}</span>)}
+          {(task as unknown as {review_at?: string}).review_at && propRow("Sent for Review", <span className="text-xs text-sky-600 dark:text-sky-400">{new Date((task as unknown as {review_at: string}).review_at).toLocaleDateString()}</span>)}
           {task.completed_at && propRow("Completed", <span className="text-xs text-emerald-600 dark:text-emerald-400">{new Date(task.completed_at).toLocaleDateString()}</span>)}
         </div>
 
@@ -633,7 +631,7 @@ function TableRow({
         )}
       </div>
 
-      {/* Owner */}
+      {/* Assigned to */}
       <div className="flex w-28 shrink-0 items-center px-3">
         <button onClick={(e) => { e.stopPropagation(); openPop === "owner" ? closePopover() : openPopover("owner", e.currentTarget as HTMLElement); }}
           className="flex items-center gap-1.5 hover:opacity-80 transition-opacity">
@@ -699,11 +697,6 @@ function TableRow({
         <span className="font-mono text-xs text-zinc-400">{taskIdStr}</span>
       </div>
 
-      {/* SP */}
-      <div className="w-12 shrink-0 px-3 text-right">
-        <span className="text-sm text-zinc-600 dark:text-zinc-400">{task.estimated_sp ?? 0}</span>
-      </div>
-
       {/* Actions */}
       <div className="flex w-16 shrink-0 items-center justify-end gap-0.5 px-2 opacity-0 group-hover:opacity-100 transition-opacity">
         <button onClick={(e) => { e.stopPropagation(); onOpen(); }}
@@ -722,15 +715,14 @@ function TableRow({
 
 // Column headers
 const COL_HEADERS = [
-  { label: "Task",      cls: "flex-1 min-w-0"           },
-  { label: "Owner",     cls: "w-28 shrink-0"            },
-  { label: "Status",    cls: "w-36 shrink-0"            },
-  { label: "Priority",  cls: "w-28 shrink-0"            },
-  { label: "Type",      cls: "w-32 shrink-0"            },
-  { label: "Due",       cls: "w-24 shrink-0"            },
-  { label: "Task ID",   cls: "w-20 shrink-0"            },
-  { label: "SP",        cls: "w-12 shrink-0 text-right" },
-  { label: "",          cls: "w-16 shrink-0"            },
+  { label: "Task",        cls: "flex-1 min-w-0"           },
+  { label: "Assigned to", cls: "w-28 shrink-0"            },
+  { label: "Status",      cls: "w-36 shrink-0"            },
+  { label: "Priority",    cls: "w-28 shrink-0"            },
+  { label: "Type",        cls: "w-32 shrink-0"            },
+  { label: "Due",         cls: "w-24 shrink-0"            },
+  { label: "Task ID",     cls: "w-20 shrink-0"            },
+  { label: "",            cls: "w-16 shrink-0"            },
 ];
 
 // ─── Table section ────────────────────────────────────────────────────────────
@@ -750,7 +742,7 @@ function TableSection({
   const [quickTitle,    setQuickTitle]    = React.useState("");
   const [quickSaving,   setQuickSaving]   = React.useState(false);
   const quickInputRef = React.useRef<HTMLInputElement>(null);
-  const spTotal = tasks.reduce((s, t) => s + (t.estimated_sp ?? 0), 0);
+
 
   async function submitQuickAdd() {
     const title = quickTitle.trim();
@@ -778,7 +770,7 @@ function TableSection({
           className="ml-2 flex items-center gap-1 text-xs text-zinc-400 opacity-0 group-hover/sh:opacity-100 transition-opacity hover:text-zinc-600">
           <Plus className="h-3 w-3" /> Add task
         </button>
-        {spTotal > 0 && <span className="ml-auto text-xs text-zinc-400">{spTotal} SP</span>}
+
       </button>
 
       {!collapsed && (
@@ -847,18 +839,7 @@ function TableSection({
             </button>
           )}
 
-          {/* Sum row */}
-          {spTotal > 0 && (
-            <div className="flex items-center border-t border-zinc-100 bg-zinc-50 dark:border-[#2D2A45] dark:bg-[#0F0D1E]">
-              <div className="w-8 shrink-0" /><div className="w-5 shrink-0" />
-              <div className="flex-1 px-3 py-2 text-xs text-zinc-400">Sum</div>
-              {[28, 36, 28, 32, 24, 20].map((w, i) => (
-                <div key={i} className={`w-${w} shrink-0`} />
-              ))}
-              <div className="w-12 shrink-0 px-3 py-2 text-right text-xs font-semibold text-zinc-600 dark:text-zinc-400">{spTotal} SP</div>
-              <div className="w-16 shrink-0" />
-            </div>
-          )}
+
         </div>
       )}
 
@@ -902,7 +883,7 @@ function CreateTaskModal({
   defaultStatus, team, onSave, onClose,
 }: {
   defaultStatus: TaskStatus; team: TeamMemberWithAgent[];
-  onSave: (p: { title: string; description: string; assignee: string; status: TaskStatus; type: string; estimated_sp: number; priority: Priority }) => Promise<void>;
+  onSave: (p: { title: string; description: string; assignee: string; status: TaskStatus; type: string; priority: Priority }) => Promise<void>;
   onClose: () => void;
 }) {
   const [title,       setTitle]       = React.useState("");
@@ -910,7 +891,6 @@ function CreateTaskModal({
   const [assignee,    setAssignee]    = React.useState("");
   const [status,      setStatus]      = React.useState<TaskStatus>(defaultStatus);
   const [type,        setType]        = React.useState("Task");
-  const [estimatedSp, setEstimatedSp] = React.useState(0);
   const [priority,    setPriority]    = React.useState<Priority>("medium");
   const [saving,      setSaving]      = React.useState(false);
   const [titleError,  setTitleError]  = React.useState(false);
@@ -919,7 +899,7 @@ function CreateTaskModal({
     if (!title.trim()) { setTitleError(true); return; }
     setTitleError(false);
     setSaving(true);
-    await onSave({ title: title.trim(), description: description.trim(), assignee, status, type, estimated_sp: estimatedSp, priority });
+    await onSave({ title: title.trim(), description: description.trim(), assignee, status, type, priority });
     setSaving(false);
   }
 
@@ -979,10 +959,6 @@ function CreateTaskModal({
                 {PRIORITIES.map(p => <option key={p} value={p}>{PRIORITY_META[p].label}</option>)}
               </select>
             </div>
-            <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">Story Points</label>
-              <Input type="number" min={0} max={100} value={estimatedSp} onChange={(e) => setEstimatedSp(Number(e.target.value))} placeholder="0" />
-            </div>
           </div>
         </div>
 
@@ -1041,14 +1017,14 @@ function TaskBoardContent({
     setActing(null);
   }
 
-  async function handleCreate(payload: { title: string; description: string; assignee: string; status: TaskStatus; type: string; estimated_sp: number; priority: Priority }) {
-    await createTask(projectId, { ...payload, proposer: "Mithran ⚡" });
+  async function handleCreate(payload: { title: string; description: string; assignee: string; status: TaskStatus; type: string; priority: Priority }) {
+    await createTask(projectId, { ...payload });
     // Do NOT optimistically add here — the WebSocket `task:created` event is the single source of truth.
     setCreateIn(null);
   }
 
   async function handleQuickAdd(title: string, status: TaskStatus) {
-    await createTask(projectId, { title, status, proposer: "Mithran ⚡", type: "Task", priority: "medium" });
+    await createTask(projectId, { title, status, type: "Task", priority: "medium" });
     // WebSocket task:created event is the single source of truth.
   }
 
@@ -1743,8 +1719,8 @@ function SprintBoardTabWithSignal({ view, projectId, newTaskSignal }: { view: "t
     return () => { clearTimeout(retryTimeout); ws?.close(); };
   }, [projectId]);
 
-  async function handleCreate(payload: { title: string; description: string; assignee: string; status: TaskStatus; type: string; estimated_sp: number; priority: Priority }) {
-    await createTask(projectId, { ...payload, proposer: "Mithran ⚡" });
+  async function handleCreate(payload: { title: string; description: string; assignee: string; status: TaskStatus; type: string; priority: Priority }) {
+    await createTask(projectId, { ...payload });
     // WebSocket task:created is the single source of truth — no optimistic add here.
     setCreateIn(null);
   }
