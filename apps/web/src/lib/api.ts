@@ -54,8 +54,8 @@ export async function authMe(): Promise<AuthUser | null> {
 
 export async function fetchProjects(): Promise<Project[]> {
   const data = await apiFetch<{ ok: boolean; projects: Project[] }>("/api/v1/projects");
-  if (data?.ok && data.projects?.length) return data.projects;
-  // fallback
+  if (data?.ok) return data.projects ?? [];
+  // fallback (API unreachable)
   return PROJECTS;
 }
 
@@ -172,7 +172,8 @@ export async function removeTeamMember(projectId: string, agentId: string): Prom
 
 export async function fetchAgents(): Promise<Agent[]> {
   const data = await apiFetch<{ ok: boolean; agents: Agent[] }>("/api/v1/agents");
-  if (data?.ok && data.agents?.length) {
+  if (data?.ok) {
+    if (!data.agents?.length) return [];
     return data.agents.map((a) => ({
       id: a.id,
       name: a.name,
