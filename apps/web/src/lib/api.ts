@@ -192,6 +192,7 @@ export async function fetchAgents(): Promise<Agent[]> {
       last_seen_at:    (a as unknown as { last_seen_at?: string }).last_seen_at,
       callback_token:  (a as unknown as { callback_token?: string }).callback_token,
       last_ping_ms:    (a as unknown as { last_ping_ms?: number }).last_ping_ms,
+      open_task_count: (a as unknown as { open_task_count?: number }).open_task_count ?? 0,
     }));
   }
   return AGENTS;
