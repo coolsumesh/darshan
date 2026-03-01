@@ -47,10 +47,20 @@ const ORG_TYPE_META: Record<string, {
     badge: "bg-brand-100 text-brand-700 dark:bg-brand-500/10 dark:text-brand-300",
     accent: "border-brand-500", cardActive: "bg-brand-600 ring-brand-600 text-white",
   },
-  member:  {
-    label: "Member", desc: "You're a member",
-    badge: "bg-zinc-100 text-zinc-600 dark:bg-white/10 dark:text-zinc-400",
-    accent: "border-zinc-400", cardActive: "bg-zinc-600 ring-zinc-600 text-white",
+  admin:  {
+    label: "Admin", desc: "You manage this org",
+    badge: "bg-blue-100 text-blue-700 dark:bg-blue-500/10 dark:text-blue-300",
+    accent: "border-blue-500", cardActive: "bg-blue-600 ring-blue-600 text-white",
+  },
+  contributor: {
+    label: "Contributor", desc: "You work here",
+    badge: "bg-brand-100 text-brand-700 dark:bg-brand-500/10 dark:text-brand-300",
+    accent: "border-brand-400", cardActive: "bg-brand-600 ring-brand-600 text-white",
+  },
+  viewer: {
+    label: "Viewer", desc: "Read-only access",
+    badge: "bg-zinc-100 text-zinc-500 dark:bg-white/10 dark:text-zinc-400",
+    accent: "border-zinc-300", cardActive: "bg-zinc-500 ring-zinc-500 text-white",
   },
   partner: {
     label: "Partner", desc: "Collaborate together",
@@ -70,9 +80,9 @@ const ORG_TYPE_META: Record<string, {
 };
 
 /** Returns the display type based on the user's relationship to the org.
- *  If user is a member (not owner) of an 'own' org, show "member" instead of "own". */
+ *  For own orgs where the user isn't the owner, show their actual role (admin/contributor/viewer). */
 function effectiveType(org: ExtOrg): string {
-  if (org.type === "own" && org.my_role !== "owner") return "member";
+  if (org.type === "own" && org.my_role && org.my_role !== "owner") return org.my_role;
   return org.type;
 }
 

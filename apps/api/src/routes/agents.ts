@@ -575,7 +575,7 @@ ACK_URL: ${ackUrl}
     Params: { id: string };
     Body: { email: string; role?: string };
   }>("/api/v1/orgs/:id/users", async (req, reply) => {
-    const { email, role = "member" } = req.body;
+    const { email, role = "contributor" } = req.body;
     if (!email) return reply.status(400).send({ ok: false, error: "email required" });
     const { rows: orgs } = await db.query(
       `select id from organisations where id::text = $1 or slug = $1`, [req.params.id]
@@ -641,7 +641,7 @@ ACK_URL: ${ackUrl}
     Body: { email: string; role?: string };
   }>("/api/v1/orgs/:id/user-invites", async (req, reply) => {
     const reqUser = getRequestUser(req);
-    const { email, role = "member" } = req.body;
+    const { email, role = "contributor" } = req.body;
     if (!email) return reply.status(400).send({ ok: false, error: "email required" });
 
     const { rows: orgs } = await db.query(

@@ -28,17 +28,21 @@ const AVATAR_COLORS = ["#7C3AED", "#2563EB", "#0284C7", "#059669", "#D97706", "#
 const ORG_TYPE_META: Record<string, {
   label: string; badge: string; accent: string;
 }> = {
-  own:     { label: "Own workspace", badge: "bg-brand-100 text-brand-700 dark:bg-brand-500/10 dark:text-brand-300", accent: "border-brand-500" },
-  member:  { label: "Member",        badge: "bg-zinc-100 text-zinc-600 dark:bg-white/10 dark:text-zinc-400",        accent: "border-zinc-400"  },
-  partner: { label: "Partner",       badge: "bg-sky-100 text-sky-700 dark:bg-sky-500/10 dark:text-sky-300",         accent: "border-sky-500"   },
-  client:  { label: "Client",        badge: "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400", accent: "border-emerald-500" },
-  vendor:  { label: "Vendor",        badge: "bg-amber-100 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400", accent: "border-amber-500"  },
+  own:         { label: "Own workspace", badge: "bg-brand-100 text-brand-700 dark:bg-brand-500/10 dark:text-brand-300",     accent: "border-brand-500"   },
+  admin:       { label: "Admin",         badge: "bg-blue-100 text-blue-700 dark:bg-blue-500/10 dark:text-blue-300",       accent: "border-blue-500"    },
+  contributor: { label: "Contributor",   badge: "bg-brand-100 text-brand-700 dark:bg-brand-500/10 dark:text-brand-300",   accent: "border-brand-400"   },
+  viewer:      { label: "Viewer",        badge: "bg-zinc-100 text-zinc-500 dark:bg-white/10 dark:text-zinc-400",           accent: "border-zinc-300"    },
+  partner:     { label: "Partner",       badge: "bg-sky-100 text-sky-700 dark:bg-sky-500/10 dark:text-sky-300",            accent: "border-sky-500"     },
+  client:      { label: "Client",        badge: "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400", accent: "border-emerald-500" },
+  vendor:      { label: "Vendor",        badge: "bg-amber-100 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400",   accent: "border-amber-500"   },
 };
 
 const ROLE_BADGE: Record<string, string> = {
-  owner:  "bg-purple-100 text-purple-700 dark:bg-purple-500/10 dark:text-purple-300",
-  admin:  "bg-blue-100 text-blue-700 dark:bg-blue-500/10 dark:text-blue-300",
-  member: "bg-zinc-100 text-zinc-600 dark:bg-white/10 dark:text-zinc-400",
+  owner:       "bg-purple-100 text-purple-700 dark:bg-purple-500/10 dark:text-purple-300",
+  admin:       "bg-blue-100 text-blue-700 dark:bg-blue-500/10 dark:text-blue-300",
+  contributor: "bg-brand-100 text-brand-700 dark:bg-brand-500/10 dark:text-brand-300",
+  viewer:      "bg-zinc-100 text-zinc-500 dark:bg-white/10 dark:text-zinc-400",
+  member:      "bg-zinc-100 text-zinc-600 dark:bg-white/10 dark:text-zinc-400", // legacy fallback
 };
 
 type TabId = "general" | "members" | "agents" | "projects";
@@ -435,6 +439,7 @@ function MembersTab({ orgId, canEdit }: { orgId: string; canEdit: boolean }) {
   const [invitingUser,   setInvitingUser]   = React.useState(false);
   const [inviteSent,     setInviteSent]     = React.useState("");
   const [inviteUnknown,  setInviteUnknown]  = React.useState(false);
+  const [inviteRole,     setInviteRole]     = React.useState<string>("contributor");
 
   async function reload() {
     setLoading(true);
@@ -458,7 +463,7 @@ function MembersTab({ orgId, canEdit }: { orgId: string; canEdit: boolean }) {
     setEmailError("");
     setInviteSent("");
     setInviteUnknown(false);
-    const result = await inviteOrgUser(orgId, email);
+    const result = await inviteOrgUser(orgId, email, inviteRole);
     if (result) {
       setPendingInvites(prev => [result.invite, ...prev.filter(i => i.invitee_email !== result.invite.invitee_email)]);
       setInviteSent(email);
@@ -556,6 +561,16 @@ function MembersTab({ orgId, canEdit }: { orgId: string; canEdit: boolean }) {
                     disabled={invitingUser}
                     className="flex-1 rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm outline-none focus:border-brand-400 dark:border-white/10 dark:bg-white/5 dark:text-white disabled:opacity-50"
                   />
+                  <select
+                    value={inviteRole}
+                    onChange={e => setInviteRole(e.target.value)}
+                    disabled={invitingUser}
+                    className="rounded-xl border border-zinc-200 bg-white px-2 py-2 text-xs font-semibold text-zinc-700 outline-none focus:border-brand-400 dark:border-white/10 dark:bg-white/5 dark:text-zinc-300 disabled:opacity-50"
+                  >
+                    <option value="admin">Admin</option>
+                    <option value="contributor">Contributor</option>
+                    <option value="viewer">Viewer</option>
+                  </select>
                   <button onClick={handleInviteUser} disabled={invitingUser || !emailInput.trim()}
                     className="flex items-center gap-1.5 rounded-xl bg-brand-600 px-3 py-2 text-xs font-semibold text-white hover:bg-brand-700 disabled:opacity-40 transition-colors">
                     <Mail className="h-3.5 w-3.5" />
@@ -874,7 +889,8 @@ export default function OrgSettingsPage() {
     );
   }
 
-  const effectiveOrgType = (org.type === "own" && currentRole !== "owner") ? "member" : org.type;
+  // For own orgs where user isn't the owner, show their role as the display type
+  const effectiveOrgType = (org.type === "own" && currentRole !== "owner") ? currentRole : org.type;
   const tm = ORG_TYPE_META[effectiveOrgType] ?? ORG_TYPE_META.partner;
 
   return (

@@ -448,7 +448,7 @@ export type ProjectInvite = {
 export type OrgInvite = {
   id: string;
   token: string;
-  role: "owner" | "admin" | "member";
+  role: OrgUserRole;
   org_id: string;
   org_name: string;
   org_slug: string;
@@ -514,13 +514,15 @@ export async function revokeProjectInvite(projectId: string, inviteId: string): 
 
 // ── Org User Members ──────────────────────────────────────────────────────────
 
+export type OrgUserRole = "owner" | "admin" | "contributor" | "viewer";
+
 export type OrgUserMember = {
   id: string;
   user_id: string;
   name: string;
   email: string;
   avatar_url?: string | null;
-  role: "owner" | "admin" | "member";
+  role: OrgUserRole;
   created_at: string;
 };
 
@@ -529,7 +531,7 @@ export async function fetchOrgUserMembers(idOrSlug: string): Promise<OrgUserMemb
   return data?.ok ? data.users : [];
 }
 
-export async function addOrgUserMember(idOrSlug: string, email: string, role = "member"): Promise<OrgUserMember | null> {
+export async function addOrgUserMember(idOrSlug: string, email: string, role = "contributor"): Promise<OrgUserMember | null> {
   const data = await apiFetch<{ ok: boolean; user: OrgUserMember }>(`/api/v1/orgs/${idOrSlug}/users`, {
     method: "POST",
     body: JSON.stringify({ email, role }),
@@ -548,7 +550,7 @@ export type PendingOrgInvite = {
   id: string;
   token: string;
   invitee_email: string;
-  role: "owner" | "admin" | "member";
+  role: OrgUserRole;
   expires_at: string;
   created_at: string;
   invited_by_name?: string;
@@ -557,7 +559,7 @@ export type PendingOrgInvite = {
 /** Invite a user to an org by email — creates invite record, shows in their bell.
  *  Returns `registered: false` if the email has no Darshan account yet (invite still created). */
 export async function inviteOrgUser(
-  idOrSlug: string, email: string, role = "member"
+  idOrSlug: string, email: string, role = "contributor"
 ): Promise<{ invite: PendingOrgInvite; registered: boolean } | null> {
   const data = await apiFetch<{ ok: boolean; invite: PendingOrgInvite; registered: boolean }>(
     `/api/v1/orgs/${idOrSlug}/user-invites`,

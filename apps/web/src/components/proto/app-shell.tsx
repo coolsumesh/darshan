@@ -382,8 +382,9 @@ function NotificationBellInner() {
                           {" "}as{" "}
                           <span className={cn(
                             "font-semibold",
-                            inv.role === "admin" ? "text-violet-400"
-                            : inv.role === "owner" ? "text-amber-400"
+                            inv.role === "owner"       ? "text-amber-400"
+                            : inv.role === "admin"     ? "text-violet-400"
+                            : inv.role === "viewer"    ? "text-zinc-400"
                             : "text-brand-400"
                           )}>
                             {inv.role}
