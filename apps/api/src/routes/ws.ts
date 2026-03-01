@@ -1,11 +1,12 @@
 import type { FastifyInstance } from "fastify";
+import type { WebSocket } from "@fastify/websocket";
 import { addConnection } from "../broadcast.js";
 
 export async function registerWs(server: FastifyInstance) {
   server.get(
     "/ws",
     { websocket: true },
-    (socket) => {
+    (socket: WebSocket) => {
       addConnection(socket);
       socket.send(
         JSON.stringify({
