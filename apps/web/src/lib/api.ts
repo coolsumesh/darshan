@@ -489,3 +489,22 @@ export async function revokeProjectInvite(projectId: string, inviteId: string): 
   const data = await apiFetch<{ ok: boolean }>(`/api/v1/projects/${projectId}/invites/${inviteId}`, { method: "DELETE" });
   return data?.ok ?? false;
 }
+
+// ── Task Activity ──────────────────────────────────────────────────────────────
+
+export type TaskActivity = {
+  id: string;
+  actor_name: string;
+  actor_type: "human" | "agent" | "system";
+  action: "created" | "status_changed" | "assigned";
+  from_value: string | null;
+  to_value: string | null;
+  created_at: string;
+};
+
+export async function fetchTaskActivity(projectId: string, taskId: string): Promise<TaskActivity[]> {
+  const data = await apiFetch<{ ok: boolean; activity: TaskActivity[] }>(
+    `/api/v1/projects/${projectId}/tasks/${taskId}/activity`
+  );
+  return data?.ok ? data.activity : [];
+}

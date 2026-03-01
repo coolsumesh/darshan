@@ -25,10 +25,12 @@ import {
   pingAgent,
   fetchUserMembers, addUserMember, removeUserMember,
   fetchProjectInvites, createProjectInvite, revokeProjectInvite,
+  fetchTaskActivity,
   authMe,
   type TeamMemberWithAgent,
   type UserMember,
   type ProjectInvite,
+  type TaskActivity,
 } from "@/lib/api";
 import { type Agent } from "@/lib/agents";
 
@@ -87,6 +89,18 @@ function formatDueDate(due?: string): { text: string; cls: string } | null {
   if (diff === 0) return { text: "Due today",                  cls: "bg-amber-100 text-amber-700" };
   if (diff <= 2)  return { text: `Due in ${diff}d`,            cls: "bg-amber-100 text-amber-700" };
   return { text: d.toLocaleDateString("en-US", { month: "short", day: "numeric" }), cls: "bg-zinc-100 text-zinc-600" };
+}
+
+function timeAgo(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const m = Math.floor(diff / 60000);
+  if (m < 1)   return "just now";
+  if (m < 60)  return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24)  return `${h}h ago`;
+  const d = Math.floor(h / 24);
+  if (d < 7)   return `${d}d ago`;
+  return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
 // ─── Click-outside hook ───────────────────────────────────────────────────────
@@ -391,6 +405,15 @@ function TaskDetailPanel({
 
   // Keep local completion note in sync if task updates externally (e.g. WebSocket)
   React.useEffect(() => { setCompletionNote(task.completion_note ?? ""); }, [task.completion_note]);
+
+  // Activity log — fetch on mount and whenever status/assignee changes
+  const [activity, setActivity] = React.useState<TaskActivity[]>([]);
+  const refreshActivity = React.useCallback(() => {
+    const pid = taskProjectId(task);
+    if (pid) fetchTaskActivity(pid, task.id).then(setActivity);
+  }, [task.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  React.useEffect(() => { refreshActivity(); }, [refreshActivity]);
+  React.useEffect(() => { refreshActivity(); }, [task.status, task.assignee]); // eslint-disable-line react-hooks/exhaustive-deps
   function openPopover(name: string, el: HTMLElement) { setOpenPop(name); setAnchorEl(el); }
   function closePopover() { setOpenPop(null); setAnchorEl(null); }
 
@@ -554,6 +577,64 @@ function TaskDetailPanel({
             </button>
           )}
         </div>
+
+        {/* Activity log */}
+        {activity.length > 0 && (
+          <div className="mb-4">
+            <div className="mb-3 flex items-center gap-2">
+              <span className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Activity</span>
+            </div>
+            <div className="flex flex-col gap-3">
+              {activity.map((ev) => {
+                const initials = ev.actor_name.split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase();
+                const label = (status: string | null) =>
+                  status ? (STATUS_META[status as keyof typeof STATUS_META]?.label ?? status) : "—";
+
+                let actionText: React.ReactNode;
+                if (ev.action === "created") {
+                  actionText = <><span className="font-medium text-zinc-800 dark:text-white">{ev.actor_name}</span> created this task</>;
+                } else if (ev.action === "status_changed") {
+                  actionText = (
+                    <>
+                      <span className="font-medium text-zinc-800 dark:text-white">{ev.actor_name}</span>
+                      {" moved "}
+                      <span className="rounded-md bg-zinc-100 px-1.5 py-0.5 text-[11px] font-medium text-zinc-600 dark:bg-white/10 dark:text-zinc-300">{label(ev.from_value)}</span>
+                      {" → "}
+                      <span className="rounded-md bg-zinc-100 px-1.5 py-0.5 text-[11px] font-medium text-zinc-600 dark:bg-white/10 dark:text-zinc-300">{label(ev.to_value)}</span>
+                    </>
+                  );
+                } else {
+                  // assigned
+                  const wasUnassigned = !ev.from_value;
+                  const isUnassigned  = !ev.to_value;
+                  actionText = (
+                    <>
+                      <span className="font-medium text-zinc-800 dark:text-white">{ev.actor_name}</span>
+                      {wasUnassigned
+                        ? <> assigned <span className="font-medium text-zinc-800 dark:text-white">{ev.to_value}</span></>
+                        : isUnassigned
+                          ? <> unassigned <span className="font-medium text-zinc-800 dark:text-white">{ev.from_value}</span></>
+                          : <> reassigned from <span className="font-medium text-zinc-800 dark:text-white">{ev.from_value}</span> to <span className="font-medium text-zinc-800 dark:text-white">{ev.to_value}</span></>
+                      }
+                    </>
+                  );
+                }
+
+                return (
+                  <div key={ev.id} className="flex items-start gap-2.5">
+                    <div className="mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full bg-brand-600 text-[9px] font-bold text-white">
+                      {initials}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs text-zinc-500 dark:text-zinc-400 leading-relaxed">{actionText}</p>
+                    </div>
+                    <span className="shrink-0 text-[11px] text-zinc-400">{timeAgo(ev.created_at)}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {/* Danger zone */}
         <button onClick={() => { onDelete(task.id); onClose(); }}

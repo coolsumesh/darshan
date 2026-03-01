@@ -256,8 +256,9 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
       const { title, description = "", assignee, status = "proposed", priority = "medium", type = "Task", due_date } = req.body;
       if (!title) return reply.status(400).send({ ok: false, error: "title required" });
 
-      const authUser = getRequestUser(req);
+      const authUser    = getRequestUser(req);
       const requestorName = authUser?.name ?? req.body.proposer ?? null;
+      const actorName   = authUser?.name ?? "System";
       let requestorOrg: string | null = null;
       if (authUser?.userId) {
         const orgRes = await db.query(
@@ -273,6 +274,15 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
         [access.projectId, title, description, requestorName, requestorOrg, assignee ?? null, status, priority, type, due_date ?? null]
       );
       broadcast("task:created", { task: rows[0] });
+
+      // Write 'created' activity
+      const actorType = authUser ? "human" : "system";
+      await db.query(
+        `insert into task_activity (task_id, project_id, actor_name, actor_type, action, to_value)
+         values ($1, $2, $3, $4, 'created', $5)`,
+        [rows[0].id, access.projectId, actorName, actorType, status]
+      );
+
       if (assignee) await notifyAgentInbox(assignee, rows[0]);
       return reply.status(201).send({ ok: true, task: rows[0] });
     }
@@ -318,11 +328,12 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
       if (!sets.length) return reply.status(400).send({ ok: false, error: "nothing to update" });
 
       const { rows: before } = await db.query(
-        `select assignee from tasks where id = $1 and project_id = $2`,
+        `select status, assignee from tasks where id = $1 and project_id = $2`,
         [req.params.taskId, access.projectId]
       );
       if (!before[0]) return reply.status(404).send({ ok: false, error: "task not found" });
       const oldAssignee: string | null = before[0]?.assignee ?? null;
+      const oldStatus: string          = before[0]?.status ?? "";
 
       vals.push(req.params.taskId);
       const { rows } = await db.query(
@@ -331,7 +342,32 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
       );
       broadcast("task:updated", { task: rows[0] });
 
+      // ── Write activity entries ──────────────────────────────────────────────
+      const authUser   = getRequestUser(req);
+      const actorName  = authUser?.name ?? "System";
+      const actorType  = authUser ? "human" : "system";
+      const activityOps: Promise<unknown>[] = [];
+
+      const newStatus   = req.body.status   as string | undefined;
       const newAssignee = req.body.assignee as string | undefined;
+
+      if (newStatus !== undefined && newStatus !== oldStatus) {
+        activityOps.push(db.query(
+          `insert into task_activity (task_id, project_id, actor_name, actor_type, action, from_value, to_value)
+           values ($1, $2, $3, $4, 'status_changed', $5, $6)`,
+          [req.params.taskId, access.projectId, actorName, actorType, oldStatus, newStatus]
+        ));
+      }
+      if (newAssignee !== undefined && newAssignee !== oldAssignee) {
+        activityOps.push(db.query(
+          `insert into task_activity (task_id, project_id, actor_name, actor_type, action, from_value, to_value)
+           values ($1, $2, $3, $4, 'assigned', $5, $6)`,
+          [req.params.taskId, access.projectId, actorName, actorType, oldAssignee, newAssignee || null]
+        ));
+      }
+      if (activityOps.length > 0) await Promise.all(activityOps);
+
+      // ── Agent inbox notifications ───────────────────────────────────────────
       if (newAssignee !== undefined) {
         if (oldAssignee) {
           await db.query(
@@ -345,6 +381,23 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
         if (newAssignee) await notifyAgentInbox(newAssignee, rows[0]);
       }
       return { ok: true, task: rows[0] };
+    }
+  );
+
+  // ── Get task activity — member+ ───────────────────────────────────────────
+  server.get<{ Params: { id: string; taskId: string } }>(
+    "/api/v1/projects/:id/tasks/:taskId/activity",
+    async (req, reply) => {
+      const access = await checkAccess(req.params.id, req, "member");
+      if ("deny" in access) return reply.status(access.deny).send({ ok: false, error: access.deny === 404 ? "project not found" : "forbidden" });
+      const { rows } = await db.query(
+        `select id, actor_name, actor_type, action, from_value, to_value, created_at
+         from task_activity
+         where task_id = $1
+         order by created_at asc`,
+        [req.params.taskId]
+      );
+      return { ok: true, activity: rows };
     }
   );
 
