@@ -93,6 +93,25 @@ function OrgAvatar({ name, avatarUrl, color, size = 44, className }: {
   );
 }
 
+// ─── User Avatar (photo with initials fallback) ───────────────────────────────
+function UserAvatar({ name, avatarUrl, size = 36 }: { name: string; avatarUrl?: string | null; size?: number }) {
+  const [err, setErr] = React.useState(false);
+  const initials = name.split(" ").map(p => p[0]).slice(0, 2).join("").toUpperCase();
+  if (avatarUrl && !err) {
+    return (
+      <img src={avatarUrl} alt="" referrerPolicy="no-referrer" onError={() => setErr(true)}
+        style={{ width: size, height: size }}
+        className="shrink-0 rounded-full object-cover" />
+    );
+  }
+  return (
+    <div style={{ width: size, height: size }}
+      className="grid shrink-0 place-items-center rounded-full bg-brand-600 text-sm font-bold text-white">
+      {initials || name[0]?.toUpperCase()}
+    </div>
+  );
+}
+
 // ─── Agent Avatar (initials) ──────────────────────────────────────────────────
 function AgentAvatar({ name, size = 36 }: { name: string; size?: number }) {
   const bg = avatarColor(name);
@@ -526,14 +545,7 @@ function MembersTab({ orgId, canEdit }: { orgId: string; canEdit: boolean }) {
           <div className="flex flex-col gap-2">
             {users.map(u => (
               <div key={u.id} className="flex items-center gap-3 rounded-xl bg-zinc-50 px-4 py-3 dark:bg-white/5">
-                {u.avatar_url ? (
-                  <img src={u.avatar_url} alt={u.name} referrerPolicy="no-referrer"
-                    className="h-9 w-9 shrink-0 rounded-full object-cover" />
-                ) : (
-                  <div className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-brand-600 text-sm font-bold text-white">
-                    {u.name[0]?.toUpperCase()}
-                  </div>
-                )}
+                <UserAvatar name={u.name} avatarUrl={u.avatar_url} size={36} />
                 <div className="min-w-0 flex-1">
                   <div className="text-sm font-semibold text-zinc-900 dark:text-white">{u.name}</div>
                   <div className="text-[11px] text-zinc-400">{u.email}</div>
