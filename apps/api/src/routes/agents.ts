@@ -58,7 +58,9 @@ export async function registerAgents(server: FastifyInstance, db: pg.Pool) {
        from organisations o
        left join agents   a on a.org_id = o.id
        left join projects p on p.org_id = o.id
-       where ($1::uuid is null or o.owner_user_id = $1::uuid)
+       where ($1::uuid is null
+          or o.owner_user_id = $1::uuid
+          or exists (select 1 from org_user_members oum where oum.org_id = o.id and oum.user_id = $1::uuid))
        group by o.id
        order by o.type asc, o.name asc`,
       [userId]
