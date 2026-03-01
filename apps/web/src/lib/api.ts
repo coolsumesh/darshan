@@ -441,11 +441,30 @@ export type ProjectInvite = {
   declined_at?: string;
   accepted_by_name?: string;
   invite_url: string;
+  invite_type: "project";
 };
 
-/** Pending invites addressed to the current user's email (notification bell) */
-export async function fetchMyInvites(): Promise<ProjectInvite[]> {
-  const data = await apiFetch<{ ok: boolean; invites: ProjectInvite[] }>("/api/v1/me/invites");
+export type OrgInvite = {
+  id: string;
+  token: string;
+  role: "owner" | "admin" | "member";
+  org_id: string;
+  org_name: string;
+  org_slug: string;
+  invited_by_name?: string;
+  invitee_email: string;
+  expires_at: string;
+  accepted_at?: string;
+  declined_at?: string;
+  invite_url: string;
+  invite_type: "org";
+};
+
+export type AnyInvite = ProjectInvite | OrgInvite;
+
+/** Pending invites (project + org) addressed to the current user's email */
+export async function fetchMyInvites(): Promise<AnyInvite[]> {
+  const data = await apiFetch<{ ok: boolean; invites: AnyInvite[] }>("/api/v1/me/invites");
   return data?.ok ? data.invites : [];
 }
 
@@ -519,6 +538,60 @@ export async function addOrgUserMember(idOrSlug: string, email: string, role = "
 
 export async function removeOrgUserMember(idOrSlug: string, userId: string): Promise<boolean> {
   const data = await apiFetch<{ ok: boolean }>(`/api/v1/orgs/${idOrSlug}/users/${userId}`, { method: "DELETE" });
+  return data?.ok ?? false;
+}
+
+// ── Org user invites (email-based, notification flow) ─────────────────────────
+
+export type PendingOrgInvite = {
+  id: string;
+  token: string;
+  invitee_email: string;
+  role: "owner" | "admin" | "member";
+  expires_at: string;
+  created_at: string;
+  invited_by_name?: string;
+};
+
+/** Invite a user to an org by email — creates invite record, shows in their bell */
+export async function inviteOrgUser(
+  idOrSlug: string, email: string, role = "member"
+): Promise<PendingOrgInvite | null> {
+  const data = await apiFetch<{ ok: boolean; invite: PendingOrgInvite }>(
+    `/api/v1/orgs/${idOrSlug}/user-invites`,
+    { method: "POST", body: JSON.stringify({ email, role }) }
+  );
+  return data?.ok ? data.invite : null;
+}
+
+/** List pending (unaccepted) org user invites — for admin view */
+export async function fetchPendingOrgInvites(idOrSlug: string): Promise<PendingOrgInvite[]> {
+  const data = await apiFetch<{ ok: boolean; invites: PendingOrgInvite[] }>(
+    `/api/v1/orgs/${idOrSlug}/user-invites`
+  );
+  return data?.ok ? data.invites : [];
+}
+
+/** Revoke a pending org invite */
+export async function revokeOrgInvite(idOrSlug: string, inviteId: string): Promise<boolean> {
+  const data = await apiFetch<{ ok: boolean }>(
+    `/api/v1/orgs/${idOrSlug}/user-invites/${inviteId}`,
+    { method: "DELETE" }
+  );
+  return data?.ok ?? false;
+}
+
+/** Accept an org invite — adds user to org_user_members */
+export async function acceptOrgInvite(token: string): Promise<{ org_name: string; org_id: string } | null> {
+  const data = await apiFetch<{ ok: boolean; org_name: string; org_id: string }>(
+    `/api/v1/invites/org/${token}/accept`, { method: "POST" }
+  );
+  return data?.ok ? { org_name: data.org_name, org_id: data.org_id } : null;
+}
+
+/** Decline an org invite */
+export async function declineOrgInvite(token: string): Promise<boolean> {
+  const data = await apiFetch<{ ok: boolean }>(`/api/v1/invites/org/${token}/decline`, { method: "POST" });
   return data?.ok ?? false;
 }
 

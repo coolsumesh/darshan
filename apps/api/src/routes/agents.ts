@@ -603,6 +603,76 @@ ACK_URL: ${ackUrl}
     return { ok: true };
   });
 
+  // ── Org user invites (email-based, with notification flow) ─────────────────
+
+  // GET /api/v1/orgs/:id/user-invites — list pending invites for admin view
+  server.get<{ Params: { id: string } }>("/api/v1/orgs/:id/user-invites", async (req, reply) => {
+    const { rows: orgs } = await db.query(
+      `select id from organisations where id::text = $1 or slug = $1`, [req.params.id]
+    );
+    if (!orgs.length) return reply.status(404).send({ ok: false, error: "org not found" });
+    const { rows } = await db.query(
+      `select oui.id, oui.token, oui.invitee_email, oui.role, oui.expires_at, oui.created_at,
+              u.name as invited_by_name
+       from org_user_invites oui
+       left join users u on u.id = oui.invited_by
+       where oui.org_id = $1
+         and oui.accepted_at is null
+         and oui.declined_at is null
+         and oui.expires_at > now()
+       order by oui.created_at desc`,
+      [orgs[0].id]
+    );
+    return { ok: true, invites: rows };
+  });
+
+  // POST /api/v1/orgs/:id/user-invites — create invite by email
+  server.post<{
+    Params: { id: string };
+    Body: { email: string; role?: string };
+  }>("/api/v1/orgs/:id/user-invites", async (req, reply) => {
+    const reqUser = getRequestUser(req);
+    const { email, role = "member" } = req.body;
+    if (!email) return reply.status(400).send({ ok: false, error: "email required" });
+
+    const { rows: orgs } = await db.query(
+      `select id from organisations where id::text = $1 or slug = $1`, [req.params.id]
+    );
+    if (!orgs.length) return reply.status(404).send({ ok: false, error: "org not found" });
+
+    try {
+      const { rows } = await db.query(
+        `insert into org_user_invites (org_id, invitee_email, invited_by, role)
+         values ($1, lower($2), $3, $4)
+         on conflict do nothing
+         returning *`,
+        [orgs[0].id, email.trim(), reqUser?.userId ?? null, role]
+      );
+      if (!rows[0]) {
+        // Conflict: already has a pending invite — return the existing one
+        const { rows: existing } = await db.query(
+          `select * from org_user_invites
+           where org_id = $1 and lower(invitee_email) = lower($2)
+             and accepted_at is null and declined_at is null and expires_at > now()`,
+          [orgs[0].id, email.trim()]
+        );
+        return { ok: true, invite: existing[0] ?? null };
+      }
+      return { ok: true, invite: rows[0] };
+    } catch (err: unknown) {
+      return reply.status(500).send({ ok: false, error: String(err) });
+    }
+  });
+
+  // DELETE /api/v1/orgs/:id/user-invites/:inviteId — revoke invite
+  server.delete<{ Params: { id: string; inviteId: string } }>("/api/v1/orgs/:id/user-invites/:inviteId", async (req, reply) => {
+    await db.query(
+      `delete from org_user_invites where id::text = $1`,
+      [req.params.inviteId]
+    );
+    return { ok: true };
+  });
+
   // ── Projects assigned to an agent ──────────────────────────────────────────
   server.get<{ Params: { id: string } }>("/api/v1/agents/:id/projects", async (req, reply) => {
     const { rows: agents } = await db.query(

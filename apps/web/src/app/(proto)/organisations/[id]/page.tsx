@@ -6,7 +6,7 @@ import { useParams, useRouter, useSearchParams } from "next/navigation";
 import {
   Archive, Bot, Building2, ChevronRight, ExternalLink, FolderKanban,
   Lock, Plus, Save, Shield, Trash2, Upload, Users, X, Camera, Link2,
-  Crown, Check,
+  Crown, Check, Mail, Clock,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { Button } from "@/components/ui/button";
@@ -15,8 +15,9 @@ import {
   fetchOrg, updateOrg, deleteOrg, uploadOrgLogo, deleteOrgLogo,
   fetchOrgAgents, fetchOrgProjects, fetchOrgMembers, addOrgMember,
   updateOrgMemberRole, removeOrgMember, fetchAgents,
-  fetchOrgUserMembers, addOrgUserMember, removeOrgUserMember,
-  type OrgDetail, type OrgMember, type OrgUserMember,
+  fetchOrgUserMembers, removeOrgUserMember,
+  inviteOrgUser, fetchPendingOrgInvites, revokeOrgInvite,
+  type OrgDetail, type OrgMember, type OrgUserMember, type PendingOrgInvite,
 } from "@/lib/api";
 import type { Agent } from "@/lib/agents";
 
@@ -423,37 +424,51 @@ function GeneralTab({ org, canEdit, onUpdated, onDeleted }: {
 
 // ─── Tab: Members ─────────────────────────────────────────────────────────────
 function MembersTab({ orgId, canEdit }: { orgId: string; canEdit: boolean }) {
-  const [members,   setMembers]   = React.useState<OrgMember[]>([]);
-  const [users,     setUsers]     = React.useState<OrgUserMember[]>([]);
-  const [loading,   setLoading]   = React.useState(true);
-  const [showPicker, setShowPicker] = React.useState(false);
-  const [emailInput, setEmailInput] = React.useState("");
-  const [emailError, setEmailError] = React.useState("");
-  const [addingUser, setAddingUser] = React.useState(false);
+  const [members,        setMembers]        = React.useState<OrgMember[]>([]);
+  const [users,          setUsers]          = React.useState<OrgUserMember[]>([]);
+  const [pendingInvites, setPendingInvites] = React.useState<PendingOrgInvite[]>([]);
+  const [loading,        setLoading]        = React.useState(true);
+  const [showPicker,     setShowPicker]     = React.useState(false);
+  const [emailInput,     setEmailInput]     = React.useState("");
+  const [emailError,     setEmailError]     = React.useState("");
+  const [invitingUser,   setInvitingUser]   = React.useState(false);
+  const [inviteSent,     setInviteSent]     = React.useState("");
 
   async function reload() {
     setLoading(true);
-    const [m, u] = await Promise.all([fetchOrgMembers(orgId), fetchOrgUserMembers(orgId)]);
+    const [m, u, p] = await Promise.all([
+      fetchOrgMembers(orgId),
+      fetchOrgUserMembers(orgId),
+      fetchPendingOrgInvites(orgId),
+    ]);
     setMembers(m);
     setUsers(u);
+    setPendingInvites(p);
     setLoading(false);
   }
 
   React.useEffect(() => { reload(); }, [orgId]);
 
-  async function handleAddUser() {
+  async function handleInviteUser() {
     const email = emailInput.trim();
     if (!email) return;
-    setAddingUser(true);
+    setInvitingUser(true);
     setEmailError("");
-    const result = await addOrgUserMember(orgId, email);
+    setInviteSent("");
+    const result = await inviteOrgUser(orgId, email);
     if (result) {
-      setUsers(prev => [...prev.filter(u => u.user_id !== result.user_id), result]);
+      setPendingInvites(prev => [result, ...prev.filter(i => i.invitee_email !== result.invitee_email)]);
+      setInviteSent(email);
       setEmailInput("");
     } else {
-      setEmailError("No account found with that email. They need to sign up first.");
+      setEmailError("Failed to send invite. Please try again.");
     }
-    setAddingUser(false);
+    setInvitingUser(false);
+  }
+
+  async function handleRevokeInvite(inviteId: string) {
+    await revokeOrgInvite(orgId, inviteId);
+    setPendingInvites(prev => prev.filter(i => i.id !== inviteId));
   }
 
   async function handleRemoveUser(userId: string) {
@@ -531,19 +546,54 @@ function MembersTab({ orgId, canEdit }: { orgId: string; canEdit: boolean }) {
                   <input
                     type="email"
                     value={emailInput}
-                    onChange={e => { setEmailInput(e.target.value); setEmailError(""); }}
-                    onKeyDown={e => e.key === "Enter" && handleAddUser()}
-                    placeholder="Add person by email…"
-                    disabled={addingUser}
+                    onChange={e => { setEmailInput(e.target.value); setEmailError(""); setInviteSent(""); }}
+                    onKeyDown={e => e.key === "Enter" && handleInviteUser()}
+                    placeholder="Invite person by email…"
+                    disabled={invitingUser}
                     className="flex-1 rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm outline-none focus:border-brand-400 dark:border-white/10 dark:bg-white/5 dark:text-white disabled:opacity-50"
                   />
-                  <button onClick={handleAddUser} disabled={addingUser || !emailInput.trim()}
+                  <button onClick={handleInviteUser} disabled={invitingUser || !emailInput.trim()}
                     className="flex items-center gap-1.5 rounded-xl bg-brand-600 px-3 py-2 text-xs font-semibold text-white hover:bg-brand-700 disabled:opacity-40 transition-colors">
-                    <Plus className="h-3.5 w-3.5" />
-                    {addingUser ? "Adding…" : "Add"}
+                    <Mail className="h-3.5 w-3.5" />
+                    {invitingUser ? "Sending…" : "Invite"}
                   </button>
                 </div>
                 {emailError && <p className="text-xs text-red-500">{emailError}</p>}
+                {inviteSent && (
+                  <p className="flex items-center gap-1.5 text-xs text-emerald-600 dark:text-emerald-400">
+                    <Check className="h-3.5 w-3.5" /> Invite sent to {inviteSent}
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* Pending invites */}
+            {pendingInvites.length > 0 && (
+              <div className="flex flex-col gap-1.5">
+                <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-zinc-400">
+                  <Clock className="h-3 w-3" /> Pending invites ({pendingInvites.length})
+                </p>
+                {pendingInvites.map(inv => (
+                  <div key={inv.id} className="flex items-center gap-3 rounded-xl border border-dashed border-zinc-200 bg-zinc-50/50 px-4 py-2.5 dark:border-white/10 dark:bg-white/3">
+                    <Mail className="h-4 w-4 shrink-0 text-zinc-400" />
+                    <div className="min-w-0 flex-1">
+                      <div className="text-sm text-zinc-700 dark:text-zinc-300 truncate">{inv.invitee_email}</div>
+                      <div className="text-[11px] text-zinc-400">
+                        Invited · expires {new Date(inv.expires_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                      </div>
+                    </div>
+                    <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-semibold capitalize", ROLE_BADGE[inv.role])}>
+                      {inv.role}
+                    </span>
+                    {canEdit && (
+                      <button onClick={() => handleRevokeInvite(inv.id)}
+                        title="Revoke invite"
+                        className="grid h-6 w-6 shrink-0 place-items-center rounded-lg text-zinc-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-500/10 transition-colors">
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                  </div>
+                ))}
               </div>
             )}
           </div>

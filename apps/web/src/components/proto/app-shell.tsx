@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import * as React from "react";
 import { Suspense } from "react";
-import { authLogout, authMe, fetchMyInvites, fetchInviteByToken, acceptProjectInvite, declineProjectInvite, type ProjectInvite, type AuthUser } from "@/lib/api";
+import { authLogout, authMe, fetchMyInvites, fetchInviteByToken, acceptProjectInvite, declineProjectInvite, acceptOrgInvite, declineOrgInvite, type ProjectInvite, type AnyInvite, type AuthUser } from "@/lib/api";
 import {
   Activity,
   Bell,
@@ -246,16 +246,16 @@ function NotificationBellInner() {
   const router       = useRouter();
   const searchParams = useSearchParams();
   const [open,       setOpen]       = React.useState(false);
-  const [invites,    setInvites]    = React.useState<ProjectInvite[]>([]);
+  const [invites,    setInvites]    = React.useState<AnyInvite[]>([]);
   const [acting,     setActing]     = React.useState<string | null>(null);
   const panelRef = React.useRef<HTMLDivElement>(null);
 
-  // Fetch email-based pending invites
+  // Fetch all pending invites (project + org)
   React.useEffect(() => {
     fetchMyInvites().then(setInvites);
   }, []);
 
-  // Handle ?invite=TOKEN in URL — fetch that specific invite and open panel
+  // Handle ?invite=TOKEN in URL — fetch that specific project invite and open panel
   React.useEffect(() => {
     const token = searchParams.get("invite");
     if (!token) return;
@@ -266,7 +266,6 @@ function NotificationBellInner() {
         return exists ? prev : [inv, ...prev];
       });
       setOpen(true);
-      // Clean up URL param without reload
       const url = new URL(window.location.href);
       url.searchParams.delete("invite");
       window.history.replaceState({}, "", url.toString());
@@ -282,20 +281,33 @@ function NotificationBellInner() {
     return () => document.removeEventListener("mousedown", handler);
   }, [open]);
 
-  async function handleAccept(invite: ProjectInvite) {
+  async function handleAccept(invite: AnyInvite) {
     setActing(invite.token);
-    const result = await acceptProjectInvite(invite.token);
-    if (result) {
-      setInvites((prev) => prev.filter((i) => i.token !== invite.token));
-      setOpen(false);
-      router.push(`/projects/${result.project_slug}`);
+    if (invite.invite_type === "org") {
+      const result = await acceptOrgInvite(invite.token);
+      if (result) {
+        setInvites((prev) => prev.filter((i) => i.token !== invite.token));
+        setOpen(false);
+        router.push("/organisations");
+      }
+    } else {
+      const result = await acceptProjectInvite(invite.token);
+      if (result) {
+        setInvites((prev) => prev.filter((i) => i.token !== invite.token));
+        setOpen(false);
+        router.push(`/projects/${result.project_slug}`);
+      }
     }
     setActing(null);
   }
 
-  async function handleDecline(invite: ProjectInvite) {
+  async function handleDecline(invite: AnyInvite) {
     setActing(invite.token);
-    await declineProjectInvite(invite.token);
+    if (invite.invite_type === "org") {
+      await declineOrgInvite(invite.token);
+    } else {
+      await declineProjectInvite(invite.token);
+    }
     setInvites((prev) => prev.filter((i) => i.token !== invite.token));
     setActing(null);
   }
@@ -343,25 +355,36 @@ function NotificationBellInner() {
             ) : (
               invites.map((inv) => {
                 const isActing = acting === inv.token;
+                const isOrg = inv.invite_type === "org";
                 return (
                   <div key={inv.token} className="border-b border-white/5 px-4 py-4 last:border-0">
                     {/* Icon + text */}
                     <div className="flex items-start gap-3">
-                      <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-brand-500/15">
-                        <FolderKanban className="h-4 w-4 text-brand-400" />
+                      <div className={cn(
+                        "grid h-9 w-9 shrink-0 place-items-center rounded-xl",
+                        isOrg ? "bg-sky-500/15" : "bg-brand-500/15"
+                      )}>
+                        {isOrg
+                          ? <Building2 className="h-4 w-4 text-sky-400" />
+                          : <FolderKanban className="h-4 w-4 text-brand-400" />
+                        }
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-semibold text-white leading-snug">
-                          Project invitation
+                          {isOrg ? "Organisation invitation" : "Project invitation"}
                         </p>
                         <p className="mt-0.5 text-xs text-white/50 leading-snug">
                           <span className="text-white/70">{inv.invited_by_name ?? "Someone"}</span>
                           {" "}invited you to join{" "}
-                          <span className="text-white/70">{inv.project_name}</span>
+                          <span className="text-white/70">
+                            {isOrg ? inv.org_name : (inv as ProjectInvite).project_name}
+                          </span>
                           {" "}as{" "}
                           <span className={cn(
                             "font-semibold",
-                            inv.role === "admin" ? "text-violet-400" : "text-brand-400"
+                            inv.role === "admin" ? "text-violet-400"
+                            : inv.role === "owner" ? "text-amber-400"
+                            : "text-brand-400"
                           )}>
                             {inv.role}
                           </span>
