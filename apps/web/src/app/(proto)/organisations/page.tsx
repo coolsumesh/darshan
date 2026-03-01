@@ -21,7 +21,7 @@ import {
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type OrgType   = "own" | "partner" | "client" | "vendor";
-type OrgFilter = "all" | OrgType | "archived";
+type OrgFilter = "all" | OrgType | "admin" | "contributor" | "viewer" | "archived";
 type OrgView   = "grid" | "list";
 type PanelTab  = "overview" | "team" | "settings";
 
@@ -1214,10 +1214,27 @@ export default function OrganisationsPage() {
   const externalOrgs = orgs.filter(o => o.type !== "own");
   const totalAgents  = orgs.reduce((s, o) => s + (o.agent_count ?? 0), 0);
 
+  const roleFilters = new Set(["admin", "contributor", "viewer"]);
+  const typeFilters = new Set(["partner", "client", "vendor", "own"]);
+
+  const filteredMember = memberOrgs.filter(o => {
+    const st = (o as unknown as { status?: string }).status ?? "active";
+    if (filter === "archived" && st !== "archived") return false;
+    if (roleFilters.has(filter) && o.my_role !== filter) return false;
+    if (typeFilters.has(filter)) return false; // type filter → hide member orgs
+    if (query) {
+      const q = query.toLowerCase();
+      if (![o.name, o.slug, o.description ?? ""].some(s => s.toLowerCase().includes(q))) return false;
+    }
+    return true;
+  });
+
   const filteredExternal = externalOrgs.filter(o => {
     const st = (o as unknown as { status?: string }).status ?? "active";
-    if (filter === "archived"                               && st !== "archived") return false;
-    if (filter !== "all" && filter !== "archived" && o.type !== filter) return false;
+    if (filter === "archived" && st !== "archived") return false;
+    if (roleFilters.has(filter)) return false; // role filter → hide external orgs
+    if (filter === "own") return false;
+    if (typeFilters.has(filter) && filter !== "own" && o.type !== filter) return false;
     if (query) {
       const q = query.toLowerCase();
       if (![o.name, o.slug, o.description ?? ""].some(s => s.toLowerCase().includes(q))) return false;
@@ -1226,14 +1243,20 @@ export default function OrganisationsPage() {
   });
 
   const allTabs: { id: OrgFilter; label: string; count: number }[] = [
-    { id: "all",      label: "All",      count: orgs.length },
-    { id: "own",      label: "Own",      count: ownOrgs.length },
-    { id: "partner",  label: "Partner",  count: externalOrgs.filter(o => o.type === "partner").length },
-    { id: "client",   label: "Client",   count: externalOrgs.filter(o => o.type === "client").length },
-    { id: "vendor",   label: "Vendor",   count: externalOrgs.filter(o => o.type === "vendor").length },
-    { id: "archived", label: "Archived", count: orgs.filter(o => (o as unknown as { status?: string }).status === "archived").length },
+    { id: "all",         label: "All",         count: orgs.length },
+    // Ownership
+    { id: "own",         label: "Own",         count: ownOrgs.length },
+    // Role-based (orgs you belong to)
+    { id: "admin",       label: "Admin",       count: memberOrgs.filter(o => o.my_role === "admin").length },
+    { id: "contributor", label: "Contributor", count: memberOrgs.filter(o => o.my_role === "contributor").length },
+    { id: "viewer",      label: "Viewer",      count: memberOrgs.filter(o => o.my_role === "viewer").length },
+    // External org types
+    { id: "partner",     label: "Partner",     count: externalOrgs.filter(o => o.type === "partner").length },
+    { id: "client",      label: "Client",      count: externalOrgs.filter(o => o.type === "client").length },
+    { id: "vendor",      label: "Vendor",      count: externalOrgs.filter(o => o.type === "vendor").length },
+    { id: "archived",    label: "Archived",    count: orgs.filter(o => (o as unknown as { status?: string }).status === "archived").length },
   ];
-  // Only show tabs that have at least one org (always show "All")
+  // Only show tabs with count > 0 (always show "All")
   const FILTER_TABS = allTabs.filter(t => t.id === "all" || t.count > 0);
 
   return (
@@ -1318,22 +1341,22 @@ export default function OrganisationsPage() {
                 <OwnOrgCard key={o.id} org={o} onView={() => { setDetailOrg(o); setShowNew(false); }} />
               ))}
 
-              {/* Member orgs (admin / contributor / viewer of someone else's own org) */}
-              {filter === "all" && memberOrgs.length > 0 && (
+              {/* Member orgs (admin / contributor / viewer) */}
+              {(filter === "all" || roleFilters.has(filter)) && filteredMember.length > 0 && (
                 <>
-                  {ownOrgs.length > 0 && (
+                  {filter === "all" && (ownOrgs.length > 0) && (
                     <div className="mb-2 flex items-center gap-3">
                       <div className="h-px flex-1 bg-zinc-200 dark:bg-white/10" />
                       <span className="text-xs font-semibold uppercase tracking-widest text-zinc-400">Organisations I belong to</span>
                       <div className="h-px flex-1 bg-zinc-200 dark:bg-white/10" />
                     </div>
                   )}
-                  {memberOrgs.map(o => <MemberOrgCard key={o.id} org={o} />)}
+                  {filteredMember.map(o => <MemberOrgCard key={o.id} org={o} />)}
                 </>
               )}
 
               {/* External section divider */}
-              {(filter === "all") && externalOrgs.length > 0 && (
+              {filter === "all" && filteredExternal.length > 0 && (filteredMember.length > 0 || ownOrgs.length > 0) && (
                 <div className="mb-4 flex items-center gap-3">
                   <div className="h-px flex-1 bg-zinc-200 dark:bg-white/10" />
                   <span className="text-xs font-semibold uppercase tracking-widest text-zinc-400">External Organisations</span>
