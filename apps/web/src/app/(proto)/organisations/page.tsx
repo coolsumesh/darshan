@@ -19,7 +19,7 @@ import {
   type Org, type OrgDetail,
 } from "@/lib/api";
 
-// â”€â”€â”€ Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Types ────────────────────────────────────────────────────────────────────
 type OrgFilter = "all" | "owner" | "admin" | "contributor" | "viewer" | "archived";
 type OrgView   = "grid" | "list";
 type PanelTab  = "overview" | "team" | "settings";
@@ -37,7 +37,7 @@ type OrgProject = {
   id: string; name: string; slug: string; status: string; progress?: number;
 };
 
-// â”€â”€â”€ Role meta â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Role meta ────────────────────────────────────────────────────────────────
 const ROLE_META: Record<string, { label: string; desc: string; badge: string; accent: string }> = {
   owner:       { label: "Owner",       desc: "You run this org",    badge: "bg-purple-100 text-purple-700 dark:bg-purple-500/10 dark:text-purple-300", accent: "border-purple-500" },
   admin:       { label: "Admin",       desc: "You manage this org", badge: "bg-blue-100 text-blue-700 dark:bg-blue-500/10 dark:text-blue-300",         accent: "border-blue-500"   },
@@ -55,7 +55,7 @@ function avatarColor(name: string, override?: string | null): string {
 }
 
 function relTime(d?: string): string {
-  if (!d) return "â€”";
+  if (!d) return "—";
   const diff = Date.now() - new Date(d).getTime();
   const days = Math.floor(diff / 86400000);
   if (days < 1) return "today";
@@ -65,7 +65,7 @@ function relTime(d?: string): string {
 }
 
 function fmtDate(d?: string) {
-  if (!d) return "â€”";
+  if (!d) return "—";
   return new Date(d).toLocaleDateString("en-GB", { day:"numeric", month:"short", year:"numeric" });
 }
 
@@ -77,7 +77,7 @@ function ProgressBar({ value }: { value?: number }) {
   );
 }
 
-// â”€â”€â”€ OrgAvatar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── OrgAvatar ────────────────────────────────────────────────────────────────
 function OrgAvatar({ name, avatarUrl, color, size = 44, className }: {
   name: string; avatarUrl?: string | null; color?: string | null; size?: number; className?: string;
 }) {
@@ -97,7 +97,7 @@ function OrgAvatar({ name, avatarUrl, color, size = 44, className }: {
   );
 }
 
-// â”€â”€â”€ AvatarEditor â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── AvatarEditor ─────────────────────────────────────────────────────────────
 function AvatarEditor({ name, avatarUrl, color, onChange, onUpload, onRemove, size = 72 }: {
   name: string; avatarUrl?: string | null; color: string;
   onChange: (color: string) => void;
@@ -125,7 +125,7 @@ function AvatarEditor({ name, avatarUrl, color, onChange, onUpload, onRemove, si
 
   return (
     <div className="flex flex-col items-center gap-3">
-      {/* Avatar circle â€” clickable */}
+      {/* Avatar circle — clickable */}
       <div
         className="group relative cursor-pointer"
         onClick={() => fileRef.current?.click()}
@@ -182,12 +182,12 @@ function AvatarEditor({ name, avatarUrl, color, onChange, onUpload, onRemove, si
 
       <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/svg+xml,image/webp"
         className="hidden" onChange={handleFile} />
-      <p className="text-[11px] text-zinc-400">PNG, JPG, SVG Â· Max 2MB</p>
+      <p className="text-[11px] text-zinc-400">PNG, JPG, SVG · Max 2MB</p>
     </div>
   );
 }
 
-// â”€â”€â”€ New Org Panel â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── New Org Panel ────────────────────────────────────────────────────────────
 function NewOrgPanel({ onDone, onClose }: {
   onDone: (org: ExtOrg) => void; onClose: () => void;
 }) {
@@ -246,11 +246,11 @@ function NewOrgPanel({ onDone, onClose }: {
 
       {/* Scrollable body */}
       <div className="flex-1 overflow-y-auto p-5 flex flex-col gap-5">
-        {/* STEP 1 â€” Identity */}
+        {/* STEP 1 — Identity */}
         <div>
-          <p className="mb-4 text-[11px] font-semibold uppercase tracking-widest text-zinc-400">Step 1 â€” Identity</p>
+          <p className="mb-4 text-[11px] font-semibold uppercase tracking-widest text-zinc-400">Step 1 — Identity</p>
 
-          {/* Avatar editor â€” top & center */}
+          {/* Avatar editor — top & center */}
           <div className="mb-5 rounded-2xl bg-zinc-50 p-4 dark:bg-white/5">
             <AvatarEditor
               name={name}
@@ -268,7 +268,7 @@ function NewOrgPanel({ onDone, onClose }: {
             <label className="mb-1.5 block text-xs font-semibold text-zinc-700 dark:text-zinc-300">
               Organisation name <span className="text-red-500">*</span>
             </label>
-            <Input autoFocus placeholder="e.g. DesignCo, PartnerLabsâ€¦" value={name}
+            <Input autoFocus placeholder="e.g. DesignCo, PartnerLabs…" value={name}
               onChange={e => autoSlug(e.target.value)} />
           </div>
 
@@ -314,7 +314,7 @@ function NewOrgPanel({ onDone, onClose }: {
                 ? "bg-brand-600 text-white hover:bg-brand-700 shadow-sm"
                 : "bg-zinc-100 text-zinc-400 cursor-not-allowed dark:bg-white/10 dark:text-zinc-500"
             )}>
-            {saving ? "Creatingâ€¦" : "Create Organisation â†’"}
+            {saving ? "Creating…" : "Create Organisation →"}
           </button>
           {!canCreate && (
             <div className="absolute bottom-full mb-2 right-0 hidden group-hover:block z-10">
@@ -329,7 +329,7 @@ function NewOrgPanel({ onDone, onClose }: {
   );
 }
 
-// â”€â”€â”€ Org Detail Panel â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Org Detail Panel ─────────────────────────────────────────────────────────
 function OrgDetailPanel({ org: initialOrg, onClose, onUpdated, onDeleted }: {
   org: ExtOrg; onClose: () => void;
   onUpdated: (o: ExtOrg) => void;
@@ -448,7 +448,7 @@ function OrgDetailPanel({ org: initialOrg, onClose, onUpdated, onDeleted }: {
 
       {/* Tab content */}
       <div className="flex-1 overflow-y-auto">
-        {/* â”€â”€ OVERVIEW â”€â”€ */}
+        {/* ── OVERVIEW ── */}
         {tab === "overview" && (
           <div className="flex flex-col gap-0">
             {/* Identity card */}
@@ -513,7 +513,7 @@ function OrgDetailPanel({ org: initialOrg, onClose, onUpdated, onDeleted }: {
               {agents.length > 3 && (
                 <button onClick={() => setTab("team")}
                   className="mt-1 flex items-center gap-1 text-xs text-brand-600 hover:underline">
-                  â†’ See all {agents.length} in Team tab
+                  → See all {agents.length} in Team tab
                 </button>
               )}
               {agents.length === 0 && (
@@ -554,7 +554,7 @@ function OrgDetailPanel({ org: initialOrg, onClose, onUpdated, onDeleted }: {
           </div>
         )}
 
-        {/* â”€â”€ TEAM â”€â”€ */}
+        {/* ── TEAM ── */}
         {tab === "team" && (
           <div className="p-5">
             <div className="mb-4 flex items-center justify-between">
@@ -580,12 +580,12 @@ function OrgDetailPanel({ org: initialOrg, onClose, onUpdated, onDeleted }: {
                         <div className="text-sm font-semibold text-zinc-800 dark:text-zinc-200">{a.name}</div>
                         <div className="text-[11px] text-zinc-400">
                           {a.agent_type?.replace("ai_","") ?? "agent"}
-                          {a.model && ` Â· ${a.model}`}
+                          {a.model && ` · ${a.model}`}
                         </div>
                       </div>
                       <div className="flex shrink-0 items-center gap-2">
                         <span className={cn("text-[11px] font-semibold", isOnline ? "text-emerald-600" : "text-zinc-400")}>
-                          {isOnline ? "ðŸŸ¢ Online" : "â¬¤ Offline"}
+                          {isOnline ? "ðŸŸ¢ Online" : "⬤ Offline"}
                         </span>
                         <Link href="/agents" className="grid h-6 w-6 place-items-center rounded text-zinc-400 hover:text-brand-600">
                           <ExternalLink className="h-3.5 w-3.5" />
@@ -605,7 +605,7 @@ function OrgDetailPanel({ org: initialOrg, onClose, onUpdated, onDeleted }: {
           </div>
         )}
 
-        {/* â”€â”€ SETTINGS â”€â”€ */}
+        {/* ── SETTINGS ── */}
         {tab === "settings" && (
           <div className="flex flex-col gap-0">
             <div className="p-5 flex flex-col gap-4">
@@ -640,7 +640,7 @@ function OrgDetailPanel({ org: initialOrg, onClose, onUpdated, onDeleted }: {
                     className="flex-1 border-0 bg-zinc-50 px-3 py-2 text-sm text-zinc-900 outline-none dark:bg-zinc-900 dark:text-zinc-100" />
                 </div>
                 {slug !== org.slug && (
-                  <p className="mt-1 text-[11px] text-amber-600">âš  Changing slug will break existing links</p>
+                  <p className="mt-1 text-[11px] text-amber-600">⚠ Changing slug will break existing links</p>
                 )}
               </div>
 
@@ -654,7 +654,7 @@ function OrgDetailPanel({ org: initialOrg, onClose, onUpdated, onDeleted }: {
 
 
 
-              {/* Save button â€” always visible */}
+              {/* Save button — always visible */}
               <button onClick={handleSave} disabled={saving}
                 className={cn(
                   "flex items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-semibold transition-all",
@@ -662,7 +662,7 @@ function OrgDetailPanel({ org: initialOrg, onClose, onUpdated, onDeleted }: {
                     ? "bg-emerald-600 text-white"
                     : "bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-60"
                 )}>
-                {saving ? "Savingâ€¦" : saved ? "âœ“ Saved" : (<><Save className="h-4 w-4" /> Save changes</>)}
+                {saving ? "Saving…" : saved ? "✓ Saved" : (<><Save className="h-4 w-4" /> Save changes</>)}
               </button>
             </div>
 
@@ -686,7 +686,7 @@ function OrgDetailPanel({ org: initialOrg, onClose, onUpdated, onDeleted }: {
                       <div className="flex gap-2">
                         <button onClick={handleDelete} disabled={deleting}
                           className="flex-1 rounded-lg bg-red-600 py-1.5 text-xs font-semibold text-white hover:bg-red-700 disabled:opacity-60">
-                          {deleting ? "Deletingâ€¦" : "Yes, delete"}
+                          {deleting ? "Deleting…" : "Yes, delete"}
                         </button>
                         <button onClick={() => setConfirmDelete(false)}
                           className="flex-1 rounded-lg ring-1 ring-zinc-200 py-1.5 text-xs font-semibold text-zinc-600 dark:ring-white/10 dark:text-zinc-400">
@@ -717,8 +717,8 @@ function OrgDetailPanel({ org: initialOrg, onClose, onUpdated, onDeleted }: {
   );
 }
 
-// â”€â”€â”€ Own Org Featured Card â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-// â”€â”€â”€ Unified Org Card (role-based) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Own Org Featured Card ────────────────────────────────────────────────────
+// ─── Unified Org Card (role-based) ───────────────────────────────────────────
 function OrgCard({ org, onView, onArchive }: { org: ExtOrg; onView: () => void; onArchive?: () => void }) {
   const router = useRouter();
   const role = org.my_role ?? "owner";
@@ -826,7 +826,7 @@ function OrgCard({ org, onView, onArchive }: { org: ExtOrg; onView: () => void; 
   );
 }
 
-// â”€â”€â”€ Org List Row (role-based) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Org List Row (role-based) ────────────────────────────────────────────────
 function OrgListRow({ org, onView }: { org: ExtOrg; onView: () => void }) {
   const router = useRouter();
   const role = org.my_role ?? "owner";
@@ -852,11 +852,11 @@ function OrgListRow({ org, onView }: { org: ExtOrg; onView: () => void }) {
         <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-semibold capitalize", tm.badge)}>{tm.label}</span>
       </div>
       <div className="w-20 shrink-0 text-xs font-semibold">
-        <span className={isArchived ? "text-zinc-400" : "text-emerald-600"}>â— {isArchived ? "Archived" : "Active"}</span>
+        <span className={isArchived ? "text-zinc-400" : "text-emerald-600"}>● {isArchived ? "Archived" : "Active"}</span>
       </div>
       <div className="w-16 shrink-0 text-xs text-zinc-500">{org.agent_count ?? 0}</div>
       <div className="w-20 shrink-0 text-xs text-zinc-500">{org.project_count ?? 0}</div>
-      <div className="min-w-0 flex-1 text-xs text-zinc-400 truncate">{org.description ?? "â€”"}</div>
+      <div className="min-w-0 flex-1 text-xs text-zinc-400 truncate">{org.description ?? "—"}</div>
       <div className="flex shrink-0 items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
         <Link href={`/organisations/${org.id}`}
           className="flex items-center gap-1 rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-700 transition-colors">
@@ -867,9 +867,9 @@ function OrgListRow({ org, onView }: { org: ExtOrg; onView: () => void }) {
   );
 }
 
-// â”€â”€â”€ [REMOVED] OwnOrgCard, MemberOrgCard, ExternalOrgCard, ExternalOrgListRow â”€
+// ─── [REMOVED] OwnOrgCard, MemberOrgCard, ExternalOrgCard, ExternalOrgListRow ─
 
-// â”€â”€â”€ Page â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Page ─────────────────────────────────────────────────────────────────────
 export default function OrganisationsPage() {
   const [orgs,      setOrgs]      = React.useState<ExtOrg[]>([]);
   const [loading,   setLoading]   = React.useState(true);
@@ -893,7 +893,7 @@ export default function OrganisationsPage() {
     }
   }
 
-  // Split purely by role â€” no type
+  // Split purely by role — no type
   const ownOrgs        = orgs.filter(o => o.my_role === "owner" || !o.my_role);
   const memberOrgs     = orgs.filter(o => o.my_role && o.my_role !== "owner");
   const archivedCount  = orgs.filter(o => (o as unknown as { status?: string }).status === "archived").length;
@@ -944,7 +944,7 @@ export default function OrganisationsPage() {
             </button>
           </div>
 
-          {/* Stats â€” role-based org counts */}
+          {/* Stats — role-based org counts */}
           <div className="grid grid-cols-4 gap-3">
             {[
               { label: "Owner",       value: ownOrgs.length,                                          icon: Crown,    cls: "bg-purple-500", filter: "owner"       as OrgFilter },
@@ -968,7 +968,7 @@ export default function OrganisationsPage() {
             ))}
           </div>
 
-          {/* Filter tabs + search â€” only show tabs when there's something to filter */}
+          {/* Filter tabs + search — only show tabs when there's something to filter */}
           <div className="flex items-center border-b border-zinc-200 dark:border-[#2D2A45]">
             {FILTER_TABS.length > 1 && FILTER_TABS.map(tab => (
               <button key={tab.id} onClick={() => setFilter(tab.id)}
@@ -985,7 +985,7 @@ export default function OrganisationsPage() {
             <div className="ml-auto flex items-center gap-2 pb-2">
               <div className="relative">
                 <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-400" />
-                <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search orgsâ€¦"
+                <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search orgs…"
                   className="w-44 rounded-lg bg-zinc-100 py-1.5 pl-8 pr-3 text-xs focus:outline-none focus:ring-2 focus:ring-brand-400/40 dark:bg-white/10 dark:text-white" />
               </div>
               <div className="flex rounded-lg bg-zinc-100 p-0.5 dark:bg-white/10">
@@ -1002,14 +1002,14 @@ export default function OrganisationsPage() {
 
           {/* Content */}
           {loading ? (
-            <div className="py-16 text-center text-sm text-zinc-400">Loadingâ€¦</div>
+            <div className="py-16 text-center text-sm text-zinc-400">Loading…</div>
           ) : filteredOrgs.length === 0 ? (
             <div className="py-20 text-center">
               {query ? (
                 <>
                   <Search className="mx-auto mb-3 h-8 w-8 text-zinc-300" />
                   <p className="font-display font-bold text-zinc-700 dark:text-zinc-200">No orgs match &quot;{query}&quot;</p>
-                  <button onClick={() => setQuery("")} className="mt-2 text-sm text-brand-600 hover:underline">Ã— Clear</button>
+                  <button onClick={() => setQuery("")} className="mt-2 text-sm text-brand-600 hover:underline">× Clear</button>
                 </>
               ) : (
                 <>
