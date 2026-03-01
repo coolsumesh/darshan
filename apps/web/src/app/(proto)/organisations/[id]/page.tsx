@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import {
   Archive, Bot, Building2, ChevronRight, ExternalLink, FolderKanban,
-  Lock, Plus, Save, Shield, Trash2, Upload, Users, X, Camera, Link2,
+  Lock, Plus, Save, Trash2, Upload, Users, X, Camera, Link2,
   Crown, Check, Mail, Clock, Share2, ArrowDownToLine,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
@@ -1060,25 +1060,10 @@ export default function OrgSettingsPage() {
             </div>
             <div className="mt-1 flex items-center gap-2">
               <span className="font-mono text-xs text-zinc-400">@{org.slug}</span>
-              <span className={cn("text-xs font-semibold capitalize",
-                currentRole === "owner" ? "text-purple-600 dark:text-purple-400" :
-                currentRole === "admin" ? "text-blue-600 dark:text-blue-400" : "text-zinc-400")}>
-                {currentRole === "owner" && "👑"} {currentRole}
-              </span>
             </div>
             {org.description && <p className="mt-1 text-sm text-zinc-500 truncate">{org.description}</p>}
           </div>
         </div>
-
-        {/* Read-only warning */}
-        {!canEdit && (
-          <div className="flex items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-500/20 dark:bg-amber-500/10">
-            <Shield className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
-            <p className="text-sm font-medium text-amber-800 dark:text-amber-300">
-              You have read-only access to this organisation.
-            </p>
-          </div>
-        )}
 
         {/* Tab bar */}
         <div className="flex border-b border-zinc-200 dark:border-[#2D2A45]">
