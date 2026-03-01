@@ -912,7 +912,7 @@ export default function OrganisationsPage() {
   function matchesQuery(o: ExtOrg): boolean {
     if (!query) return true;
     const q = query.toLowerCase();
-    return [o.name, o.slug, o.description ?? ""].some(s => s.toLowerCase().includes(q));
+    return [o.name, o.slug, o.description].some(s => s?.toLowerCase().includes(q));
   }
 
   const filteredOrgs = orgs.filter(o => matchesFilter(o) && matchesQuery(o));
