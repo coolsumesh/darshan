@@ -24,8 +24,8 @@ export function verifyToken(token: string): JwtPayload | null {
 }
 
 /** Decode the session user from the darshan_token cookie on any request. */
-export function getRequestUser(req: { cookies?: unknown }): JwtPayload | null {
-  const token = (req.cookies as Record<string, string> | undefined)?.["darshan_token"];
+export function getRequestUser(req: unknown): JwtPayload | null {
+  const token = (req as { cookies?: Record<string, string> }).cookies?.["darshan_token"];
   if (!token) return null;
   return verifyToken(token);
 }
