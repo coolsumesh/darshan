@@ -17,7 +17,7 @@ import {
   updateOrgMemberRole, removeOrgMember, fetchAgents,
   fetchOrgUserMembers, removeOrgUserMember,
   inviteOrgUser, fetchPendingOrgInvites, revokeOrgInvite,
-  type OrgDetail, type OrgMember, type OrgUserMember, type PendingOrgInvite,
+  type OrgDetail, type OrgMember, type OrgUserMember, type PendingOrgInvite, type OrgUserRole,
 } from "@/lib/api";
 import type { Agent } from "@/lib/agents";
 
@@ -849,7 +849,7 @@ export default function OrgSettingsPage() {
 
   const [org, setOrg] = React.useState<OrgDetail | null>(null);
   const [loading, setLoading] = React.useState(true);
-  const [currentRole, setCurrentRole] = React.useState<"owner" | "admin" | "member">("member");
+  const [currentRole, setCurrentRole] = React.useState<OrgUserRole>("contributor");
   const [activeTab, setActiveTab] = React.useState<TabId>(initialTab);
 
   const canEdit = currentRole === "owner" || currentRole === "admin";
@@ -858,7 +858,7 @@ export default function OrgSettingsPage() {
     async function load() {
       const orgData = await fetchOrg(orgId);
       setOrg(orgData);
-      setCurrentRole(orgData?.my_role ?? "member");
+      setCurrentRole((orgData?.my_role ?? "contributor") as OrgUserRole);
       setLoading(false);
     }
     load();
