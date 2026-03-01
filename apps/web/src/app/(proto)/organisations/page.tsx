@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   Building2, Bot, Camera, Check, ChevronRight, ExternalLink,
-  LayoutGrid, List, Plus, Search, X, Zap, Users,
+  LayoutGrid, List, Lock, Plus, Search, X, Zap, Users,
   FolderKanban, Archive, Trash2, Save, Upload, Link2,
   MoreVertical, Crown, Settings, UserCircle,
 } from "lucide-react";
@@ -888,6 +888,119 @@ function OwnOrgCard({ org, onView }: { org: ExtOrg; onView: () => void }) {
   );
 }
 
+// ─── Member Org Card (admin / contributor / viewer of someone else's own org) ──
+const MEMBER_ROLE_META: Record<string, {
+  border: string; bg: string; badge: string; btnCls: string; btnLabel: string; btnHref: (id: string) => string;
+}> = {
+  admin: {
+    border: "border-blue-300 dark:border-blue-500/30",
+    bg: "bg-blue-50/30 dark:bg-blue-500/5",
+    badge: "bg-blue-100 text-blue-700 dark:bg-blue-500/10 dark:text-blue-300",
+    btnCls: "bg-blue-600 hover:bg-blue-700",
+    btnLabel: "Manage",
+    btnHref: (id) => `/organisations/${id}`,
+  },
+  contributor: {
+    border: "border-brand-200 dark:border-brand-500/20",
+    bg: "bg-brand-50/20 dark:bg-brand-500/5",
+    badge: "bg-brand-100 text-brand-700 dark:bg-brand-500/10 dark:text-brand-300",
+    btnCls: "bg-brand-600 hover:bg-brand-700",
+    btnLabel: "View Projects",
+    btnHref: () => `/projects`,
+  },
+  viewer: {
+    border: "border-zinc-200 dark:border-zinc-600/30",
+    bg: "bg-zinc-50/30 dark:bg-white/3",
+    badge: "bg-zinc-100 text-zinc-500 dark:bg-white/10 dark:text-zinc-400",
+    btnCls: "bg-zinc-600 hover:bg-zinc-700",
+    btnLabel: "View",
+    btnHref: (id) => `/organisations/${id}`,
+  },
+};
+
+function MemberOrgCard({ org }: { org: ExtOrg }) {
+  const router = useRouter();
+  const role = org.my_role ?? "contributor";
+  const meta = MEMBER_ROLE_META[role] ?? MEMBER_ROLE_META.contributor;
+  const [menuOpen, setMenuOpen] = React.useState(false);
+  const menuRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
+    }
+    if (menuOpen) document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [menuOpen]);
+
+  const borderColor = role === "admin" ? "#2563EB" : role === "viewer" ? "#A1A1AA" : "#7C3AED";
+
+  return (
+    <div className={cn("relative mb-4 overflow-hidden rounded-2xl border p-5", meta.border, meta.bg)}
+      style={{ borderLeft: `4px solid ${borderColor}` }}>
+      <div className="flex items-center gap-4">
+        <OrgAvatar name={org.name} avatarUrl={org.avatar_url} color={org.avatar_color} size={48} />
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="font-display text-base font-bold text-zinc-900 dark:text-white">{org.name}</h2>
+            <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-semibold capitalize", meta.badge)}>
+              {role}
+            </span>
+            <span className="font-mono text-xs text-zinc-400">@{org.slug}</span>
+            {role === "viewer" && <Lock className="h-3 w-3 text-zinc-400" />}
+          </div>
+          {org.description && <p className="mt-0.5 text-sm text-zinc-500 truncate">{org.description}</p>}
+          <div className="mt-1.5 flex items-center gap-4 text-xs text-zinc-400">
+            <span className="flex items-center gap-1"><Bot className="h-3.5 w-3.5" />{org.agent_count ?? 0} agents</span>
+            <span className="flex items-center gap-1"><FolderKanban className="h-3.5 w-3.5" />{org.project_count ?? 0} projects</span>
+            {(org.online_count ?? 0) > 0 && (
+              <span className="flex items-center gap-1"><Zap className="h-3.5 w-3.5 text-emerald-500" />{org.online_count} online</span>
+            )}
+          </div>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <Link href={meta.btnHref(org.id)}
+            className={cn("flex items-center gap-1.5 rounded-xl px-4 py-2 text-sm font-semibold text-white transition-colors", meta.btnCls)}>
+            {meta.btnLabel} <ChevronRight className="h-4 w-4" />
+          </Link>
+          <div className="relative" ref={menuRef}>
+            <button onClick={() => setMenuOpen(v => !v)}
+              className="grid h-8 w-8 place-items-center rounded-xl text-zinc-400 hover:bg-zinc-100 dark:hover:bg-white/10 transition-colors">
+              <MoreVertical className="h-4 w-4" />
+            </button>
+            {menuOpen && (
+              <div className="absolute right-0 top-full z-30 mt-1 w-44 rounded-xl bg-white py-1.5 shadow-xl ring-1 ring-zinc-200 dark:bg-[#1E1B33] dark:ring-[#2D2A45]">
+                <button onClick={() => { router.push(`/organisations/${org.id}`); setMenuOpen(false); }}
+                  className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-50 dark:text-zinc-300 dark:hover:bg-white/5">
+                  <Building2 className="h-3.5 w-3.5" /> View Org
+                </button>
+                {(role === "admin" || role === "contributor") && (
+                  <button onClick={() => { router.push(`/projects`); setMenuOpen(false); }}
+                    className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-50 dark:text-zinc-300 dark:hover:bg-white/5">
+                    <FolderKanban className="h-3.5 w-3.5" /> Projects
+                  </button>
+                )}
+                {role === "admin" && (
+                  <>
+                    <button onClick={() => { router.push(`/organisations/${org.id}?tab=members`); setMenuOpen(false); }}
+                      className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-50 dark:text-zinc-300 dark:hover:bg-white/5">
+                      <Users className="h-3.5 w-3.5" /> Members
+                    </button>
+                    <button onClick={() => { router.push(`/organisations/${org.id}?tab=agents`); setMenuOpen(false); }}
+                      className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-50 dark:text-zinc-300 dark:hover:bg-white/5">
+                      <Bot className="h-3.5 w-3.5" /> Agents
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── External Org Card ────────────────────────────────────────────────────────
 function ExternalOrgCard({ org, onView, onArchive }: {
   org: ExtOrg; onView: () => void;
@@ -1093,9 +1206,12 @@ export default function OrganisationsPage() {
     }
   }
 
-  // "Own" = orgs where you are the actual owner, not just a member
+  // "Own" = orgs where you are the actual owner
   const ownOrgs      = orgs.filter(o => o.type === "own" && (o.my_role === "owner" || !o.my_role));
-  const externalOrgs = orgs.filter(o => !(o.type === "own" && (o.my_role === "owner" || !o.my_role)));
+  // "Member" = own orgs where you're admin/contributor/viewer (someone else's org you belong to)
+  const memberOrgs   = orgs.filter(o => o.type === "own" && o.my_role && o.my_role !== "owner");
+  // "External" = partner/client/vendor orgs (created by you or linked externally)
+  const externalOrgs = orgs.filter(o => o.type !== "own");
   const totalAgents  = orgs.reduce((s, o) => s + (o.agent_count ?? 0), 0);
 
   const filteredExternal = externalOrgs.filter(o => {
@@ -1111,7 +1227,7 @@ export default function OrganisationsPage() {
 
   const FILTER_TABS: { id: OrgFilter; label: string; count: number }[] = [
     { id: "all",      label: "All",      count: orgs.length },
-    { id: "own",      label: "Own",      count: ownOrgs.length },
+    ...(ownOrgs.length > 0 ? [{ id: "own" as OrgFilter, label: "Own", count: ownOrgs.length }] : []),
     { id: "partner",  label: "Partner",  count: externalOrgs.filter(o => o.type === "partner").length },
     { id: "client",   label: "Client",   count: externalOrgs.filter(o => o.type === "client").length },
     { id: "vendor",   label: "Vendor",   count: externalOrgs.filter(o => o.type === "vendor").length },
@@ -1139,10 +1255,12 @@ export default function OrganisationsPage() {
           {/* Stats */}
           <div className="flex gap-4">
             {[
-              { label: "Total Orgs",   value: orgs.length,         icon: Building2, cls: "bg-brand-600"   },
-              { label: "Own",          value: ownOrgs.length,      icon: Users,     cls: "bg-indigo-500"  },
-              { label: "External",     value: externalOrgs.length, icon: Building2, cls: "bg-sky-500"     },
-              { label: "Agents total", value: totalAgents,         icon: Bot,       cls: "bg-emerald-500" },
+              { label: "Total Orgs",   value: orgs.length,                          icon: Building2, cls: "bg-brand-600"   },
+              ...(ownOrgs.length > 0
+                ? [{ label: "Own",        value: ownOrgs.length,    icon: Crown,     cls: "bg-indigo-500"  }]
+                : [{ label: "Member of",  value: memberOrgs.length, icon: Users,     cls: "bg-blue-500"    }]),
+              { label: "External",     value: externalOrgs.length,                  icon: Building2, cls: "bg-sky-500"     },
+              { label: "Agents total", value: totalAgents,                           icon: Bot,       cls: "bg-emerald-500" },
             ].map(({ label, value, icon: Icon, cls }) => (
               <div key={label} className="flex flex-1 items-center gap-3 rounded-2xl bg-white p-4 ring-1 ring-zinc-200 shadow-sm dark:bg-[#16132A] dark:ring-[#2D2A45]">
                 <div className={cn("grid h-9 w-9 shrink-0 place-items-center rounded-xl", cls)}>
@@ -1193,10 +1311,24 @@ export default function OrganisationsPage() {
             <div className="py-16 text-center text-sm text-zinc-400">Loading…</div>
           ) : (
             <div>
-              {/* Own org */}
+              {/* Own org (workspace owner) */}
               {(filter === "all" || filter === "own") && ownOrgs.map(o => (
                 <OwnOrgCard key={o.id} org={o} onView={() => { setDetailOrg(o); setShowNew(false); }} />
               ))}
+
+              {/* Member orgs (admin / contributor / viewer of someone else's own org) */}
+              {filter === "all" && memberOrgs.length > 0 && (
+                <>
+                  {ownOrgs.length > 0 && (
+                    <div className="mb-2 flex items-center gap-3">
+                      <div className="h-px flex-1 bg-zinc-200 dark:bg-white/10" />
+                      <span className="text-xs font-semibold uppercase tracking-widest text-zinc-400">Organisations I belong to</span>
+                      <div className="h-px flex-1 bg-zinc-200 dark:bg-white/10" />
+                    </div>
+                  )}
+                  {memberOrgs.map(o => <MemberOrgCard key={o.id} org={o} />)}
+                </>
+              )}
 
               {/* External section divider */}
               {(filter === "all") && externalOrgs.length > 0 && (
