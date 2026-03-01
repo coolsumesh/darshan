@@ -28,7 +28,7 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T | null> 
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 
-export type AuthUser = { id: string; email: string; name: string; role: string };
+export type AuthUser = { id: string; email: string; name: string; role: string; avatar_url?: string | null };
 
 export async function authLogin(email: string, password: string): Promise<AuthUser | null> {
   const data = await apiFetch<{ ok: boolean; user: AuthUser }>("/api/v1/auth/login", {

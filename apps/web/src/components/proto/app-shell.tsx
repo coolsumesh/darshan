@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import * as React from "react";
 import { Suspense } from "react";
-import { authLogout, fetchMyInvites, fetchInviteByToken, acceptProjectInvite, declineProjectInvite, type ProjectInvite } from "@/lib/api";
+import { authLogout, authMe, fetchMyInvites, fetchInviteByToken, acceptProjectInvite, declineProjectInvite, type ProjectInvite, type AuthUser } from "@/lib/api";
 import {
   Activity,
   Bell,
@@ -123,10 +123,12 @@ function Sidebar({
   pathname,
   collapsed,
   setCollapsed,
+  me,
 }: {
   pathname: string;
   collapsed: boolean;
   setCollapsed: (v: boolean) => void;
+  me?: AuthUser | null;
 }) {
   const isActive = (href: string, exact = false) =>
     exact ? pathname === href : pathname === href || pathname.startsWith(href + "/");
@@ -194,11 +196,20 @@ function Sidebar({
       <div className={cn("shrink-0 border-t border-white/5 py-3", collapsed ? "px-2" : "px-3")}>
         {!collapsed && (
           <div className="mt-2 flex items-center gap-2.5 rounded-lg px-3 py-2">
-            <div className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-brand-700 text-xs font-bold text-white">
-              S
-            </div>
+            {me?.avatar_url ? (
+              <img
+                src={me.avatar_url}
+                alt={me.name}
+                className="h-7 w-7 shrink-0 rounded-full object-cover"
+                referrerPolicy="no-referrer"
+              />
+            ) : (
+              <div className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-brand-700 text-xs font-bold text-white">
+                {me?.name?.[0]?.toUpperCase() ?? "?"}
+              </div>
+            )}
             <div className="min-w-0 flex-1">
-              <div className="truncate text-xs font-semibold text-white">Sumesh</div>
+              <div className="truncate text-xs font-semibold text-white">{me?.name ?? "…"}</div>
               <div className="flex items-center gap-1.5 mt-0.5">
                 <div className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
                 <span className="text-[10px] text-[#4A4468]">Online</span>
@@ -410,7 +421,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const [collapsed,     setCollapsed]     = React.useState(false);
   const [mobileOpen,    setMobileOpen]    = React.useState(false);
   const [userMenuOpen,  setUserMenuOpen]  = React.useState(false);
+  const [me,            setMe]            = React.useState<AuthUser | null>(null);
   const userMenuRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => { authMe().then(setMe); }, []);
 
   // Close user menu on outside click
   React.useEffect(() => {
@@ -528,15 +542,24 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               onClick={() => setUserMenuOpen((v) => !v)}
               className="flex items-center gap-2 rounded-lg px-2 py-1 transition-colors hover:bg-white/10"
             >
-              <div
-                className="grid h-7 w-7 place-items-center rounded-full text-xs font-bold text-white"
-                style={{ background: "linear-gradient(135deg,#7C3AED,#6366F1)" }}
-              >
-                S
-              </div>
+              {me?.avatar_url ? (
+                <img
+                  src={me.avatar_url}
+                  alt={me.name}
+                  className="h-7 w-7 rounded-full object-cover ring-2 ring-white/20"
+                  referrerPolicy="no-referrer"
+                />
+              ) : (
+                <div
+                  className="grid h-7 w-7 place-items-center rounded-full text-xs font-bold text-white"
+                  style={{ background: "linear-gradient(135deg,#7C3AED,#6366F1)" }}
+                >
+                  {me?.name?.[0]?.toUpperCase() ?? "?"}
+                </div>
+              )}
               <div className="hidden sm:flex flex-col items-start leading-tight">
-                <span className="text-xs font-semibold text-white">Sumesh</span>
-                <span className="text-[10px] text-white/40">Admin</span>
+                <span className="text-xs font-semibold text-white">{me?.name ?? "…"}</span>
+                <span className="text-[10px] text-white/40">{me?.role ?? ""}</span>
               </div>
               <ChevronDown className={cn("hidden sm:block h-3 w-3 text-white/30 transition-transform", userMenuOpen && "rotate-180")} />
             </button>
@@ -579,14 +602,14 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               aria-label="Close navigation"
             />
             <div className="absolute inset-y-0 left-0 flex">
-              <Sidebar pathname={pathname} collapsed={false} setCollapsed={() => setMobileOpen(false)} />
+              <Sidebar pathname={pathname} collapsed={false} setCollapsed={() => setMobileOpen(false)} me={me} />
             </div>
           </div>
         )}
 
         {/* Desktop sidebar */}
         <div className="hidden lg:flex">
-          <Sidebar pathname={pathname} collapsed={collapsed} setCollapsed={handleCollapse} />
+          <Sidebar pathname={pathname} collapsed={collapsed} setCollapsed={handleCollapse} me={me} />
         </div>
 
         {/* Main content area */}

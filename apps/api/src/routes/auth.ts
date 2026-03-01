@@ -83,7 +83,12 @@ export async function registerAuth(server: FastifyInstance) {
     if (!token) return reply.status(401).send({ ok: false, error: "not authenticated" });
     const payload = verifyToken(token);
     if (!payload) return reply.status(401).send({ ok: false, error: "invalid token" });
-    return { ok: true, user: payload };
+    // Fetch avatar_url from DB (not in JWT to keep tokens small)
+    const { rows } = await db.query(
+      `select avatar_url from users where id = $1`,
+      [payload.userId]
+    );
+    return { ok: true, user: { ...payload, avatar_url: rows[0]?.avatar_url ?? null } };
   });
 
   // ── Google OAuth 2.0 ────────────────────────────────────────────────────────
