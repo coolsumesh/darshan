@@ -303,9 +303,32 @@ export async function fetchOrgProjects(idOrSlug: string): Promise<{ id: string; 
   return data?.ok ? data.projects : [];
 }
 
-export async function fetchOrgAgents(idOrSlug: string): Promise<Agent[]> {
-  const data = await apiFetch<{ ok: boolean; agents: Agent[] }>(`/api/v1/orgs/${idOrSlug}/agents`);
+export type OrgAgentWithContrib = Agent & {
+  source: "native" | "contributed";
+  contributed_by_user_id: string | null;
+  contributed_by_name: string | null;
+  member_role?: string;
+};
+
+export async function fetchOrgAgents(idOrSlug: string): Promise<OrgAgentWithContrib[]> {
+  const data = await apiFetch<{ ok: boolean; agents: OrgAgentWithContrib[] }>(`/api/v1/orgs/${idOrSlug}/agents`);
   return data?.ok ? data.agents : [];
+}
+
+export async function contributeAgentToOrg(orgId: string, agentId: string): Promise<boolean> {
+  const data = await apiFetch<{ ok: boolean }>(`/api/v1/orgs/${orgId}/agent-contributions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ agent_id: agentId }),
+  });
+  return data?.ok ?? false;
+}
+
+export async function withdrawAgentFromOrg(orgId: string, agentId: string): Promise<boolean> {
+  const data = await apiFetch<{ ok: boolean }>(`/api/v1/orgs/${orgId}/agent-contributions/${agentId}`, {
+    method: "DELETE",
+  });
+  return data?.ok ?? false;
 }
 
 export async function uploadOrgLogo(idOrSlug: string, file: File): Promise<string | null> {

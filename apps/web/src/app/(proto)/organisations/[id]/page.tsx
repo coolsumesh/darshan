@@ -6,7 +6,7 @@ import { useParams, useRouter, useSearchParams } from "next/navigation";
 import {
   Archive, Bot, Building2, ChevronRight, ExternalLink, FolderKanban,
   Lock, Plus, Save, Shield, Trash2, Upload, Users, X, Camera, Link2,
-  Crown, Check, Mail, Clock,
+  Crown, Check, Mail, Clock, Share2, ArrowDownToLine,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { Button } from "@/components/ui/button";
@@ -17,7 +17,9 @@ import {
   updateOrgMemberRole, removeOrgMember, fetchAgents,
   fetchOrgUserMembers, removeOrgUserMember,
   inviteOrgUser, fetchPendingOrgInvites, revokeOrgInvite,
+  contributeAgentToOrg, withdrawAgentFromOrg, authMe,
   type OrgDetail, type OrgMember, type OrgUserMember, type PendingOrgInvite, type OrgUserRole,
+  type OrgAgentWithContrib,
 } from "@/lib/api";
 import type { Agent } from "@/lib/agents";
 
@@ -714,75 +716,193 @@ function MembersTab({ orgId, canEdit }: { orgId: string; canEdit: boolean }) {
 }
 
 // ─── Tab: Agents ──────────────────────────────────────────────────────────────
-function AgentsTab({ orgId, canEdit }: { orgId: string; canEdit: boolean }) {
-  const [agents, setAgents] = React.useState<OrgAgent[]>([]);
+function AgentsTab({ orgId, canEdit, currentRole }: { orgId: string; canEdit: boolean; currentRole: OrgUserRole }) {
+  const [agents, setAgents] = React.useState<OrgAgentWithContrib[]>([]);
   const [loading, setLoading] = React.useState(true);
-  const [showPicker, setShowPicker] = React.useState(false);
+  const [meId, setMeId] = React.useState<string | null>(null);
+  const [showContributePicker, setShowContributePicker] = React.useState(false);
+  const [withdrawing, setWithdrawing] = React.useState<string | null>(null);
+
+  const canContribute = currentRole !== "viewer";
 
   async function reload() {
     setLoading(true);
     const a = await fetchOrgAgents(orgId);
-    setAgents(a as OrgAgent[]);
+    setAgents(a);
     setLoading(false);
   }
 
-  React.useEffect(() => { reload(); }, [orgId]);
+  React.useEffect(() => {
+    reload();
+    authMe().then(u => setMeId(u?.id ?? null));
+  }, [orgId]);
 
-  const existingIds = agents.map(a => a.id);
+  const nativeAgents     = agents.filter(a => !a.source || a.source === "native");
+  const contributedAgents = agents.filter(a => a.source === "contributed");
+  const existingIds      = agents.map(a => a.id);
+
+  async function handleContribute(agent: Agent) {
+    const ok = await contributeAgentToOrg(orgId, agent.id);
+    if (ok) { setShowContributePicker(false); await reload(); }
+  }
+
+  async function handleWithdraw(agentId: string) {
+    setWithdrawing(agentId);
+    await withdrawAgentFromOrg(orgId, agentId);
+    setWithdrawing(null);
+    await reload();
+  }
 
   if (loading) return <div className="py-12 text-center text-sm text-zinc-400">Loading…</div>;
 
   return (
-    <div className="flex flex-col gap-4">
-      <div className="flex items-center justify-between">
-        <p className="text-xs font-semibold uppercase tracking-wide text-zinc-400">
-          Agents ({agents.length})
-        </p>
-        {canEdit && (
-          <Link href="/agents"
-            className="flex items-center gap-1.5 rounded-xl bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-700 transition-colors">
-            <Plus className="h-3.5 w-3.5" /> Add Agent
-          </Link>
+    <div className="flex flex-col gap-6">
+
+      {/* ── Org-owned agents ── */}
+      <div className="flex flex-col gap-3">
+        <div className="flex items-center justify-between">
+          <p className="text-xs font-semibold uppercase tracking-wide text-zinc-400">
+            Org Agents ({nativeAgents.length})
+          </p>
+          {canEdit && (
+            <Link href="/agents"
+              className="flex items-center gap-1.5 rounded-xl bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-700 transition-colors">
+              <Plus className="h-3.5 w-3.5" /> Add Agent
+            </Link>
+          )}
+        </div>
+
+        {nativeAgents.length === 0 ? (
+          <div className="flex flex-col items-center py-8">
+            <Bot className="mb-3 h-8 w-8 text-zinc-300" />
+            <p className="text-sm font-medium text-zinc-500">No org agents yet</p>
+            {canEdit && (
+              <Link href="/agents" className="mt-3 text-sm text-brand-600 hover:underline">+ Onboard agent</Link>
+            )}
+          </div>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {nativeAgents.map(a => {
+              const isOnline = a.status === "online";
+              return (
+                <div key={a.id} className="flex items-center gap-3 rounded-xl bg-zinc-50 px-4 py-3 dark:bg-white/5">
+                  <div className="relative">
+                    <AgentAvatar name={a.name} size={36} />
+                    <span className={cn("absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full ring-1 ring-white dark:ring-[#16132A]",
+                      isOnline ? "bg-emerald-400" : "bg-zinc-400")} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-semibold text-zinc-900 dark:text-white">{a.name}</div>
+                    <div className="text-[11px] text-zinc-400">
+                      {a.agent_type?.replace("ai_", "") ?? "agent"}
+                      {a.model && ` · ${a.model}`}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className={cn("text-[11px] font-semibold", isOnline ? "text-emerald-600" : "text-zinc-400")}>
+                      {isOnline ? "🟢 Online" : "⬤ Offline"}
+                    </span>
+                    <Link href="/agents"
+                      className="grid h-6 w-6 place-items-center rounded-lg text-zinc-400 hover:text-brand-600 transition-colors">
+                      <ExternalLink className="h-3.5 w-3.5" />
+                    </Link>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         )}
       </div>
 
-      {agents.length === 0 ? (
-        <div className="flex flex-col items-center py-12">
-          <Bot className="mb-3 h-8 w-8 text-zinc-300" />
-          <p className="text-sm font-medium text-zinc-500">No agents yet</p>
-          <Link href="/agents" className="mt-3 text-sm text-brand-600 hover:underline">+ Onboard agent</Link>
+      <div className="h-px bg-zinc-100 dark:bg-white/5" />
+
+      {/* ── Contributed agents ── */}
+      <div className="flex flex-col gap-3">
+        <div className="flex items-center justify-between">
+          <p className="text-xs font-semibold uppercase tracking-wide text-zinc-400">
+            Contributed Agents ({contributedAgents.length})
+          </p>
+          {canContribute && (
+            <button onClick={() => setShowContributePicker(true)}
+              className="flex items-center gap-1.5 rounded-xl border border-brand-300 bg-brand-50 px-3 py-1.5 text-xs font-semibold text-brand-700 hover:bg-brand-100 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-300 dark:hover:bg-brand-500/20 transition-colors">
+              <Share2 className="h-3.5 w-3.5" /> Contribute Agent
+            </button>
+          )}
         </div>
-      ) : (
-        <div className="flex flex-col gap-2">
-          {agents.map(a => {
-            const isOnline = a.status === "online";
-            return (
-              <div key={a.id} className="flex items-center gap-3 rounded-xl bg-zinc-50 px-4 py-3 dark:bg-white/5">
-                <div className="relative">
-                  <AgentAvatar name={a.name} size={36} />
-                  <span className={cn("absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full ring-1 ring-white dark:ring-[#16132A]",
-                    isOnline ? "bg-emerald-400" : "bg-zinc-400")} />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="text-sm font-semibold text-zinc-900 dark:text-white">{a.name}</div>
-                  <div className="text-[11px] text-zinc-400">
-                    {a.agent_type?.replace("ai_", "") ?? "agent"}
-                    {a.model && ` · ${a.model}`}
+
+        <p className="text-[11px] text-zinc-400 -mt-1">
+          Members can lend their own agents to this org for project work, without transferring ownership.
+        </p>
+
+        {contributedAgents.length === 0 ? (
+          <div className="flex flex-col items-center py-8">
+            <Share2 className="mb-3 h-7 w-7 text-zinc-300" />
+            <p className="text-sm font-medium text-zinc-500">No contributed agents yet</p>
+            {canContribute && (
+              <button onClick={() => setShowContributePicker(true)} className="mt-3 text-sm text-brand-600 hover:underline">
+                + Contribute one of your agents
+              </button>
+            )}
+          </div>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {contributedAgents.map(a => {
+              const isOnline = a.status === "online";
+              const isMyContrib = a.contributed_by_user_id === meId;
+              const canWithdraw = isMyContrib || canEdit;
+              return (
+                <div key={a.id} className="flex items-center gap-3 rounded-xl border border-brand-100 bg-brand-50/50 px-4 py-3 dark:border-brand-500/10 dark:bg-brand-500/5">
+                  <div className="relative">
+                    <AgentAvatar name={a.name} size={36} />
+                    <span className={cn("absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full ring-1 ring-white dark:ring-[#16132A]",
+                      isOnline ? "bg-emerald-400" : "bg-zinc-400")} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="text-sm font-semibold text-zinc-900 dark:text-white">{a.name}</span>
+                      <span className="flex items-center gap-0.5 rounded-full bg-brand-100 px-1.5 py-0.5 text-[10px] font-semibold text-brand-700 dark:bg-brand-500/15 dark:text-brand-300">
+                        <Share2 className="h-2.5 w-2.5" /> Contributed
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <span className="text-[11px] text-zinc-400">
+                        {a.agent_type?.replace("ai_", "") ?? "agent"}{a.model && ` · ${a.model}`}
+                      </span>
+                      {a.contributed_by_name && (
+                        <span className="text-[11px] text-zinc-400">· by <span className="font-medium text-zinc-600 dark:text-zinc-300">{a.contributed_by_name}</span></span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className={cn("text-[11px] font-semibold", isOnline ? "text-emerald-600" : "text-zinc-400")}>
+                      {isOnline ? "🟢 Online" : "⬤ Offline"}
+                    </span>
+                    {canWithdraw && (
+                      <button
+                        onClick={() => handleWithdraw(a.id)}
+                        disabled={withdrawing === a.id}
+                        title={isMyContrib ? "Withdraw your agent" : "Remove contributed agent"}
+                        className="flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-semibold text-zinc-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-500/10 transition-colors disabled:opacity-40">
+                        <ArrowDownToLine className="h-3 w-3" />
+                        {withdrawing === a.id ? "…" : isMyContrib ? "Withdraw" : "Remove"}
+                      </button>
+                    )}
                   </div>
                 </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  <span className={cn("text-[11px] font-semibold", isOnline ? "text-emerald-600" : "text-zinc-400")}>
-                    {isOnline ? "🟢 Online" : "⬤ Offline"}
-                  </span>
-                  <Link href="/agents"
-                    className="grid h-6 w-6 place-items-center rounded-lg text-zinc-400 hover:text-brand-600 transition-colors">
-                    <ExternalLink className="h-3.5 w-3.5" />
-                  </Link>
-                </div>
-              </div>
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Contribute picker */}
+      {showContributePicker && (
+        <AgentPickerModal
+          title="Contribute an Agent"
+          excludeIds={existingIds}
+          onPick={handleContribute}
+          onClose={() => setShowContributePicker(false)}
+        />
       )}
     </div>
   );
@@ -975,7 +1095,7 @@ export default function OrgSettingsPage() {
             <MembersTab orgId={org.id} canEdit={canEdit} />
           )}
           {activeTab === "agents" && (
-            <AgentsTab orgId={org.id} canEdit={canEdit} />
+            <AgentsTab orgId={org.id} canEdit={canEdit} currentRole={currentRole} />
           )}
           {activeTab === "projects" && (
             <ProjectsTab orgId={org.id} />

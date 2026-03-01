@@ -183,18 +183,129 @@ export async function registerAgents(server: FastifyInstance, db: pg.Pool) {
       `select id from organisations where id::text = $1 or slug = $1`, [req.params.id]
     );
     if (!orgs.length) return reply.status(404).send({ ok: false, error: "org not found" });
+    const orgId = orgs[0].id;
     const { rows } = await db.query(
       `select a.id, a.name, a.status, a.agent_type, a.model, a.provider,
               a.capabilities, a.ping_status, a.last_seen_at, a.org_id,
-              coalesce(om.role, 'member') as member_role
+              coalesce(om.role, 'member') as member_role,
+              'native'::text as source,
+              null::uuid as contributed_by_user_id,
+              null::text as contributed_by_name
        from agents a
        left join org_members om on om.agent_id = a.id and om.org_id = $1
        where a.org_id = $1 and a.agent_type = 'ai_agent'
-       order by lower(a.name) asc`,
-      [orgs[0].id]
+       union all
+       select a.id, a.name, a.status, a.agent_type, a.model, a.provider,
+              a.capabilities, a.ping_status, a.last_seen_at, a.org_id,
+              'contributor'::text as member_role,
+              'contributed'::text as source,
+              oac.contributed_by as contributed_by_user_id,
+              u.name as contributed_by_name
+       from org_agent_contributions oac
+       join agents a on a.id = oac.agent_id
+       join users u on u.id = oac.contributed_by
+       where oac.org_id = $1 and oac.status = 'active'
+       order by lower(name) asc`,
+      [orgId]
     );
     return { ok: true, agents: rows };
   });
+
+  // ── Contribute an agent to an org ──────────────────────────────────────────
+  server.post<{ Params: { id: string }; Body: { agent_id: string } }>(
+    "/api/v1/orgs/:id/agent-contributions",
+    async (req, reply) => {
+      const user = getRequestUser(req);
+      if (!user) return reply.status(401).send({ ok: false, error: "unauthorized" });
+
+      const { rows: orgs } = await db.query(
+        `select id from organisations where id::text = $1 or slug = $1`, [req.params.id]
+      );
+      if (!orgs.length) return reply.status(404).send({ ok: false, error: "org not found" });
+      const orgId = orgs[0].id;
+
+      // Check user is a member of target org (any role)
+      const { rows: membership } = await db.query(`
+        select 1 from org_user_members where org_id = $1 and user_id = $2
+        union all
+        select 1 from organisations where id = $1 and owner_user_id = $2
+        limit 1
+      `, [orgId, user.userId]);
+      if (!membership.length) return reply.status(403).send({ ok: false, error: "not a member of this org" });
+
+      const agentId = (req.body as { agent_id: string }).agent_id;
+      if (!agentId) return reply.status(400).send({ ok: false, error: "agent_id required" });
+
+      // Check user has control over the agent (owns or admins the agent's org)
+      const { rows: agentRows } = await db.query(`
+        select a.id, a.org_id from agents a
+        join organisations o on o.id = a.org_id
+        where a.id::text = $1
+          and (
+            o.owner_user_id = $2
+            or exists (
+              select 1 from org_user_members
+              where org_id = a.org_id and user_id = $2 and role in ('owner', 'admin')
+            )
+          )
+      `, [agentId, user.userId]);
+      if (!agentRows.length) return reply.status(403).send({ ok: false, error: "agent not found or you don't have permission to contribute it" });
+      if (agentRows[0].org_id === orgId) return reply.status(400).send({ ok: false, error: "agent already belongs to this org" });
+
+      // Upsert — re-activate if previously withdrawn
+      const { rows } = await db.query(`
+        insert into org_agent_contributions (org_id, agent_id, contributed_by, status)
+        values ($1, $2, $3, 'active')
+        on conflict (org_id, agent_id) do update set status = 'active', contributed_by = $3
+        returning *
+      `, [orgId, agentId, user.userId]);
+
+      return { ok: true, contribution: rows[0] };
+    }
+  );
+
+  // ── Withdraw a contributed agent from an org ────────────────────────────────
+  server.delete<{ Params: { id: string; agentId: string } }>(
+    "/api/v1/orgs/:id/agent-contributions/:agentId",
+    async (req, reply) => {
+      const user = getRequestUser(req);
+      if (!user) return reply.status(401).send({ ok: false, error: "unauthorized" });
+
+      const { rows: orgs } = await db.query(
+        `select id from organisations where id::text = $1 or slug = $1`, [req.params.id]
+      );
+      if (!orgs.length) return reply.status(404).send({ ok: false, error: "org not found" });
+      const orgId = orgs[0].id;
+
+      const { rows: contributions } = await db.query(`
+        select contributed_by from org_agent_contributions
+        where org_id = $1 and agent_id::text = $2 and status = 'active'
+      `, [orgId, req.params.agentId]);
+      if (!contributions.length) return reply.status(404).send({ ok: false, error: "contribution not found" });
+
+      const isContributor = contributions[0].contributed_by === user.userId;
+
+      // Check if user is admin/owner of target org
+      const { rows: adminCheck } = await db.query(`
+        select 1 from org_user_members where org_id = $1 and user_id = $2 and role in ('owner', 'admin')
+        union all
+        select 1 from organisations where id = $1 and owner_user_id = $2
+        limit 1
+      `, [orgId, user.userId]);
+      const isOrgAdmin = adminCheck.length > 0;
+
+      if (!isContributor && !isOrgAdmin) {
+        return reply.status(403).send({ ok: false, error: "only the contributor or org admin can withdraw this agent" });
+      }
+
+      await db.query(`
+        update org_agent_contributions set status = 'withdrawn'
+        where org_id = $1 and agent_id::text = $2
+      `, [orgId, req.params.agentId]);
+
+      return { ok: true };
+    }
+  );
 
   // ── Onboard a new agent under an org ───────────────────────────────────────
   server.post<{
