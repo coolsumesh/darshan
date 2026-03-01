@@ -227,6 +227,18 @@ export async function createOrg(payload: { name: string; slug: string; descripti
   return data?.ok ? data.org : null;
 }
 
+export async function createAgent(payload: {
+  name: string; desc?: string; agent_type?: string;
+  model?: string; provider?: string; capabilities?: string[]; endpoint_type?: string;
+}): Promise<{ agent_id: string; callback_token: string } | null> {
+  const data = await apiFetch<{ ok: boolean; agent_id: string; callback_token: string }>("/api/v1/agents", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return data?.ok ? { agent_id: data.agent_id, callback_token: data.callback_token } : null;
+}
+
 export async function createOrgAgent(orgId: string, payload: {
   name: string; desc?: string; agent_type?: string;
   model?: string; provider?: string; capabilities?: string[]; endpoint_type?: string;

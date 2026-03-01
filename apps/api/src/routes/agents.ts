@@ -11,7 +11,73 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 export async function registerAgents(server: FastifyInstance, db: pg.Pool) {
 
-  // ── List all agents (with org info) ────────────────────────────────────────
+  // ── Create personal agent (no org required) ────────────────────────────────
+  server.post<{
+    Body: {
+      name: string; desc?: string; model?: string; provider?: string;
+      agent_type?: string; capabilities?: string[]; endpoint_type?: string;
+    };
+  }>("/api/v1/agents", async (req, reply) => {
+    const user = getRequestUser(req);
+    if (!user) return reply.status(401).send({ ok: false, error: "not authenticated" });
+
+    const { name, desc, model, provider, agent_type = "ai_agent",
+            capabilities = [], endpoint_type = "openclaw_poll" } = req.body ?? {};
+    if (!name?.trim()) return reply.status(400).send({ ok: false, error: "name required" });
+
+    const token = randomBytes(32).toString("hex");
+    const { rows } = await db.query(
+      `insert into agents
+         (name, description, status, owner_user_id, agent_type, model, provider,
+          capabilities, endpoint_type, endpoint_config, callback_token, ping_status)
+       values ($1,$2,'offline',$3,$4,$5,$6,$7,$8,$9,$10,'unknown') returning *`,
+      [name.trim(), desc ?? null, user.userId, agent_type,
+       model ?? null, provider ?? null, JSON.stringify(capabilities),
+       endpoint_type, JSON.stringify({}), token]
+    );
+    const agent = rows[0];
+
+    if (endpoint_type === "openclaw_poll") {
+      const baseUrl = "https://darshan.caringgems.in/api/backend/api/v1";
+      const inboxUrl = `${baseUrl}/agents/${agent.id}/inbox`;
+      const ackUrl   = `${baseUrl}/agents/${agent.id}/inbox/ack`;
+      const heartbeatBlock =
+`## Darshan Agent Inbox — ${name}
+AGENT_ID: ${agent.id}
+TOKEN: ${token}
+INBOX_URL: ${inboxUrl}
+ACK_URL: ${ackUrl}
+
+### Steps (run on every heartbeat):
+1. GET INBOX_URL with header: Authorization: Bearer ${token}
+2. For each pending item:
+
+**type = "ping"**
+POST ACK_URL: { inbox_id, callback_token: "${token}", response: "pong — ${name} online" }
+
+**type = "task_assigned"**
+Execute the task, then POST ACK_URL: { inbox_id, callback_token: "${token}", response: "done" }
+
+**type = "welcome"**
+POST ACK_URL: { inbox_id, callback_token: "${token}", response: "setup complete — ${name} ready" }
+
+**any other type**
+POST ACK_URL: { inbox_id, callback_token: "${token}", response: "ack" }`;
+
+      await db.query(
+        `insert into agent_inbox (agent_id, type, payload) values ($1, 'welcome', $2)`,
+        [agent.id, JSON.stringify({
+          message: `Welcome to Darshan, ${name}! Paste the heartbeat_config block into your OpenClaw HEARTBEAT.md.`,
+          heartbeat_config: heartbeatBlock,
+          agent_id: agent.id, token, inbox_url: inboxUrl, ack_url: ackUrl,
+        })]
+      );
+    }
+
+    return { ok: true, agent_id: agent.id, callback_token: token };
+  });
+
+  // ── List all agents (personal — owned by current user) ─────────────────────
   server.get("/api/v1/agents", async (req) => {
     const userId = getRequestUser(req)?.userId ?? null;
     const { rows } = await db.query(`

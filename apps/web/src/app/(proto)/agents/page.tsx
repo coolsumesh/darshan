@@ -4,15 +4,15 @@ import * as React from "react";
 import { createPortal } from "react-dom";
 import {
   Bot, Check, ChevronDown, Plus, Search, X, Zap,
-  Activity, Trash2, Pencil, Building2, Users, Key, Copy, Upload, UserPlus, Link2,
+  Activity, Trash2, Pencil, Key, Copy, Upload,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
-  fetchAgents, fetchOrgs, createOrg, createOrgAgent, pingAgent,
-  fetchAgentProjects, deleteAgent, updateAgent, updateOrg, deleteOrg,
-  createInvite, type Org, type AgentProject,
+  fetchAgents, createAgent, pingAgent,
+  fetchAgentProjects, deleteAgent, updateAgent,
+  type AgentProject,
 } from "@/lib/api";
 import type { Agent } from "@/lib/agents";
 
@@ -194,95 +194,6 @@ function AgentRow({ agent, onInspect, onPing, onDelete, pinging }: {
   );
 }
 
-// ─── Org Section ──────────────────────────────────────────────────────────────
-function OrgSection({ org, agents, onInspect, onPing, onDelete, onAddAgent, pingingIds }: {
-  org: Org; agents: ExtAgent[];
-  onInspect: (a: ExtAgent) => void;
-  onPing: (id: string) => void;
-  onDelete: (a: ExtAgent) => void;
-  onAddAgent: (orgId: string) => void;
-  pingingIds: Set<string>;
-}) {
-  const [collapsed, setCollapsed] = React.useState(false);
-  const onlineCount = agents.filter(a => a.status === "online").length;
-
-  const role = org.my_role ?? "owner";
-  const orgTypeCls =
-    role === "owner"       ? "bg-purple-100 text-purple-700 dark:bg-purple-500/10 dark:text-purple-300" :
-    role === "admin"       ? "bg-blue-100 text-blue-700 dark:bg-blue-500/10 dark:text-blue-300"         :
-    role === "contributor" ? "bg-brand-100 text-brand-700 dark:bg-brand-500/10 dark:text-brand-300"     :
-                             "bg-zinc-100 text-zinc-500 dark:bg-white/10 dark:text-zinc-400";
-
-  return (
-    <div className="mb-2">
-      {/* Section header */}
-      <div className="flex items-center gap-2 px-2 py-2">
-        <button
-          onClick={() => setCollapsed(c => !c)}
-          className="flex min-w-0 flex-1 items-center gap-2 text-left"
-        >
-          <div className={cn("h-4 w-1 shrink-0 rounded-full",
-            role === "owner" ? "bg-purple-500" : role === "admin" ? "bg-blue-500" :
-            role === "contributor" ? "bg-brand-500" : "bg-zinc-400")} />
-          <ChevronDown className={cn("h-4 w-4 shrink-0 text-zinc-400 transition-transform", collapsed && "-rotate-90")} />
-          <span className="font-display font-bold text-zinc-900 dark:text-white text-sm">{org.name}</span>
-          <span className={cn("rounded-full px-1.5 py-0.5 text-[10px] font-semibold capitalize", orgTypeCls)}>{role}</span>
-          <span className="grid h-5 min-w-5 place-items-center rounded-full bg-zinc-100 px-1.5 text-[11px] font-semibold text-zinc-500 dark:bg-white/10">
-            {agents.length}
-          </span>
-          {onlineCount > 0 && (
-            <span className="text-xs text-emerald-500 font-medium">{onlineCount} online</span>
-          )}
-        </button>
-        <button
-          onClick={() => onAddAgent(org.id)}
-          className="flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-zinc-500 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-white/10 dark:hover:text-zinc-300 transition-colors">
-          <Plus className="h-3 w-3" /> Add
-        </button>
-      </div>
-
-      {!collapsed && (
-        <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white dark:border-[#2D2A45] dark:bg-[#16132A] mx-2">
-          {/* Column headers */}
-          <div className="flex items-center border-b border-zinc-100 bg-zinc-50 px-4 py-2 dark:border-[#2D2A45] dark:bg-[#0F0D1E]">
-            <div className="w-2 shrink-0 mr-3" />{/* status dot placeholder */}
-            {COLS.map(c => (
-              <div key={c.label} className={cn("text-[11px] font-semibold uppercase tracking-wide text-zinc-400", c.cls)}>
-                {c.label}
-              </div>
-            ))}
-          </div>
-
-          {/* Rows */}
-          {agents.length === 0 ? (
-            <div className="px-8 py-6 text-center text-sm text-zinc-400">
-              No agents yet.{" "}
-              <button onClick={() => onAddAgent(org.id)} className="text-brand-600 hover:underline">Add one</button>
-            </div>
-          ) : (
-            agents.map(a => (
-              <AgentRow
-                key={a.id}
-                agent={a}
-                onInspect={() => onInspect(a)}
-                onPing={() => onPing(a.id)}
-                onDelete={() => onDelete(a)}
-                pinging={pingingIds.has(a.id)}
-              />
-            ))
-          )}
-
-          {/* Add row */}
-          <button
-            onClick={() => onAddAgent(org.id)}
-            className="flex w-full items-center gap-2 border-t border-dashed border-zinc-200 px-6 py-2.5 text-xs text-zinc-400 hover:bg-zinc-50 hover:text-zinc-600 dark:border-[#2D2A45] dark:hover:bg-white/5 transition-colors">
-            <Plus className="h-3.5 w-3.5" /> Add agent
-          </button>
-        </div>
-      )}
-    </div>
-  );
-}
 
 // ─── Agent Credentials Panel ─────────────────────────────────────────────────
 const BASE_URL = "https://darshan.caringgems.in/api/backend/api/v1";
@@ -743,25 +654,24 @@ function AgentDetailPanel({ agent, onClose, onPing, onRemove, onUpdated, pinging
 }
 
 // ─── Onboard Agent Modal ──────────────────────────────────────────────────────
-function OnboardAgentModal({ orgs, defaultOrgId, onDone, onClose }: {
-  orgs: Org[]; defaultOrgId?: string; onDone: () => void; onClose: () => void;
+function OnboardAgentModal({ onDone, onClose }: {
+  onDone: () => void; onClose: () => void;
 }) {
-  const [orgId,       setOrgId]       = React.useState(defaultOrgId ?? orgs[0]?.id ?? "");
-  const [name,        setName]        = React.useState("");
-  const [desc,        setDesc]        = React.useState("");
+  const [name,         setName]         = React.useState("");
+  const [desc,         setDesc]         = React.useState("");
   const [endpointType, setEndpointType] = React.useState("openclaw_poll");
-  const [saving,      setSaving]      = React.useState(false);
-  const [error,       setError]       = React.useState("");
+  const [saving,       setSaving]       = React.useState(false);
+  const [error,        setError]        = React.useState("");
 
   async function handleSave() {
-    if (!name.trim() || !orgId) { setError("Name and organisation are required."); return; }
+    if (!name.trim()) { setError("Name is required."); return; }
     setSaving(true); setError("");
-    const ok = await createOrgAgent(orgId, {
+    const result = await createAgent({
       name: name.trim(), desc: desc.trim() || undefined,
       agent_type: "ai_agent", endpoint_type: endpointType,
     });
-    if (ok) onDone();
-    else { setError("Failed to onboard agent."); setSaving(false); }
+    if (result) onDone();
+    else { setError("Failed to create agent."); setSaving(false); }
   }
 
   const sel = "w-full rounded-xl border-0 bg-zinc-50 px-3 py-2.5 text-sm text-zinc-900 ring-1 ring-zinc-200 focus:outline-none dark:bg-zinc-900 dark:text-zinc-100 dark:ring-zinc-700";
@@ -779,19 +689,13 @@ function OnboardAgentModal({ orgs, defaultOrgId, onDone, onClose }: {
         <div className="flex shrink-0 items-center justify-between border-b border-zinc-200 px-5 py-4 dark:border-[#2D2A45]">
           <div>
             <div className="font-display text-sm font-bold text-zinc-900 dark:text-white">New Agent</div>
-            <div className="mt-0.5 text-xs text-zinc-500">Register an agent under an organisation</div>
+            <div className="mt-0.5 text-xs text-zinc-500">Register a personal AI agent</div>
           </div>
           <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg text-zinc-400 hover:bg-zinc-100 dark:hover:bg-white/10">
             <X className="h-4 w-4" />
           </button>
         </div>
         <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-5 min-h-0">
-          <div>
-            <label className="mb-1.5 block text-xs font-semibold text-zinc-700 dark:text-zinc-300">Organisation <span className="text-red-500">*</span></label>
-            <select value={orgId} onChange={e => setOrgId(e.target.value)} className={sel}>
-              {orgs.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
-            </select>
-          </div>
           <div>
             <label className="mb-1.5 block text-xs font-semibold text-zinc-700 dark:text-zinc-300">Name <span className="text-red-500">*</span></label>
             <Input autoFocus placeholder="e.g. Komal, Sanjaya…" value={name} onChange={e => setName(e.target.value)} />
@@ -816,7 +720,7 @@ function OnboardAgentModal({ orgs, defaultOrgId, onDone, onClose }: {
         </div>
         <div className="flex shrink-0 justify-end gap-3 border-t border-zinc-200 px-5 py-4 dark:border-[#2D2A45]">
           <Button variant="secondary" size="sm" onClick={onClose}>Cancel</Button>
-          <Button variant="primary" size="sm" onClick={handleSave} disabled={!name || !orgId || saving}>
+          <Button variant="primary" size="sm" onClick={handleSave} disabled={!name || saving}>
             {saving ? "Creating…" : "Create Agent"}
           </Button>
         </div>
@@ -825,123 +729,6 @@ function OnboardAgentModal({ orgs, defaultOrgId, onDone, onClose }: {
   );
 }
 
-// ─── Invite Agent Modal ───────────────────────────────────────────────────────
-function InviteAgentModal({ orgs, onClose }: { orgs: Org[]; onClose: () => void }) {
-  const ownOrg = orgs.find(o => o.my_role === "owner");
-  const [orgId,    setOrgId]    = React.useState(ownOrg?.id ?? orgs[0]?.id ?? "");
-  const [label,    setLabel]    = React.useState("");
-  const [loading,  setLoading]  = React.useState(false);
-  const [copied,   setCopied]   = React.useState(false);
-  const [result,   setResult]   = React.useState<{ invite_url: string; expires_at: string } | null>(null);
-  const [error,    setError]    = React.useState("");
-
-  async function handleGenerate() {
-    setLoading(true); setError("");
-    const data = await createInvite(orgId, label.trim() || undefined);
-    if (data) setResult(data);
-    else setError("Failed to create invite link.");
-    setLoading(false);
-  }
-
-  function copyLink() {
-    if (!result) return;
-    navigator.clipboard.writeText(result.invite_url);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  }
-
-  const inp = "w-full rounded-xl border-0 bg-zinc-50 px-3 py-2.5 text-sm text-zinc-900 ring-1 ring-zinc-200 focus:outline-none dark:bg-zinc-900 dark:text-zinc-100 dark:ring-zinc-700";
-  const sel = inp + " cursor-pointer";
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <button className="absolute inset-0 bg-zinc-950/50 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative z-10 w-full max-w-md rounded-2xl bg-white shadow-xl ring-1 ring-zinc-200 dark:bg-[#16132A] dark:ring-[#2D2A45] flex flex-col max-h-[80vh]">
-
-        {/* Header */}
-        <div className="flex shrink-0 items-center justify-between border-b border-zinc-200 px-5 py-4 dark:border-[#2D2A45]">
-          <div>
-            <div className="font-display text-sm font-bold text-zinc-900 dark:text-white">Invite Agent</div>
-            <div className="mt-0.5 text-xs text-zinc-500">Generate a one-time link — valid 24 hours</div>
-          </div>
-          <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg text-zinc-400 hover:bg-zinc-100 dark:hover:bg-white/10">
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-
-        <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-5 min-h-0">
-          {!result ? (
-            <>
-              {/* Org */}
-              <div>
-                <label className="mb-1.5 block text-xs font-semibold text-zinc-700 dark:text-zinc-300">Organisation</label>
-                <select value={orgId} onChange={e => setOrgId(e.target.value)} className={sel}>
-                  {orgs.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
-                </select>
-              </div>
-
-              {/* Label */}
-              <div>
-                <label className="mb-1.5 block text-xs font-semibold text-zinc-700 dark:text-zinc-300">
-                  Label <span className="font-normal text-zinc-400">(optional — shown to the recipient)</span>
-                </label>
-                <input
-                  value={label}
-                  onChange={e => setLabel(e.target.value)}
-                  placeholder="e.g. For Alex's coding agent"
-                  className={inp}
-                />
-              </div>
-
-              {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-600 dark:bg-red-500/10">{error}</p>}
-            </>
-          ) : (
-            <>
-              {/* Invite URL */}
-              <div className="rounded-xl bg-emerald-50 p-4 ring-1 ring-emerald-200 dark:bg-emerald-500/5 dark:ring-emerald-500/20">
-                <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-emerald-700 dark:text-emerald-400">
-                  <Check className="h-3.5 w-3.5" /> Invite link generated
-                </p>
-                <code className="block break-all text-[11px] text-zinc-700 dark:text-zinc-300">{result.invite_url}</code>
-                <p className="mt-2 text-[10px] text-zinc-400">
-                  Expires {new Date(result.expires_at).toLocaleString()} · One-time use
-                </p>
-              </div>
-              <p className="text-xs text-zinc-500">
-                Send this link to your friend. Their agent registers directly and receives credentials that only they see.
-              </p>
-            </>
-          )}
-        </div>
-
-        {/* Footer */}
-        <div className="flex shrink-0 justify-end gap-3 border-t border-zinc-200 px-5 py-4 dark:border-[#2D2A45]">
-          <button onClick={onClose} className="rounded-xl border border-zinc-200 px-4 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-white/5">
-            {result ? "Close" : "Cancel"}
-          </button>
-          {!result ? (
-            <button
-              onClick={handleGenerate}
-              disabled={!orgId || loading}
-              className="flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-emerald-700 disabled:opacity-50 transition-colors shadow-lg"
-            >
-              <Link2 className="h-4 w-4" />
-              {loading ? "Generating…" : "Generate Link"}
-            </button>
-          ) : (
-            <button
-              onClick={copyLink}
-              className="flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 transition-colors"
-            >
-              {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-              {copied ? "Copied!" : "Copy Link"}
-            </button>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
 
 // ─── Import Agent Modal ───────────────────────────────────────────────────────
 type ImportPayload = {
@@ -950,11 +737,10 @@ type ImportPayload = {
   capabilities?: string[]; endpoint_type?: string;
 };
 
-function ImportAgentModal({ orgs, onDone, onClose }: {
-  orgs: Org[]; onDone: () => void; onClose: () => void;
+function ImportAgentModal({ onDone, onClose }: {
+  onDone: () => void; onClose: () => void;
 }) {
   const [raw,    setRaw]    = React.useState("");
-  const [orgId,  setOrgId]  = React.useState(orgs.find(o => o.my_role === "owner")?.id ?? orgs[0]?.id ?? "");
   const [saving, setSaving] = React.useState(false);
   const [error,  setError]  = React.useState("");
 
@@ -969,19 +755,18 @@ function ImportAgentModal({ orgs, onDone, onClose }: {
 
   async function handleImport() {
     if (!parsed?.name?.trim()) { setError("Name is required."); return; }
-    if (!orgId) { setError("Select an organisation."); return; }
     setSaving(true); setError("");
-    const ok = await createOrgAgent(orgId, {
+    const result = await createAgent({
       name:          parsed.name.trim(),
       desc:          parsed.desc?.trim(),
-      agent_type:    parsed.agent_type ?? "ai_agent",
+      agent_type:    "ai_agent",
       model:         parsed.model,
       provider:      parsed.provider ?? "anthropic",
       capabilities:  caps,
       endpoint_type: parsed.endpoint_type ?? "openclaw_poll",
     });
-    if (ok) onDone();
-    else { setError("Failed to create agent."); setSaving(false); }
+    if (result) onDone();
+    else { setError("Failed to import agent."); setSaving(false); }
   }
 
   const sel = "w-full rounded-xl border-0 bg-zinc-50 px-3 py-2.5 text-sm text-zinc-900 ring-1 ring-zinc-200 focus:outline-none dark:bg-zinc-900 dark:text-zinc-100 dark:ring-zinc-700";
@@ -1042,16 +827,6 @@ function ImportAgentModal({ orgs, onDone, onClose }: {
             </div>
           )}
 
-          {/* Org selector */}
-          <div>
-            <label className="mb-1.5 block text-xs font-semibold text-zinc-700 dark:text-zinc-300">
-              Add to Organisation <span className="text-red-500">*</span>
-            </label>
-            <select value={orgId} onChange={e => setOrgId(e.target.value)} className={sel}>
-              {orgs.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
-            </select>
-          </div>
-
           {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-600 dark:bg-red-500/10">{error}</p>}
         </div>
 
@@ -1061,7 +836,7 @@ function ImportAgentModal({ orgs, onDone, onClose }: {
           <Button
             variant="primary" size="sm"
             onClick={handleImport}
-            disabled={!parsed?.name || !orgId || saving || !!parseError}
+            disabled={!parsed?.name || saving || !!parseError}
           >
             <Upload className="h-3.5 w-3.5" />
             {saving ? "Importing…" : "Import Agent"}
@@ -1104,7 +879,6 @@ function DeleteAgentConfirm({ agent, onConfirm, onClose, deleting }: {
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 export default function AgentsPage() {
-  const [orgs,         setOrgs]         = React.useState<Org[]>([]);
   const [agents,       setAgents]       = React.useState<ExtAgent[]>([]);
   const [loading,      setLoading]      = React.useState(true);
   const [statusFilter, setStatusFilter] = React.useState<StatusFilter>("all");
@@ -1112,15 +886,12 @@ export default function AgentsPage() {
   const [pingingIds,   setPingingIds]   = React.useState<Set<string>>(new Set());
   const [detailAgent,  setDetailAgent]  = React.useState<ExtAgent | null>(null);
   const [showAgentModal,  setShowAgentModal]  = React.useState(false);
-  const [agentModalOrgId, setAgentModalOrgId] = React.useState<string | undefined>();
   const [showImportModal, setShowImportModal] = React.useState(false);
-  const [showInviteModal, setShowInviteModal] = React.useState(false);
   const [deleteTarget,    setDeleteTarget]    = React.useState<ExtAgent | null>(null);
   const [deleting,        setDeleting]        = React.useState(false);
 
   async function reload() {
-    const [os, ag] = await Promise.all([fetchOrgs(), fetchAgents()]);
-    setOrgs(os);
+    const ag = await fetchAgents();
     setAgents(ag as ExtAgent[]);
     setLoading(false);
   }
@@ -1144,13 +915,9 @@ export default function AgentsPage() {
     reload();
   }
 
-  function openAgentModal(orgId?: string) {
-    setAgentModalOrgId(orgId);
-    setShowAgentModal(true);
-  }
-
   // Derived
-  const totalOnline = agents.filter(a => a.status === "online").length;
+  const totalOnline  = agents.filter(a => a.status === "online").length;
+  const totalOffline = agents.filter(a => a.status !== "online").length;
 
   // Filter
   const filtered = agents.filter(a => {
@@ -1158,20 +925,15 @@ export default function AgentsPage() {
     if (statusFilter === "offline" && a.status === "online") return false;
     if (query) {
       const q = query.toLowerCase();
-      if (![a.name, a.desc ?? "", a.model ?? "", a.org_name ?? "", ...(Array.isArray(a.capabilities) ? a.capabilities : [])].some(s => s.toLowerCase().includes(q))) return false;
+      if (![a.name, a.desc ?? "", a.model ?? "", ...(Array.isArray(a.capabilities) ? a.capabilities : [])].some(s => s.toLowerCase().includes(q))) return false;
     }
     return true;
   });
 
-  const ownOrg      = orgs.find(o => o.my_role === "owner");
-  const externalOrgs = orgs.filter(o => o.my_role !== "owner");
-  const agentsFor   = (orgId: string) => filtered.filter(a => a.org_id === orgId);
-  const unassigned  = filtered.filter(a => !a.org_id);
-
   const STATUS_TABS: { id: StatusFilter; label: string; count: number }[] = [
     { id: "all",     label: "All",     count: agents.length },
-    { id: "online",  label: "Online",  count: agents.filter(a => a.status === "online").length },
-    { id: "offline", label: "Offline", count: agents.filter(a => a.status !== "online").length },
+    { id: "online",  label: "Online",  count: totalOnline   },
+    { id: "offline", label: "Offline", count: totalOffline  },
   ];
 
   return (
@@ -1182,24 +944,19 @@ export default function AgentsPage() {
           {/* Header */}
           <div className="flex items-center justify-between">
             <div>
-              <h1 className="font-display text-2xl font-bold text-zinc-900 dark:text-white">Agents</h1>
+              <h1 className="font-display text-2xl font-bold text-zinc-900 dark:text-white">My Agents</h1>
               <p className="mt-0.5 text-sm text-zinc-500">
-                {agents.length} AI agents · {totalOnline} online · {orgs.length} orgs
+                {agents.length} agent{agents.length !== 1 ? "s" : ""} · {totalOnline} online
               </p>
             </div>
             <div className="flex items-center gap-2">
-              <button
-                onClick={() => setShowInviteModal(true)}
-                className="flex items-center gap-2 rounded-xl border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 transition-colors dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700">
-                <UserPlus className="h-4 w-4" /> Invite
-              </button>
               <button
                 onClick={() => setShowImportModal(true)}
                 className="flex items-center gap-2 rounded-xl border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 transition-colors dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700">
                 <Upload className="h-4 w-4" /> Import
               </button>
               <button
-                onClick={() => openAgentModal(ownOrg?.id)}
+                onClick={() => setShowAgentModal(true)}
                 className="flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 transition-colors">
                 <Plus className="h-4 w-4" /> New Agent
               </button>
@@ -1207,22 +964,24 @@ export default function AgentsPage() {
           </div>
 
           {/* Stats */}
-          <div className="flex gap-4">
-            {[
-              { label: "Total",   value: agents.length, icon: Bot,      cls: "bg-brand-600"   },
-              { label: "Online",  value: totalOnline,   icon: Zap,      cls: "bg-emerald-500" },
-              { label: "Orgs",    value: orgs.length,   icon: Building2, cls: "bg-zinc-700"   },
-            ].map(({ label, value, icon: Icon, cls }) => (
-              <div key={label} className="flex flex-1 items-center gap-3 rounded-2xl bg-white p-4 ring-1 ring-zinc-200 shadow-sm dark:bg-[#16132A] dark:ring-[#2D2A45]">
-                <div className={cn("grid h-9 w-9 shrink-0 place-items-center rounded-xl", cls)}>
-                  <Icon className="h-4 w-4 text-white" />
+          <div className="px-1">
+            <div className="grid grid-cols-3 gap-3 px-1">
+              {[
+                { label: "Total",   value: agents.length, icon: Bot,      cls: "bg-brand-600"   },
+                { label: "Online",  value: totalOnline,   icon: Zap,      cls: "bg-emerald-500" },
+                { label: "Offline", value: totalOffline,  icon: Activity,  cls: "bg-zinc-500"   },
+              ].map(({ label, value, icon: Icon, cls }) => (
+                <div key={label} className="flex items-center gap-3 rounded-2xl bg-white p-4 ring-1 ring-zinc-200 shadow-sm dark:bg-[#16132A] dark:ring-[#2D2A45]">
+                  <div className={cn("grid h-9 w-9 shrink-0 place-items-center rounded-xl", cls)}>
+                    <Icon className="h-4 w-4 text-white" />
+                  </div>
+                  <div>
+                    <div className="font-display text-2xl font-extrabold leading-none text-zinc-900 dark:text-white">{value}</div>
+                    <div className="mt-0.5 text-xs text-zinc-400">{label}</div>
+                  </div>
                 </div>
-                <div>
-                  <div className="font-display text-2xl font-extrabold leading-none text-zinc-900 dark:text-white">{value}</div>
-                  <div className="mt-0.5 text-xs text-zinc-400">{label}</div>
-                </div>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
 
           {/* Filter + search */}
@@ -1248,76 +1007,49 @@ export default function AgentsPage() {
             </div>
           </div>
 
-          {/* Content */}
+          {/* Agent list */}
           {loading ? (
             <div className="py-16 text-center text-sm text-zinc-400">Loading…</div>
-          ) : (
-            <div>
-              {/* Own org */}
-              {ownOrg && (
-                <OrgSection
-                  org={ownOrg}
-                  agents={agentsFor(ownOrg.id)}
-                  onInspect={setDetailAgent}
-                  onPing={handlePing}
-                  onDelete={setDeleteTarget}
-                  onAddAgent={openAgentModal}
-                  pingingIds={pingingIds}
-                />
-              )}
-
-              {/* External orgs */}
-              {externalOrgs.length > 0 && (
+          ) : filtered.length === 0 ? (
+            <div className="py-20 text-center">
+              {agents.length === 0 ? (
                 <>
-                  <div className="my-4 flex items-center gap-3">
-                    <div className="h-px flex-1 bg-zinc-200 dark:bg-white/10" />
-                    <span className="text-xs font-semibold uppercase tracking-widest text-zinc-400">External</span>
-                    <div className="h-px flex-1 bg-zinc-200 dark:bg-white/10" />
-                  </div>
-                  {externalOrgs.map(org => (
-                    <OrgSection
-                      key={org.id}
-                      org={org}
-                      agents={agentsFor(org.id)}
-                      onInspect={setDetailAgent}
-                      onPing={handlePing}
-                      onDelete={setDeleteTarget}
-                      onAddAgent={openAgentModal}
-                      pingingIds={pingingIds}
-                    />
-                  ))}
+                  <Bot className="mx-auto mb-3 h-10 w-10 text-zinc-200 dark:text-zinc-700" />
+                  <p className="font-display font-bold text-zinc-700 dark:text-zinc-200">No agents yet</p>
+                  <p className="mt-1 text-sm text-zinc-400">Create your first agent to get started</p>
+                  <button onClick={() => setShowAgentModal(true)}
+                    className="mt-4 flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 transition-colors mx-auto">
+                    <Plus className="h-4 w-4" /> New Agent
+                  </button>
                 </>
-              )}
-
-              {/* Unassigned */}
-              {unassigned.length > 0 && (
-                <div className="mt-4">
-                  <div className="mb-3 flex items-center gap-3">
-                    <div className="h-px flex-1 bg-zinc-200 dark:bg-white/10" />
-                    <span className="text-xs font-semibold uppercase tracking-widest text-zinc-400">Unassigned</span>
-                    <div className="h-px flex-1 bg-zinc-200 dark:bg-white/10" />
-                  </div>
-                  <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white mx-2 dark:border-[#2D2A45] dark:bg-[#16132A]">
-                    {unassigned.map(a => (
-                      <AgentRow key={a.id} agent={a}
-                        onInspect={() => setDetailAgent(a)}
-                        onPing={() => handlePing(a.id)}
-                        onDelete={() => setDeleteTarget(a)}
-                        pinging={pingingIds.has(a.id)}
-                      />
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {filtered.length === 0 && !loading && (
-                <div className="py-20 text-center">
+              ) : (
+                <>
                   <Search className="mx-auto mb-3 h-8 w-8 text-zinc-300" />
                   <p className="font-display font-bold text-zinc-700 dark:text-zinc-200">No agents match</p>
                   <button onClick={() => { setStatusFilter("all"); setQuery(""); }}
                     className="mt-2 text-sm text-brand-600 hover:underline">× Clear filters</button>
-                </div>
+                </>
               )}
+            </div>
+          ) : (
+            <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white dark:border-[#2D2A45] dark:bg-[#16132A]">
+              {/* Column headers */}
+              <div className="flex items-center border-b border-zinc-100 bg-zinc-50 px-4 py-2 dark:border-[#2D2A45] dark:bg-[#0F0D1E]">
+                <div className="w-2 shrink-0 mr-3" />
+                {COLS.map(c => (
+                  <div key={c.label} className={cn("text-[11px] font-semibold uppercase tracking-wide text-zinc-400", c.cls)}>
+                    {c.label}
+                  </div>
+                ))}
+              </div>
+              {filtered.map(a => (
+                <AgentRow key={a.id} agent={a}
+                  onInspect={() => setDetailAgent(a)}
+                  onPing={() => handlePing(a.id)}
+                  onDelete={() => setDeleteTarget(a)}
+                  pinging={pingingIds.has(a.id)}
+                />
+              ))}
             </div>
           )}
         </div>
@@ -1335,18 +1067,9 @@ export default function AgentsPage() {
         />
       )}
 
-      {/* Invite agent modal */}
-      {showInviteModal && (
-        <InviteAgentModal
-          orgs={orgs}
-          onClose={() => setShowInviteModal(false)}
-        />
-      )}
-
       {/* Import agent modal */}
       {showImportModal && (
         <ImportAgentModal
-          orgs={orgs}
           onDone={() => { setShowImportModal(false); reload(); }}
           onClose={() => setShowImportModal(false)}
         />
@@ -1355,8 +1078,6 @@ export default function AgentsPage() {
       {/* New agent modal */}
       {showAgentModal && (
         <OnboardAgentModal
-          orgs={orgs}
-          defaultOrgId={agentModalOrgId}
           onDone={() => { setShowAgentModal(false); reload(); }}
           onClose={() => setShowAgentModal(false)}
         />
