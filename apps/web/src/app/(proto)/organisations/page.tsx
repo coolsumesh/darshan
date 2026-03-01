@@ -1234,7 +1234,7 @@ export default function OrganisationsPage() {
     if (filter === "archived" && st !== "archived") return false;
     if (roleFilters.has(filter)) return false; // role filter → hide external orgs
     if (filter === "own") return false;
-    if (typeFilters.has(filter) && filter !== "own" && o.type !== filter) return false;
+    if (typeFilters.has(filter) && o.type !== filter) return false;
     if (query) {
       const q = query.toLowerCase();
       if (![o.name, o.slug, o.description ?? ""].some(s => s.toLowerCase().includes(q))) return false;
