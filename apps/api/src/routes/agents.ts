@@ -177,10 +177,10 @@ export async function registerAgents(server: FastifyInstance, db: pg.Pool) {
     const { rows } = await db.query(
       `select a.id, a.name, a.status, a.agent_type, a.model, a.provider,
               a.capabilities, a.ping_status, a.last_seen_at, a.org_id,
-              om.role as member_role
-       from org_members om
-       join agents a on a.id = om.agent_id
-       where om.org_id = $1 and a.agent_type = 'ai_agent'
+              coalesce(om.role, 'member') as member_role
+       from agents a
+       left join org_members om on om.agent_id = a.id and om.org_id = $1
+       where a.org_id = $1 and a.agent_type = 'ai_agent'
        order by lower(a.name) asc`,
       [orgs[0].id]
     );
