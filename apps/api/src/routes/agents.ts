@@ -710,15 +710,24 @@ ACK_URL: ${ackUrl}
     }
   });
 
-  // DELETE /api/v1/orgs/:id/users/:userId — remove user
+  // DELETE /api/v1/orgs/:id/users/:userId — remove user (+ auto-withdraw their contributed agents)
   server.delete<{ Params: { id: string; userId: string } }>("/api/v1/orgs/:id/users/:userId", async (req, reply) => {
     const { rows: orgs } = await db.query(
       `select id from organisations where id::text = $1 or slug = $1`, [req.params.id]
     );
     if (!orgs.length) return reply.status(404).send({ ok: false, error: "org not found" });
+    const orgId = orgs[0].id;
+
+    // Auto-withdraw any agents this user contributed to the org
+    await db.query(
+      `update org_agent_contributions set status = 'withdrawn'
+       where org_id = $1 and contributed_by = $2::uuid and status = 'active'`,
+      [orgId, req.params.userId]
+    );
+
     await db.query(
       `delete from org_user_members where org_id = $1 and user_id::text = $2`,
-      [orgs[0].id, req.params.userId]
+      [orgId, req.params.userId]
     );
     return { ok: true };
   });
