@@ -20,7 +20,7 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
     minRole: ProjectRole = "member"
   ): Promise<{ projectId: string; role: ProjectRole } | { deny: 404 | 403 }> {
     const { rows } = await db.query(
-      `select id, owner_user_id from projects where id::text = $1 or lower(slug) = lower($1)`,
+      `select id, owner_user_id, org_id from projects where id::text = $1 or lower(slug) = lower($1)`,
       [idOrSlug]
     );
     if (!rows[0]) return { deny: 404 };
@@ -31,14 +31,27 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
 
     let role: ProjectRole;
     if (rows[0].owner_user_id === userId) {
+      // 1. Project owner
       role = "owner";
     } else {
-      const { rows: mr } = await db.query(
+      // 2. Direct project invite (project_user_members)
+      const { rows: pr } = await db.query(
         `select role from project_user_members where project_id = $1 and user_id = $2`,
         [rows[0].id, userId]
       );
-      if (!mr[0]) return { deny: 403 };
-      role = mr[0].role as ProjectRole;
+      if (pr[0]) {
+        role = pr[0].role as ProjectRole;
+      } else if (rows[0].org_id) {
+        // 3. Org membership — user belongs to the org that owns this project
+        const { rows: or } = await db.query(
+          `select role from org_user_members where org_id = $1 and user_id = $2`,
+          [rows[0].org_id, userId]
+        );
+        if (!or[0]) return { deny: 403 };
+        role = or[0].role as ProjectRole;
+      } else {
+        return { deny: 403 };
+      }
     }
 
     if (ROLE_RANK[role] < ROLE_RANK[minRole]) return { deny: 403 };
@@ -53,9 +66,17 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
               count(distinct pt.agent_id)::int as team_size,
               max(t.updated_at) as last_activity,
               case
-                when $1::uuid is null        then null
-                when p.owner_user_id = $1    then 'owner'
-                else                              'member'
+                when $1::uuid is null     then null
+                when p.owner_user_id = $1 then 'owner'
+                when exists (
+                  select 1 from org_user_members oum
+                  where oum.org_id = p.org_id and oum.user_id = $1::uuid
+                )                         then (
+                  select oum.role from org_user_members oum
+                  where oum.org_id = p.org_id and oum.user_id = $1::uuid
+                  limit 1
+                )
+                else                           'member'
               end as my_role
        from projects p
        left join project_team pt on pt.project_id = p.id
@@ -67,6 +88,10 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
            or exists (
              select 1 from project_user_members pum
              where pum.project_id = p.id and pum.user_id = $1::uuid
+           )
+           or exists (
+             select 1 from org_user_members oum
+             where oum.org_id = p.org_id and oum.user_id = $1::uuid
            )
          )
        group by p.id
