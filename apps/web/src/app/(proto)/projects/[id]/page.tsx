@@ -971,7 +971,7 @@ function BulkActionBar({
           {showAssign && (
             <div className="absolute bottom-full mb-2 left-0 z-10 min-w-[180px] overflow-hidden rounded-xl border border-zinc-100 bg-white shadow-xl dark:border-white/10 dark:bg-[#1C1830]">
               {team.map((m) => (
-                <button key={m.agent_id} onClick={() => { onAssign(m.name); closeAll(); }}
+                <button key={m.agentId} onClick={() => { onAssign(m.name); closeAll(); }}
                   className="flex w-full items-center gap-2 px-3 py-2 text-xs text-zinc-700 hover:bg-zinc-50 dark:text-zinc-300 dark:hover:bg-white/5">
                   <div className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-brand-600 text-[9px] font-bold text-white">
                     {m.name[0]?.toUpperCase()}
