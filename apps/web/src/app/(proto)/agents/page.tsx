@@ -4,7 +4,7 @@ import * as React from "react";
 import { createPortal } from "react-dom";
 import {
   Bot, Check, ChevronDown, Plus, Search, X, Zap,
-  Activity, Trash2, Pencil, Key, Copy, Upload,
+  Activity, Trash2, Pencil, Key, Copy, Upload, Building2,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { Button } from "@/components/ui/button";
