@@ -954,8 +954,8 @@ export default function OrganisationsPage() {
             ].map(({ label, value, icon: Icon, cls, filter: f }) => (
               <button key={label} onClick={() => setFilter(filter === f ? "all" : f)}
                 className={cn(
-                  "flex items-center gap-3 rounded-2xl bg-white p-4 ring-1 shadow-sm text-left transition-all dark:bg-[#16132A]",
-                  filter === f ? "ring-2 ring-brand-500" : "ring-zinc-200 hover:ring-zinc-300 dark:ring-[#2D2A45]"
+                  "flex items-center gap-3 rounded-2xl bg-white p-4 border-2 shadow-sm text-left transition-all dark:bg-[#16132A]",
+                  filter === f ? "border-brand-500" : "border-zinc-200 hover:border-zinc-300 dark:border-[#2D2A45]"
                 )}>
                 <div className={cn("grid h-9 w-9 shrink-0 place-items-center rounded-xl", cls)}>
                   <Icon className="h-4 w-4 text-white" />
