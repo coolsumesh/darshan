@@ -856,7 +856,7 @@ function OnboardAgentModal({ orgs, defaultOrgId, onDone, onClose }: {
 
 // ─── Invite Agent Modal ───────────────────────────────────────────────────────
 function InviteAgentModal({ orgs, onClose }: { orgs: Org[]; onClose: () => void }) {
-  const ownOrg = orgs.find(o => o.type === "own");
+  const ownOrg = orgs.find(o => o.my_role === "owner");
   const [orgId,    setOrgId]    = React.useState(ownOrg?.id ?? orgs[0]?.id ?? "");
   const [label,    setLabel]    = React.useState("");
   const [loading,  setLoading]  = React.useState(false);
@@ -983,7 +983,7 @@ function ImportAgentModal({ orgs, onDone, onClose }: {
   orgs: Org[]; onDone: () => void; onClose: () => void;
 }) {
   const [raw,    setRaw]    = React.useState("");
-  const [orgId,  setOrgId]  = React.useState(orgs.find(o => o.type === "own")?.id ?? orgs[0]?.id ?? "");
+  const [orgId,  setOrgId]  = React.useState(orgs.find(o => o.my_role === "owner")?.id ?? orgs[0]?.id ?? "");
   const [saving, setSaving] = React.useState(false);
   const [error,  setError]  = React.useState("");
 
@@ -1196,8 +1196,8 @@ export default function AgentsPage() {
     return true;
   });
 
-  const ownOrg      = orgs.find(o => o.type === "own");
-  const externalOrgs = orgs.filter(o => o.type !== "own");
+  const ownOrg      = orgs.find(o => o.my_role === "owner");
+  const externalOrgs = orgs.filter(o => o.my_role !== "owner");
   const agentsFor   = (orgId: string) => filtered.filter(a => a.org_id === orgId);
   const unassigned  = filtered.filter(a => !a.org_id);
 
