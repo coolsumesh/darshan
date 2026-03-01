@@ -304,10 +304,19 @@ export async function fetchOrgProjects(idOrSlug: string): Promise<{ id: string; 
 }
 
 export type OrgAgentWithContrib = Agent & {
-  source: "native" | "contributed";
-  contributed_by_user_id: string | null;
-  contributed_by_name: string | null;
+  // API-returned fields not in the base Agent mock type
+  agent_type?: string;
+  model?: string;
+  provider?: string;
+  capabilities?: string[];
+  ping_status?: string;
+  last_seen_at?: string;
+  org_id?: string;
   member_role?: string;
+  // Contribution fields
+  source?: "native" | "contributed";
+  contributed_by_user_id?: string | null;
+  contributed_by_name?: string | null;
 };
 
 export async function fetchOrgAgents(idOrSlug: string): Promise<OrgAgentWithContrib[]> {
