@@ -594,7 +594,12 @@ function MembersTab({ orgId, canEdit }: { orgId: string; canEdit: boolean }) {
                     <option value="viewer">Viewer</option>
                   </select>
                   <button onClick={handleInviteUser} disabled={invitingUser || !emailInput.trim()}
-                    className="flex items-center gap-1.5 rounded-xl bg-brand-600 px-3 py-2 text-xs font-semibold text-white hover:bg-brand-700 disabled:bg-zinc-200 disabled:text-zinc-400 disabled:cursor-not-allowed transition-colors">
+                    className={cn(
+                      "flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold transition-colors",
+                      invitingUser || !emailInput.trim()
+                        ? "bg-zinc-200 text-zinc-400 cursor-not-allowed"
+                        : "bg-brand-600 text-white hover:bg-brand-700 cursor-pointer"
+                    )}>
                     <Mail className="h-3.5 w-3.5" />
                     {invitingUser ? "Sending…" : "Invite"}
                   </button>
