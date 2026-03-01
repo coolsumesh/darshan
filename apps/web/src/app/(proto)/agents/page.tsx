@@ -208,11 +208,12 @@ function OrgSection({ org, agents, onInspect, onPing, onDelete, onAddAgent, ping
   const [collapsed, setCollapsed] = React.useState(false);
   const onlineCount = agents.filter(a => a.status === "online").length;
 
+  const role = org.my_role ?? "owner";
   const orgTypeCls =
-    org.type === "own"     ? "bg-brand-100 text-brand-700 dark:bg-brand-500/10 dark:text-brand-300" :
-    org.type === "partner" ? "bg-sky-100 text-sky-700 dark:bg-sky-500/10 dark:text-sky-300"         :
-    org.type === "client"  ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400" :
-                             "bg-zinc-100 text-zinc-600 dark:bg-white/10 dark:text-zinc-400";
+    role === "owner"       ? "bg-purple-100 text-purple-700 dark:bg-purple-500/10 dark:text-purple-300" :
+    role === "admin"       ? "bg-blue-100 text-blue-700 dark:bg-blue-500/10 dark:text-blue-300"         :
+    role === "contributor" ? "bg-brand-100 text-brand-700 dark:bg-brand-500/10 dark:text-brand-300"     :
+                             "bg-zinc-100 text-zinc-500 dark:bg-white/10 dark:text-zinc-400";
 
   return (
     <div className="mb-2">
@@ -223,11 +224,11 @@ function OrgSection({ org, agents, onInspect, onPing, onDelete, onAddAgent, ping
           className="flex min-w-0 flex-1 items-center gap-2 text-left"
         >
           <div className={cn("h-4 w-1 shrink-0 rounded-full",
-            org.type === "own" ? "bg-brand-500" : org.type === "partner" ? "bg-sky-500" :
-            org.type === "client" ? "bg-emerald-500" : "bg-zinc-400")} />
+            role === "owner" ? "bg-purple-500" : role === "admin" ? "bg-blue-500" :
+            role === "contributor" ? "bg-brand-500" : "bg-zinc-400")} />
           <ChevronDown className={cn("h-4 w-4 shrink-0 text-zinc-400 transition-transform", collapsed && "-rotate-90")} />
           <span className="font-display font-bold text-zinc-900 dark:text-white text-sm">{org.name}</span>
-          <span className={cn("rounded-full px-1.5 py-0.5 text-[10px] font-semibold capitalize", orgTypeCls)}>{org.type}</span>
+          <span className={cn("rounded-full px-1.5 py-0.5 text-[10px] font-semibold capitalize", orgTypeCls)}>{role}</span>
           <span className="grid h-5 min-w-5 place-items-center rounded-full bg-zinc-100 px-1.5 text-[11px] font-semibold text-zinc-500 dark:bg-white/10">
             {agents.length}
           </span>
