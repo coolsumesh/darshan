@@ -490,6 +490,36 @@ export async function revokeProjectInvite(projectId: string, inviteId: string): 
   return data?.ok ?? false;
 }
 
+// ── Org User Members ──────────────────────────────────────────────────────────
+
+export type OrgUserMember = {
+  id: string;
+  user_id: string;
+  name: string;
+  email: string;
+  avatar_url?: string | null;
+  role: "owner" | "admin" | "member";
+  created_at: string;
+};
+
+export async function fetchOrgUserMembers(idOrSlug: string): Promise<OrgUserMember[]> {
+  const data = await apiFetch<{ ok: boolean; users: OrgUserMember[] }>(`/api/v1/orgs/${idOrSlug}/users`);
+  return data?.ok ? data.users : [];
+}
+
+export async function addOrgUserMember(idOrSlug: string, email: string, role = "member"): Promise<OrgUserMember | null> {
+  const data = await apiFetch<{ ok: boolean; user: OrgUserMember }>(`/api/v1/orgs/${idOrSlug}/users`, {
+    method: "POST",
+    body: JSON.stringify({ email, role }),
+  });
+  return data?.ok ? data.user : null;
+}
+
+export async function removeOrgUserMember(idOrSlug: string, userId: string): Promise<boolean> {
+  const data = await apiFetch<{ ok: boolean }>(`/api/v1/orgs/${idOrSlug}/users/${userId}`, { method: "DELETE" });
+  return data?.ok ?? false;
+}
+
 // ── Task Activity ──────────────────────────────────────────────────────────────
 
 export type TaskActivity = {

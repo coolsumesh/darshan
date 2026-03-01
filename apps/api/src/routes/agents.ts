@@ -526,6 +526,70 @@ ACK_URL: ${ackUrl}
     return { ok: true };
   });
 
+  // ── Org user members (humans by email) ──────────────────────────────────────
+
+  // GET /api/v1/orgs/:id/users — list user members
+  server.get<{ Params: { id: string } }>("/api/v1/orgs/:id/users", async (req, reply) => {
+    const { rows: orgs } = await db.query(
+      `select id from organisations where id::text = $1 or slug = $1`, [req.params.id]
+    );
+    if (!orgs.length) return reply.status(404).send({ ok: false, error: "org not found" });
+    const { rows } = await db.query(
+      `select oum.id, oum.role, oum.created_at,
+              u.id as user_id, u.name, u.email, u.avatar_url
+       from org_user_members oum
+       join users u on u.id = oum.user_id
+       where oum.org_id = $1
+       order by
+         case oum.role when 'owner' then 0 when 'admin' then 1 else 2 end,
+         lower(u.name) asc`,
+      [orgs[0].id]
+    );
+    return { ok: true, users: rows };
+  });
+
+  // POST /api/v1/orgs/:id/users — add user by email
+  server.post<{
+    Params: { id: string };
+    Body: { email: string; role?: string };
+  }>("/api/v1/orgs/:id/users", async (req, reply) => {
+    const { email, role = "member" } = req.body;
+    if (!email) return reply.status(400).send({ ok: false, error: "email required" });
+    const { rows: orgs } = await db.query(
+      `select id from organisations where id::text = $1 or slug = $1`, [req.params.id]
+    );
+    if (!orgs.length) return reply.status(404).send({ ok: false, error: "org not found" });
+    const { rows: users } = await db.query(
+      `select id, name, email, avatar_url from users where lower(email) = lower($1)`, [email]
+    );
+    if (!users.length) return reply.status(404).send({ ok: false, error: "no user found with that email" });
+    try {
+      const { rows } = await db.query(
+        `insert into org_user_members (org_id, user_id, role)
+         values ($1, $2, $3)
+         on conflict (org_id, user_id) do update set role = excluded.role
+         returning *`,
+        [orgs[0].id, users[0].id, role]
+      );
+      return { ok: true, user: { ...rows[0], ...users[0] } };
+    } catch {
+      return reply.status(400).send({ ok: false, error: "failed to add user" });
+    }
+  });
+
+  // DELETE /api/v1/orgs/:id/users/:userId — remove user
+  server.delete<{ Params: { id: string; userId: string } }>("/api/v1/orgs/:id/users/:userId", async (req, reply) => {
+    const { rows: orgs } = await db.query(
+      `select id from organisations where id::text = $1 or slug = $1`, [req.params.id]
+    );
+    if (!orgs.length) return reply.status(404).send({ ok: false, error: "org not found" });
+    await db.query(
+      `delete from org_user_members where org_id = $1 and user_id::text = $2`,
+      [orgs[0].id, req.params.userId]
+    );
+    return { ok: true };
+  });
+
   // ── Projects assigned to an agent ──────────────────────────────────────────
   server.get<{ Params: { id: string } }>("/api/v1/agents/:id/projects", async (req, reply) => {
     const { rows: agents } = await db.query(
