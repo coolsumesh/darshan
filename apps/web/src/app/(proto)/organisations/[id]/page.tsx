@@ -242,7 +242,7 @@ function AgentPickerModal({ title, excludeIds, onPick, onClose }: {
           )}
           {filtered.map(a => (
             <button key={a.id} onClick={() => onPick(a, selectedRole)}
-              className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left hover:bg-zinc-50 dark:hover:bg-white/5 transition-colors">
+              className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left hover:bg-zinc-100 dark:hover:bg-white/10 transition-colors">
               <AgentAvatar name={a.name} size={36} />
               <div className="min-w-0 flex-1">
                 <div className="text-sm font-semibold text-zinc-900 dark:text-white">{a.name}</div>
@@ -594,7 +594,7 @@ function MembersTab({ orgId, canEdit }: { orgId: string; canEdit: boolean }) {
                     <option value="viewer">Viewer</option>
                   </select>
                   <button onClick={handleInviteUser} disabled={invitingUser || !emailInput.trim()}
-                    className="flex items-center gap-1.5 rounded-xl bg-brand-600 px-3 py-2 text-xs font-semibold text-white hover:bg-brand-700 disabled:opacity-40 transition-colors">
+                    className="flex items-center gap-1.5 rounded-xl bg-brand-600 px-3 py-2 text-xs font-semibold text-white hover:bg-brand-700 disabled:bg-zinc-200 disabled:text-zinc-400 disabled:cursor-not-allowed transition-colors">
                     <Mail className="h-3.5 w-3.5" />
                     {invitingUser ? "Sending…" : "Invite"}
                   </button>
