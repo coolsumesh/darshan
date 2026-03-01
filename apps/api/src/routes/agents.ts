@@ -18,7 +18,6 @@ export async function registerAgents(server: FastifyInstance, db: pg.Pool) {
       select a.*,
              o.name  as org_name,
              o.slug  as org_slug,
-             o.type  as org_type,
              (select count(*)::int from tasks t
               where lower(t.assignee) = lower(a.name)
                 and t.status in ('proposed','approved','in-progress','review')
@@ -26,7 +25,7 @@ export async function registerAgents(server: FastifyInstance, db: pg.Pool) {
       from agents a
       left join organisations o on o.id = a.org_id
       where ($1::uuid is null or o.owner_user_id = $1::uuid or a.org_id is null)
-      order by o.type asc, lower(a.name) asc
+      order by lower(a.name) asc
     `, [userId]);
     return { ok: true, agents: rows };
   });
@@ -71,23 +70,25 @@ export async function registerAgents(server: FastifyInstance, db: pg.Pool) {
           or o.owner_user_id = $1::uuid
           or exists (select 1 from org_user_members oum where oum.org_id = o.id and oum.user_id = $1::uuid))
        group by o.id
-       order by o.type asc, o.name asc`,
+       order by
+         case when o.owner_user_id = $1::uuid then 0 else 1 end,
+         o.name asc`,
       [userId]
     );
     return { ok: true, orgs };
   });
 
-  // ── Create / invite partner org ─────────────────────────────────────────────
-  server.post<{ Body: { name: string; slug: string; description?: string; type?: string } }>(
+  // ── Create org ──────────────────────────────────────────────────────────────
+  server.post<{ Body: { name: string; slug: string; description?: string } }>(
     "/api/v1/orgs",
     async (req, reply) => {
-      const { name, slug, description, type = "partner" } = req.body;
+      const { name, slug, description } = req.body;
       if (!name || !slug) return reply.status(400).send({ ok: false, error: "name and slug required" });
       const userId = getRequestUser(req)?.userId ?? null;
       const { rows } = await db.query(
-        `insert into organisations (name, slug, description, type, owner_user_id)
-         values ($1, $2, $3, $4, $5) returning *`,
-        [name, slug, description ?? null, type, userId]
+        `insert into organisations (name, slug, description, owner_user_id)
+         values ($1, $2, $3, $4) returning *`,
+        [name, slug, description ?? null, userId]
       );
       return { ok: true, org: rows[0] };
     }
@@ -125,21 +126,20 @@ export async function registerAgents(server: FastifyInstance, db: pg.Pool) {
   // ── Update org ──────────────────────────────────────────────────────────────
   server.patch<{
     Params: { id: string };
-    Body: { name?: string; slug?: string; description?: string; type?: string; status?: string; avatar_color?: string };
+    Body: { name?: string; slug?: string; description?: string; status?: string; avatar_color?: string };
   }>("/api/v1/orgs/:id", async (req, reply) => {
-    const { name, slug, description, type, status, avatar_color } = req.body;
+    const { name, slug, description, status, avatar_color } = req.body;
     const { rows } = await db.query(
       `update organisations set
          name         = coalesce($2, name),
          slug         = coalesce($3, slug),
          description  = coalesce($4, description),
-         type         = coalesce($5, type),
-         status       = coalesce($6, status),
-         avatar_color = coalesce($7, avatar_color),
+         status       = coalesce($5, status),
+         avatar_color = coalesce($6, avatar_color),
          updated_at   = now()
        where id::text = $1 or slug = $1
        returning *`,
-      [req.params.id, name ?? null, slug ?? null, description ?? null, type ?? null, status ?? null, avatar_color ?? null]
+      [req.params.id, name ?? null, slug ?? null, description ?? null, status ?? null, avatar_color ?? null]
     );
     if (!rows.length) return reply.status(404).send({ ok: false, error: "org not found" });
     return { ok: true, org: rows[0] };
@@ -898,7 +898,7 @@ ACK_URL: ${ackUrl}
   server.get<{ Params: { token: string } }>("/api/v1/invites/:token", async (req, reply) => {
     const { rows } = await db.query(
       `select ai.id, ai.label, ai.expires_at, ai.accepted_at,
-              o.name as org_name, o.type as org_type
+              o.name as org_name
        from agent_invites ai
        join organisations o on o.id = ai.org_id
        where ai.token = $1`,
@@ -910,7 +910,7 @@ ACK_URL: ${ackUrl}
     if (inv.accepted_at) return reply.status(409).send({ ok: false, error: "invite already used" });
     return {
       ok: true,
-      org:       { name: inv.org_name, type: inv.org_type },
+      org:       { name: inv.org_name },
       label:     inv.label,
       expires_at: inv.expires_at,
     };

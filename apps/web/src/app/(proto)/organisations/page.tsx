@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import * as React from "react";
 import Link from "next/link";
@@ -19,9 +19,8 @@ import {
   type Org, type OrgDetail,
 } from "@/lib/api";
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-type OrgType   = "own" | "partner" | "client" | "vendor";
-type OrgFilter = "all" | OrgType | "admin" | "contributor" | "viewer" | "archived";
+// â”€â”€â”€ Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+type OrgFilter = "all" | "owner" | "admin" | "contributor" | "viewer" | "archived";
 type OrgView   = "grid" | "list";
 type PanelTab  = "overview" | "team" | "settings";
 
@@ -38,53 +37,13 @@ type OrgProject = {
   id: string; name: string; slug: string; status: string; progress?: number;
 };
 
-// ─── Constants ────────────────────────────────────────────────────────────────
-const ORG_TYPE_META: Record<string, {
-  label: string; desc: string; badge: string; accent: string; cardActive: string;
-}> = {
-  own:     {
-    label: "Own workspace", desc: "Your team",
-    badge: "bg-brand-100 text-brand-700 dark:bg-brand-500/10 dark:text-brand-300",
-    accent: "border-brand-500", cardActive: "bg-brand-600 ring-brand-600 text-white",
-  },
-  admin:  {
-    label: "Admin", desc: "You manage this org",
-    badge: "bg-blue-100 text-blue-700 dark:bg-blue-500/10 dark:text-blue-300",
-    accent: "border-blue-500", cardActive: "bg-blue-600 ring-blue-600 text-white",
-  },
-  contributor: {
-    label: "Contributor", desc: "You work here",
-    badge: "bg-brand-100 text-brand-700 dark:bg-brand-500/10 dark:text-brand-300",
-    accent: "border-brand-400", cardActive: "bg-brand-600 ring-brand-600 text-white",
-  },
-  viewer: {
-    label: "Viewer", desc: "Read-only access",
-    badge: "bg-zinc-100 text-zinc-500 dark:bg-white/10 dark:text-zinc-400",
-    accent: "border-zinc-300", cardActive: "bg-zinc-500 ring-zinc-500 text-white",
-  },
-  partner: {
-    label: "Partner", desc: "Collaborate together",
-    badge: "bg-sky-100 text-sky-700 dark:bg-sky-500/10 dark:text-sky-300",
-    accent: "border-sky-500", cardActive: "bg-sky-600 ring-sky-600 text-white",
-  },
-  client:  {
-    label: "Client", desc: "You serve them",
-    badge: "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400",
-    accent: "border-emerald-500", cardActive: "bg-emerald-600 ring-emerald-600 text-white",
-  },
-  vendor:  {
-    label: "Vendor", desc: "You use their services",
-    badge: "bg-amber-100 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400",
-    accent: "border-amber-500", cardActive: "bg-amber-600 ring-amber-600 text-white",
-  },
+// â”€â”€â”€ Role meta â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+const ROLE_META: Record<string, { label: string; desc: string; badge: string; accent: string }> = {
+  owner:       { label: "Owner",       desc: "You run this org",    badge: "bg-purple-100 text-purple-700 dark:bg-purple-500/10 dark:text-purple-300", accent: "border-purple-500" },
+  admin:       { label: "Admin",       desc: "You manage this org", badge: "bg-blue-100 text-blue-700 dark:bg-blue-500/10 dark:text-blue-300",         accent: "border-blue-500"   },
+  contributor: { label: "Contributor", desc: "You work here",       badge: "bg-brand-100 text-brand-700 dark:bg-brand-500/10 dark:text-brand-300",     accent: "border-brand-400"  },
+  viewer:      { label: "Viewer",      desc: "Read-only access",    badge: "bg-zinc-100 text-zinc-500 dark:bg-white/10 dark:text-zinc-400",             accent: "border-zinc-300"   },
 };
-
-/** Returns the display type based on the user's relationship to the org.
- *  For own orgs where the user isn't the owner, show their actual role (admin/contributor/viewer). */
-function effectiveType(org: ExtOrg): string {
-  if (org.type === "own" && org.my_role && org.my_role !== "owner") return org.my_role;
-  return org.type;
-}
 
 const AVATAR_COLORS = ["#7C3AED","#2563EB","#0284C7","#059669","#D97706","#DC2626"];
 
@@ -96,7 +55,7 @@ function avatarColor(name: string, override?: string | null): string {
 }
 
 function relTime(d?: string): string {
-  if (!d) return "—";
+  if (!d) return "â€”";
   const diff = Date.now() - new Date(d).getTime();
   const days = Math.floor(diff / 86400000);
   if (days < 1) return "today";
@@ -106,7 +65,7 @@ function relTime(d?: string): string {
 }
 
 function fmtDate(d?: string) {
-  if (!d) return "—";
+  if (!d) return "â€”";
   return new Date(d).toLocaleDateString("en-GB", { day:"numeric", month:"short", year:"numeric" });
 }
 
@@ -118,7 +77,7 @@ function ProgressBar({ value }: { value?: number }) {
   );
 }
 
-// ─── OrgAvatar ────────────────────────────────────────────────────────────────
+// â”€â”€â”€ OrgAvatar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function OrgAvatar({ name, avatarUrl, color, size = 44, className }: {
   name: string; avatarUrl?: string | null; color?: string | null; size?: number; className?: string;
 }) {
@@ -138,7 +97,7 @@ function OrgAvatar({ name, avatarUrl, color, size = 44, className }: {
   );
 }
 
-// ─── AvatarEditor ─────────────────────────────────────────────────────────────
+// â”€â”€â”€ AvatarEditor â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function AvatarEditor({ name, avatarUrl, color, onChange, onUpload, onRemove, size = 72 }: {
   name: string; avatarUrl?: string | null; color: string;
   onChange: (color: string) => void;
@@ -166,7 +125,7 @@ function AvatarEditor({ name, avatarUrl, color, onChange, onUpload, onRemove, si
 
   return (
     <div className="flex flex-col items-center gap-3">
-      {/* Avatar circle — clickable */}
+      {/* Avatar circle â€” clickable */}
       <div
         className="group relative cursor-pointer"
         onClick={() => fileRef.current?.click()}
@@ -223,19 +182,18 @@ function AvatarEditor({ name, avatarUrl, color, onChange, onUpload, onRemove, si
 
       <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/svg+xml,image/webp"
         className="hidden" onChange={handleFile} />
-      <p className="text-[11px] text-zinc-400">PNG, JPG, SVG · Max 2MB</p>
+      <p className="text-[11px] text-zinc-400">PNG, JPG, SVG Â· Max 2MB</p>
     </div>
   );
 }
 
-// ─── New Org Panel ────────────────────────────────────────────────────────────
+// â”€â”€â”€ New Org Panel â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function NewOrgPanel({ onDone, onClose }: {
   onDone: (org: ExtOrg) => void; onClose: () => void;
 }) {
   const [name,   setName]   = React.useState("");
   const [slug,   setSlug]   = React.useState("");
   const [desc,   setDesc]   = React.useState("");
-  const [type,   setType]   = React.useState<OrgType>("partner");
   const [color,  setColor]  = React.useState(AVATAR_COLORS[0]);
   const [pendingFile, setPendingFile] = React.useState<File | null>(null);
   const [previewUrl, setPreviewUrl]   = React.useState<string | null>(null);
@@ -256,7 +214,7 @@ function NewOrgPanel({ onDone, onClose }: {
   async function handleCreate() {
     if (!name.trim() || !slug.trim()) return;
     setSaving(true); setError("");
-    const org = await createOrg({ name: name.trim(), slug: slug.trim(), description: desc.trim() || undefined, type });
+    const org = await createOrg({ name: name.trim(), slug: slug.trim(), description: desc.trim() || undefined });
     if (!org) { setError("Failed to create org. Slug may already be taken."); setSaving(false); return; }
 
     // Upload logo if pending
@@ -272,11 +230,6 @@ function NewOrgPanel({ onDone, onClose }: {
   }
 
   const canCreate = name.trim().length > 0 && slug.trim().length > 0;
-  const TYPE_CARDS: { type: OrgType; emoji: string; label: string; desc: string; sub: string }[] = [
-    { type: "partner", emoji: "🤝", label: "Partner",  desc: "Collaborate together", sub: "Co-build, shared agents" },
-    { type: "client",  emoji: "👤", label: "Client",   desc: "You serve them",        sub: "Deliver projects for" },
-    { type: "vendor",  emoji: "📦", label: "Vendor",   desc: "You use their services", sub: "APIs, tools, infra" },
-  ];
 
   return (
     <div className="flex h-full w-[440px] shrink-0 flex-col border-l border-zinc-200 bg-white dark:border-[#2D2A45] dark:bg-[#16132A] animate-slide-in-right">
@@ -284,7 +237,7 @@ function NewOrgPanel({ onDone, onClose }: {
       <div className="flex shrink-0 items-center justify-between border-b border-zinc-200 px-5 py-4 dark:border-[#2D2A45]">
         <div>
           <div className="font-display text-sm font-bold text-zinc-900 dark:text-white">New Organisation</div>
-          <div className="mt-0.5 text-xs text-zinc-500">Register a partner, client, or vendor</div>
+          <div className="mt-0.5 text-xs text-zinc-500">Create a new organisation</div>
         </div>
         <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg text-zinc-400 hover:bg-zinc-100 dark:hover:bg-white/10">
           <X className="h-4 w-4" />
@@ -293,11 +246,11 @@ function NewOrgPanel({ onDone, onClose }: {
 
       {/* Scrollable body */}
       <div className="flex-1 overflow-y-auto p-5 flex flex-col gap-5">
-        {/* STEP 1 — Identity */}
+        {/* STEP 1 â€” Identity */}
         <div>
-          <p className="mb-4 text-[11px] font-semibold uppercase tracking-widest text-zinc-400">Step 1 — Identity</p>
+          <p className="mb-4 text-[11px] font-semibold uppercase tracking-widest text-zinc-400">Step 1 â€” Identity</p>
 
-          {/* Avatar editor — top & center */}
+          {/* Avatar editor â€” top & center */}
           <div className="mb-5 rounded-2xl bg-zinc-50 p-4 dark:bg-white/5">
             <AvatarEditor
               name={name}
@@ -315,7 +268,7 @@ function NewOrgPanel({ onDone, onClose }: {
             <label className="mb-1.5 block text-xs font-semibold text-zinc-700 dark:text-zinc-300">
               Organisation name <span className="text-red-500">*</span>
             </label>
-            <Input autoFocus placeholder="e.g. DesignCo, PartnerLabs…" value={name}
+            <Input autoFocus placeholder="e.g. DesignCo, PartnerLabsâ€¦" value={name}
               onChange={e => autoSlug(e.target.value)} />
           </div>
 
@@ -345,35 +298,6 @@ function NewOrgPanel({ onDone, onClose }: {
           </div>
         </div>
 
-        {/* STEP 2 — Relationship type */}
-        <div>
-          <p className="mb-3 text-[11px] font-semibold uppercase tracking-widest text-zinc-400">Step 2 — Relationship type</p>
-          <p className="mb-3 text-xs text-zinc-500">What is your relationship with this organisation?</p>
-          <div className="flex flex-col gap-2">
-            {TYPE_CARDS.map(tc => (
-              <button key={tc.type} onClick={() => setType(tc.type)}
-                className={cn(
-                  "flex items-start gap-3 rounded-2xl p-3.5 ring-1 transition-all text-left",
-                  type === tc.type
-                    ? "bg-brand-50 ring-brand-400 dark:bg-brand-500/10 dark:ring-brand-500"
-                    : "bg-zinc-50 ring-zinc-200 hover:ring-zinc-300 dark:bg-white/5 dark:ring-white/10"
-                )}>
-                <span className="mt-0.5 text-xl">{tc.emoji}</span>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className={cn("text-sm font-bold", type === tc.type ? "text-brand-700 dark:text-brand-300" : "text-zinc-800 dark:text-zinc-200")}>
-                      {tc.label}
-                    </span>
-                    {type === tc.type && <Check className="h-3.5 w-3.5 text-brand-600" />}
-                  </div>
-                  <p className={cn("text-xs font-semibold", type === tc.type ? "text-brand-600 dark:text-brand-400" : "text-zinc-500")}>{tc.desc}</p>
-                  <p className="text-[11px] text-zinc-400 mt-0.5">{tc.sub}</p>
-                </div>
-              </button>
-            ))}
-          </div>
-        </div>
-
         {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-600 dark:bg-red-500/10">{error}</p>}
       </div>
 
@@ -390,7 +314,7 @@ function NewOrgPanel({ onDone, onClose }: {
                 ? "bg-brand-600 text-white hover:bg-brand-700 shadow-sm"
                 : "bg-zinc-100 text-zinc-400 cursor-not-allowed dark:bg-white/10 dark:text-zinc-500"
             )}>
-            {saving ? "Creating…" : "Create Organisation →"}
+            {saving ? "Creatingâ€¦" : "Create Organisation â†’"}
           </button>
           {!canCreate && (
             <div className="absolute bottom-full mb-2 right-0 hidden group-hover:block z-10">
@@ -405,7 +329,7 @@ function NewOrgPanel({ onDone, onClose }: {
   );
 }
 
-// ─── Org Detail Panel ─────────────────────────────────────────────────────────
+// â”€â”€â”€ Org Detail Panel â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function OrgDetailPanel({ org: initialOrg, onClose, onUpdated, onDeleted }: {
   org: ExtOrg; onClose: () => void;
   onUpdated: (o: ExtOrg) => void;
@@ -420,7 +344,7 @@ function OrgDetailPanel({ org: initialOrg, onClose, onUpdated, onDeleted }: {
   const [name,    setName]    = React.useState(org.name);
   const [slug,    setSlug]    = React.useState(org.slug);
   const [desc,    setDesc]    = React.useState(org.description ?? "");
-  const [type,    setType]    = React.useState(org.type);
+
   const [color,   setColor]   = React.useState(org.avatar_color ?? avatarColor(org.name));
   const [pendingFile, setPendingFile] = React.useState<File | null>(null);
   const [previewUrl,  setPreviewUrl]  = React.useState<string | null>(null);
@@ -447,7 +371,6 @@ function OrgDetailPanel({ org: initialOrg, onClose, onUpdated, onDeleted }: {
     const updated = await updateOrg(org.id, {
       name: name.trim(), slug: slug.trim(),
       description: desc.trim() || undefined,
-      type: type as string,
       avatar_color: color,
     });
     setSaving(false);
@@ -479,8 +402,8 @@ function OrgDetailPanel({ org: initialOrg, onClose, onUpdated, onDeleted }: {
     else { setConfirmDelete(false); alert("Cannot delete an org with agents assigned. Remove agents first."); }
   }
 
-  const tm      = ORG_TYPE_META[org.type] ?? ORG_TYPE_META.partner;
-  const isOwn   = org.type === "own";
+  const tm    = ROLE_META[org.my_role ?? "owner"] ?? ROLE_META.viewer;
+  const isOwn = org.my_role === "owner";
   const orgStatus = (org as unknown as { status?: string }).status ?? "active";
   const isArchived = orgStatus === "archived";
   const currentAvatarUrl = previewUrl ?? org.avatar_url;
@@ -525,7 +448,7 @@ function OrgDetailPanel({ org: initialOrg, onClose, onUpdated, onDeleted }: {
 
       {/* Tab content */}
       <div className="flex-1 overflow-y-auto">
-        {/* ── OVERVIEW ── */}
+        {/* â”€â”€ OVERVIEW â”€â”€ */}
         {tab === "overview" && (
           <div className="flex flex-col gap-0">
             {/* Identity card */}
@@ -590,7 +513,7 @@ function OrgDetailPanel({ org: initialOrg, onClose, onUpdated, onDeleted }: {
               {agents.length > 3 && (
                 <button onClick={() => setTab("team")}
                   className="mt-1 flex items-center gap-1 text-xs text-brand-600 hover:underline">
-                  → See all {agents.length} in Team tab
+                  â†’ See all {agents.length} in Team tab
                 </button>
               )}
               {agents.length === 0 && (
@@ -631,7 +554,7 @@ function OrgDetailPanel({ org: initialOrg, onClose, onUpdated, onDeleted }: {
           </div>
         )}
 
-        {/* ── TEAM ── */}
+        {/* â”€â”€ TEAM â”€â”€ */}
         {tab === "team" && (
           <div className="p-5">
             <div className="mb-4 flex items-center justify-between">
@@ -657,12 +580,12 @@ function OrgDetailPanel({ org: initialOrg, onClose, onUpdated, onDeleted }: {
                         <div className="text-sm font-semibold text-zinc-800 dark:text-zinc-200">{a.name}</div>
                         <div className="text-[11px] text-zinc-400">
                           {a.agent_type?.replace("ai_","") ?? "agent"}
-                          {a.model && ` · ${a.model}`}
+                          {a.model && ` Â· ${a.model}`}
                         </div>
                       </div>
                       <div className="flex shrink-0 items-center gap-2">
                         <span className={cn("text-[11px] font-semibold", isOnline ? "text-emerald-600" : "text-zinc-400")}>
-                          {isOnline ? "🟢 Online" : "⬤ Offline"}
+                          {isOnline ? "ðŸŸ¢ Online" : "â¬¤ Offline"}
                         </span>
                         <Link href="/agents" className="grid h-6 w-6 place-items-center rounded text-zinc-400 hover:text-brand-600">
                           <ExternalLink className="h-3.5 w-3.5" />
@@ -682,7 +605,7 @@ function OrgDetailPanel({ org: initialOrg, onClose, onUpdated, onDeleted }: {
           </div>
         )}
 
-        {/* ── SETTINGS ── */}
+        {/* â”€â”€ SETTINGS â”€â”€ */}
         {tab === "settings" && (
           <div className="flex flex-col gap-0">
             <div className="p-5 flex flex-col gap-4">
@@ -717,7 +640,7 @@ function OrgDetailPanel({ org: initialOrg, onClose, onUpdated, onDeleted }: {
                     className="flex-1 border-0 bg-zinc-50 px-3 py-2 text-sm text-zinc-900 outline-none dark:bg-zinc-900 dark:text-zinc-100" />
                 </div>
                 {slug !== org.slug && (
-                  <p className="mt-1 text-[11px] text-amber-600">⚠ Changing slug will break existing links</p>
+                  <p className="mt-1 text-[11px] text-amber-600">âš  Changing slug will break existing links</p>
                 )}
               </div>
 
@@ -729,31 +652,9 @@ function OrgDetailPanel({ org: initialOrg, onClose, onUpdated, onDeleted }: {
                   className={cn(inp, "resize-none")} />
               </div>
 
-              {/* Type (not editable for own) */}
-              {!isOwn && (
-                <div>
-                  <label className="mb-1.5 block text-xs font-semibold text-zinc-700 dark:text-zinc-300">Type</label>
-                  <div className="flex gap-2">
-                    {(["partner","client","vendor"] as const).map(t => (
-                      <button key={t} onClick={() => setType(t)}
-                        className={cn("flex-1 rounded-xl py-2 text-sm font-semibold ring-1 transition-colors capitalize",
-                          type === t ? "bg-brand-600 text-white ring-brand-600" : "bg-zinc-50 text-zinc-600 ring-zinc-200 hover:bg-zinc-100 dark:bg-white/5 dark:text-zinc-400 dark:ring-white/10")}>
-                        {t}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {isOwn && (
-                <div>
-                  <label className="mb-1.5 block text-xs font-semibold text-zinc-700 dark:text-zinc-300">Type</label>
-                  <div className="flex items-center gap-2 rounded-xl bg-zinc-100 px-3 py-2.5 dark:bg-white/5">
-                    <span className="text-sm text-zinc-500">Own workspace — locked</span>
-                  </div>
-                </div>
-              )}
 
-              {/* Save button — always visible */}
+
+              {/* Save button â€” always visible */}
               <button onClick={handleSave} disabled={saving}
                 className={cn(
                   "flex items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-semibold transition-all",
@@ -761,7 +662,7 @@ function OrgDetailPanel({ org: initialOrg, onClose, onUpdated, onDeleted }: {
                     ? "bg-emerald-600 text-white"
                     : "bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-60"
                 )}>
-                {saving ? "Saving…" : saved ? "✓ Saved" : (<><Save className="h-4 w-4" /> Save changes</>)}
+                {saving ? "Savingâ€¦" : saved ? "âœ“ Saved" : (<><Save className="h-4 w-4" /> Save changes</>)}
               </button>
             </div>
 
@@ -785,7 +686,7 @@ function OrgDetailPanel({ org: initialOrg, onClose, onUpdated, onDeleted }: {
                       <div className="flex gap-2">
                         <button onClick={handleDelete} disabled={deleting}
                           className="flex-1 rounded-lg bg-red-600 py-1.5 text-xs font-semibold text-white hover:bg-red-700 disabled:opacity-60">
-                          {deleting ? "Deleting…" : "Yes, delete"}
+                          {deleting ? "Deletingâ€¦" : "Yes, delete"}
                         </button>
                         <button onClick={() => setConfirmDelete(false)}
                           className="flex-1 rounded-lg ring-1 ring-zinc-200 py-1.5 text-xs font-semibold text-zinc-600 dark:ring-white/10 dark:text-zinc-400">
@@ -816,206 +717,14 @@ function OrgDetailPanel({ org: initialOrg, onClose, onUpdated, onDeleted }: {
   );
 }
 
-// ─── Own Org Featured Card ────────────────────────────────────────────────────
-function OwnOrgCard({ org, onView }: { org: ExtOrg; onView: () => void }) {
+// â”€â”€â”€ Own Org Featured Card â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â”€â”€â”€ Unified Org Card (role-based) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+function OrgCard({ org, onView, onArchive }: { org: ExtOrg; onView: () => void; onArchive?: () => void }) {
   const router = useRouter();
-  const orgStatus = (org as unknown as { status?: string }).status ?? "active";
-  const [menuOpen, setMenuOpen] = React.useState(false);
-  const menuRef = React.useRef<HTMLDivElement>(null);
-
-  React.useEffect(() => {
-    function handleClickOutside(e: MouseEvent) {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
-    }
-    if (menuOpen) document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [menuOpen]);
-
-  return (
-    <div className="relative mb-6 overflow-hidden rounded-2xl border border-brand-200 bg-brand-50/30 p-5 dark:border-brand-500/20 dark:bg-brand-500/5"
-      style={{ borderLeft: "4px solid #7C3AED" }}>
-      <div className="flex items-center gap-4">
-        <OrgAvatar name={org.name} avatarUrl={org.avatar_url} color={org.avatar_color} size={56} />
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <h2 className="font-display text-lg font-extrabold text-zinc-900 dark:text-white">{org.name}</h2>
-            <Crown className="h-4 w-4 text-brand-500" />
-            <span className="rounded-full bg-brand-100 px-2 py-0.5 text-[11px] font-semibold text-brand-700 dark:bg-brand-500/10 dark:text-brand-300">Own workspace</span>
-            <span className="font-mono text-xs text-zinc-400">@{org.slug}</span>
-          </div>
-          {org.description && <p className="mt-0.5 text-sm text-zinc-500 truncate">{org.description}</p>}
-          <div className="mt-2 flex items-center gap-4 text-xs text-zinc-500">
-            <span className="flex items-center gap-1"><Bot className="h-3.5 w-3.5" />{org.agent_count ?? 0} agents</span>
-            <span className="flex items-center gap-1"><FolderKanban className="h-3.5 w-3.5" />{org.project_count ?? 0} projects</span>
-            <span className="flex items-center gap-1"><Zap className="h-3.5 w-3.5 text-emerald-500" />{org.online_count ?? 0} online</span>
-          </div>
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
-          <span className={cn("rounded-full px-2.5 py-1 text-xs font-semibold",
-            orgStatus === "active" ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400" : "bg-zinc-100 text-zinc-500")}>
-            ● {orgStatus === "active" ? "Active" : orgStatus}
-          </span>
-          <Link href={`/organisations/${org.id}`}
-            className="flex items-center gap-1.5 rounded-xl bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 transition-colors">
-            Manage <ChevronRight className="h-4 w-4" />
-          </Link>
-          {/* ⋮ menu */}
-          <div className="relative" ref={menuRef}>
-            <button onClick={() => setMenuOpen(v => !v)}
-              className="grid h-8 w-8 place-items-center rounded-xl text-zinc-500 hover:bg-zinc-100 dark:hover:bg-white/10 transition-colors">
-              <MoreVertical className="h-4 w-4" />
-            </button>
-            {menuOpen && (
-              <div className="absolute right-0 top-full z-30 mt-1 w-44 rounded-xl bg-white py-1.5 shadow-xl ring-1 ring-zinc-200 dark:bg-[#1E1B33] dark:ring-[#2D2A45]">
-                <button onClick={() => { router.push(`/organisations/${org.id}`); setMenuOpen(false); }}
-                  className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-50 dark:text-zinc-300 dark:hover:bg-white/5">
-                  <Settings className="h-3.5 w-3.5" /> Settings
-                </button>
-                <button onClick={() => { router.push(`/organisations/${org.id}?tab=members`); setMenuOpen(false); }}
-                  className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-50 dark:text-zinc-300 dark:hover:bg-white/5">
-                  <Users className="h-3.5 w-3.5" /> Members
-                </button>
-                <button onClick={() => { router.push(`/organisations/${org.id}?tab=agents`); setMenuOpen(false); }}
-                  className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-50 dark:text-zinc-300 dark:hover:bg-white/5">
-                  <Bot className="h-3.5 w-3.5" /> Agents
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ─── Member Org Card (admin / contributor / viewer of someone else's own org) ──
-const MEMBER_ROLE_META: Record<string, {
-  border: string; bg: string; badge: string; btnCls: string; btnLabel: string; btnHref: (id: string) => string;
-}> = {
-  admin: {
-    border: "border-blue-300 dark:border-blue-500/30",
-    bg: "bg-blue-50/30 dark:bg-blue-500/5",
-    badge: "bg-blue-100 text-blue-700 dark:bg-blue-500/10 dark:text-blue-300",
-    btnCls: "bg-blue-600 hover:bg-blue-700",
-    btnLabel: "Manage",
-    btnHref: (id) => `/organisations/${id}`,
-  },
-  contributor: {
-    border: "border-brand-200 dark:border-brand-500/20",
-    bg: "bg-brand-50/20 dark:bg-brand-500/5",
-    badge: "bg-brand-100 text-brand-700 dark:bg-brand-500/10 dark:text-brand-300",
-    btnCls: "bg-brand-600 hover:bg-brand-700",
-    btnLabel: "View Projects",
-    btnHref: () => `/projects`,
-  },
-  viewer: {
-    border: "border-zinc-200 dark:border-zinc-600/30",
-    bg: "bg-zinc-50/30 dark:bg-white/3",
-    badge: "bg-zinc-100 text-zinc-500 dark:bg-white/10 dark:text-zinc-400",
-    btnCls: "bg-zinc-600 hover:bg-zinc-700",
-    btnLabel: "View",
-    btnHref: (id) => `/organisations/${id}`,
-  },
-};
-
-function MemberOrgCard({ org }: { org: ExtOrg }) {
-  const router = useRouter();
-  const role = org.my_role ?? "contributor";
-  const meta = MEMBER_ROLE_META[role] ?? MEMBER_ROLE_META.contributor;
-  const [menuOpen, setMenuOpen] = React.useState(false);
-  const menuRef = React.useRef<HTMLDivElement>(null);
-
-  React.useEffect(() => {
-    function handleClickOutside(e: MouseEvent) {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
-    }
-    if (menuOpen) document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [menuOpen]);
-
-  const borderColor = role === "admin" ? "#2563EB" : role === "viewer" ? "#A1A1AA" : "#7C3AED";
-
-  return (
-    <div className={cn("relative mb-4 overflow-hidden rounded-2xl border p-5", meta.border, meta.bg)}
-      style={{ borderLeft: `4px solid ${borderColor}` }}>
-      <div className="flex items-center gap-4">
-        <OrgAvatar name={org.name} avatarUrl={org.avatar_url} color={org.avatar_color} size={48} />
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <h2 className="font-display text-base font-bold text-zinc-900 dark:text-white">{org.name}</h2>
-            <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-semibold capitalize", meta.badge)}>
-              {role}
-            </span>
-            <span className="font-mono text-xs text-zinc-400">@{org.slug}</span>
-            {role === "viewer" && <Lock className="h-3 w-3 text-zinc-400" />}
-          </div>
-          {org.description && <p className="mt-0.5 text-sm text-zinc-500 truncate">{org.description}</p>}
-          <div className="mt-1.5 flex items-center gap-4 text-xs text-zinc-400">
-            <span className="flex items-center gap-1"><Bot className="h-3.5 w-3.5" />{org.agent_count ?? 0} agents</span>
-            <span className="flex items-center gap-1"><FolderKanban className="h-3.5 w-3.5" />{org.project_count ?? 0} projects</span>
-            {(org.online_count ?? 0) > 0 && (
-              <span className="flex items-center gap-1"><Zap className="h-3.5 w-3.5 text-emerald-500" />{org.online_count} online</span>
-            )}
-          </div>
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
-          <Link href={meta.btnHref(org.id)}
-            className={cn("flex items-center gap-1.5 rounded-xl px-4 py-2 text-sm font-semibold text-white transition-colors", meta.btnCls)}>
-            {meta.btnLabel} <ChevronRight className="h-4 w-4" />
-          </Link>
-          <div className="relative" ref={menuRef}>
-            <button onClick={() => setMenuOpen(v => !v)}
-              className="grid h-8 w-8 place-items-center rounded-xl text-zinc-400 hover:bg-zinc-100 dark:hover:bg-white/10 transition-colors">
-              <MoreVertical className="h-4 w-4" />
-            </button>
-            {menuOpen && (
-              <div className="absolute right-0 top-full z-30 mt-1 w-44 rounded-xl bg-white py-1.5 shadow-xl ring-1 ring-zinc-200 dark:bg-[#1E1B33] dark:ring-[#2D2A45]">
-                <button onClick={() => { router.push(`/organisations/${org.id}`); setMenuOpen(false); }}
-                  className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-50 dark:text-zinc-300 dark:hover:bg-white/5">
-                  <Building2 className="h-3.5 w-3.5" /> View Org
-                </button>
-                {(role === "admin" || role === "contributor") && (
-                  <button onClick={() => { router.push(`/projects`); setMenuOpen(false); }}
-                    className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-50 dark:text-zinc-300 dark:hover:bg-white/5">
-                    <FolderKanban className="h-3.5 w-3.5" /> Projects
-                  </button>
-                )}
-                {role === "admin" && (
-                  <>
-                    <button onClick={() => { router.push(`/organisations/${org.id}?tab=members`); setMenuOpen(false); }}
-                      className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-50 dark:text-zinc-300 dark:hover:bg-white/5">
-                      <Users className="h-3.5 w-3.5" /> Members
-                    </button>
-                    <button onClick={() => { router.push(`/organisations/${org.id}?tab=agents`); setMenuOpen(false); }}
-                      className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-50 dark:text-zinc-300 dark:hover:bg-white/5">
-                      <Bot className="h-3.5 w-3.5" /> Agents
-                    </button>
-                  </>
-                )}
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ─── External Org Card ────────────────────────────────────────────────────────
-function ExternalOrgCard({ org, onView, onArchive }: {
-  org: ExtOrg; onView: () => void;
-  onArchive?: () => void;
-}) {
-  const router = useRouter();
-  const eType = effectiveType(org);
-  const tm = ORG_TYPE_META[eType] ?? ORG_TYPE_META.partner;
+  const role = org.my_role ?? "owner";
+  const tm = ROLE_META[role] ?? ROLE_META.viewer;
   const orgStatus = (org as unknown as { status?: string }).status ?? "active";
   const isArchived = orgStatus === "archived";
-  const accentColor =
-    eType === "partner" ? "bg-sky-500" :
-    eType === "client"  ? "bg-emerald-500" :
-    eType === "vendor"  ? "bg-amber-500" : "bg-zinc-400";
-
   const [menuOpen, setMenuOpen] = React.useState(false);
   const menuRef = React.useRef<HTMLDivElement>(null);
 
@@ -1027,27 +736,31 @@ function ExternalOrgCard({ org, onView, onArchive }: {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [menuOpen]);
 
+  const accentColors: Record<string, string> = {
+    owner: "bg-purple-500", admin: "bg-blue-500", contributor: "bg-brand-500", viewer: "bg-zinc-400",
+  };
+
   return (
-    <div
-      onClick={() => router.push(`/organisations/${org.id}`)}
+    <div onClick={() => router.push(`/organisations/${org.id}`)}
       className={cn(
         "flex flex-col rounded-2xl bg-white ring-1 ring-zinc-200 shadow-sm dark:bg-[#16132A] dark:ring-[#2D2A45] overflow-hidden",
         "hover:shadow-md transition-all hover:-translate-y-0.5 cursor-pointer",
         isArchived && "opacity-60"
       )}>
-      {/* Top accent bar */}
-      <div className={cn("h-1 w-full shrink-0", accentColor)} />
+      <div className={cn("h-1 w-full shrink-0", accentColors[role] ?? "bg-zinc-400")} />
       <div className="flex flex-col gap-3 p-4">
         <div className="flex items-start gap-3">
           <OrgAvatar name={org.name} avatarUrl={org.avatar_url} color={org.avatar_color} size={44} />
           <div className="min-w-0 flex-1">
-            <div className="font-display font-bold text-zinc-900 dark:text-white truncate">{org.name}</div>
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="font-display font-bold text-zinc-900 dark:text-white truncate">{org.name}</span>
+              {role === "owner" && <Crown className="h-3.5 w-3.5 shrink-0 text-purple-500" />}
+            </div>
             <div className="mt-0.5 flex items-center gap-1.5 flex-wrap">
-              <span className={cn("rounded-full px-1.5 py-0.5 text-[10px] font-semibold", tm.badge)}>{tm.label}</span>
+              <span className={cn("rounded-full px-1.5 py-0.5 text-[10px] font-semibold capitalize", tm.badge)}>{tm.label}</span>
               <span className="font-mono text-[10px] text-zinc-400">@{org.slug}</span>
             </div>
           </div>
-          {/* ⋮ menu */}
           <div className="relative shrink-0" ref={menuRef} onClick={e => e.stopPropagation()}>
             <button onClick={() => setMenuOpen(v => !v)}
               className="grid h-7 w-7 place-items-center rounded-lg text-zinc-400 hover:bg-zinc-100 dark:hover:bg-white/10 transition-colors">
@@ -1055,10 +768,12 @@ function ExternalOrgCard({ org, onView, onArchive }: {
             </button>
             {menuOpen && (
               <div className="absolute right-0 top-full z-30 mt-1 w-44 rounded-xl bg-white py-1.5 shadow-xl ring-1 ring-zinc-200 dark:bg-[#1E1B33] dark:ring-[#2D2A45]">
-                <button onClick={() => { router.push(`/organisations/${org.id}`); setMenuOpen(false); }}
-                  className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-50 dark:text-zinc-300 dark:hover:bg-white/5">
-                  <Settings className="h-3.5 w-3.5" /> Settings
-                </button>
+                {(role === "owner" || role === "admin") && (
+                  <button onClick={() => { router.push(`/organisations/${org.id}`); setMenuOpen(false); }}
+                    className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-50 dark:text-zinc-300 dark:hover:bg-white/5">
+                    <Settings className="h-3.5 w-3.5" /> Settings
+                  </button>
+                )}
                 <button onClick={() => { router.push(`/organisations/${org.id}?tab=members`); setMenuOpen(false); }}
                   className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-50 dark:text-zinc-300 dark:hover:bg-white/5">
                   <Users className="h-3.5 w-3.5" /> Members
@@ -1067,7 +782,11 @@ function ExternalOrgCard({ org, onView, onArchive }: {
                   className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-50 dark:text-zinc-300 dark:hover:bg-white/5">
                   <Bot className="h-3.5 w-3.5" /> Agents
                 </button>
-                {!isArchived && onArchive && (
+                <button onClick={() => { router.push(`/organisations/${org.id}?tab=projects`); setMenuOpen(false); }}
+                  className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-50 dark:text-zinc-300 dark:hover:bg-white/5">
+                  <FolderKanban className="h-3.5 w-3.5" /> Projects
+                </button>
+                {!isArchived && onArchive && (role === "owner" || role === "admin") && (
                   <>
                     <div className="my-1 h-px bg-zinc-100 dark:bg-white/5" />
                     <button onClick={() => { onArchive(); setMenuOpen(false); }}
@@ -1085,19 +804,21 @@ function ExternalOrgCard({ org, onView, onArchive }: {
           : <p className="text-xs italic text-zinc-300 dark:text-zinc-600">No description</p>
         }
         <div className="flex items-center gap-3 text-xs text-zinc-500">
-          <span className="flex items-center gap-1"><Bot className="h-3.5 w-3.5" />{org.agent_count ?? 0} agents</span>
-          <span className="flex items-center gap-1"><FolderKanban className="h-3.5 w-3.5" />{org.project_count ?? 0} projects</span>
-        </div>
-        <div className="flex items-center justify-between text-[11px] text-zinc-400">
-          <span className={cn("font-semibold", isArchived ? "text-zinc-400" : "text-emerald-600")}>
-            ● {isArchived ? "Archived" : "Active"}
-          </span>
-          <span>{relTime((org as unknown as { created_at?: string }).created_at)}</span>
+          <span className="flex items-center gap-1"><Bot className="h-3.5 w-3.5" />{org.agent_count ?? 0}</span>
+          <span className="flex items-center gap-1"><FolderKanban className="h-3.5 w-3.5" />{org.project_count ?? 0}</span>
+          {(org.online_count ?? 0) > 0 && (
+            <span className="flex items-center gap-1 text-emerald-600"><Zap className="h-3.5 w-3.5" />{org.online_count} online</span>
+          )}
         </div>
         <div className="flex gap-2 border-t border-zinc-100 pt-3 dark:border-white/5" onClick={e => e.stopPropagation()}>
           <Link href={`/organisations/${org.id}`}
-            className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-brand-600 py-1.5 text-xs font-semibold text-white hover:bg-brand-700 transition-colors">
-            <ExternalLink className="h-3 w-3" /> View
+            className={cn(
+              "flex flex-1 items-center justify-center gap-1.5 rounded-lg py-1.5 text-xs font-semibold text-white transition-colors",
+              role === "owner" ? "bg-purple-600 hover:bg-purple-700" :
+              role === "admin" ? "bg-blue-600 hover:bg-blue-700" :
+              "bg-brand-600 hover:bg-brand-700"
+            )}>
+            {role === "owner" || role === "admin" ? "Manage" : "View"} <ChevronRight className="h-3 w-3" />
           </Link>
         </div>
       </div>
@@ -1105,25 +826,13 @@ function ExternalOrgCard({ org, onView, onArchive }: {
   );
 }
 
-// ─── External Org List Row ────────────────────────────────────────────────────
-function ExternalOrgListRow({ org, onView, onArchive }: {
-  org: ExtOrg; onView: () => void; onArchive?: () => void;
-}) {
+// â”€â”€â”€ Org List Row (role-based) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+function OrgListRow({ org, onView }: { org: ExtOrg; onView: () => void }) {
   const router = useRouter();
-  const tm = ORG_TYPE_META[effectiveType(org)] ?? ORG_TYPE_META.partner;
+  const role = org.my_role ?? "owner";
+  const tm = ROLE_META[role] ?? ROLE_META.viewer;
   const orgStatus = (org as unknown as { status?: string }).status ?? "active";
   const isArchived = orgStatus === "archived";
-
-  const [menuOpen, setMenuOpen] = React.useState(false);
-  const menuRef = React.useRef<HTMLDivElement>(null);
-
-  React.useEffect(() => {
-    function handleClickOutside(e: MouseEvent) {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
-    }
-    if (menuOpen) document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [menuOpen]);
 
   return (
     <div className={cn(
@@ -1133,56 +842,34 @@ function ExternalOrgListRow({ org, onView, onArchive }: {
     )} onClick={() => router.push(`/organisations/${org.id}`)}>
       <OrgAvatar name={org.name} avatarUrl={org.avatar_url} color={org.avatar_color} size={32} className="rounded-lg" />
       <div className="w-40 shrink-0">
-        <div className="text-sm font-semibold text-zinc-900 dark:text-white truncate">{org.name}</div>
+        <div className="flex items-center gap-1">
+          <span className="text-sm font-semibold text-zinc-900 dark:text-white truncate">{org.name}</span>
+          {role === "owner" && <Crown className="h-3 w-3 shrink-0 text-purple-500" />}
+        </div>
         <div className="font-mono text-[10px] text-zinc-400">@{org.slug}</div>
       </div>
       <div className="w-24 shrink-0">
-        <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-semibold", tm.badge)}>{tm.label}</span>
+        <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-semibold capitalize", tm.badge)}>{tm.label}</span>
       </div>
       <div className="w-20 shrink-0 text-xs font-semibold">
-        <span className={isArchived ? "text-zinc-400" : "text-emerald-600"}>● {isArchived ? "Archived" : "Active"}</span>
+        <span className={isArchived ? "text-zinc-400" : "text-emerald-600"}>â— {isArchived ? "Archived" : "Active"}</span>
       </div>
       <div className="w-16 shrink-0 text-xs text-zinc-500">{org.agent_count ?? 0}</div>
       <div className="w-20 shrink-0 text-xs text-zinc-500">{org.project_count ?? 0}</div>
-      <div className="min-w-0 flex-1 text-xs text-zinc-400 truncate">{org.description ?? "—"}</div>
-      <div className="w-20 shrink-0 text-xs text-zinc-400">
-        {relTime((org as unknown as { created_at?: string }).created_at)}
-      </div>
+      <div className="min-w-0 flex-1 text-xs text-zinc-400 truncate">{org.description ?? "â€”"}</div>
       <div className="flex shrink-0 items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
         <Link href={`/organisations/${org.id}`}
           className="flex items-center gap-1 rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-700 transition-colors">
-          View
+          {role === "owner" || role === "admin" ? "Manage" : "View"}
         </Link>
-        <div className="relative" ref={menuRef}>
-          <button onClick={() => setMenuOpen(v => !v)}
-            className="grid h-7 w-7 place-items-center rounded-lg text-zinc-400 hover:bg-zinc-100 dark:hover:bg-white/10 transition-colors">
-            <MoreVertical className="h-3.5 w-3.5" />
-          </button>
-          {menuOpen && (
-            <div className="absolute right-0 top-full z-30 mt-1 w-40 rounded-xl bg-white py-1.5 shadow-xl ring-1 ring-zinc-200 dark:bg-[#1E1B33] dark:ring-[#2D2A45]">
-              <button onClick={() => { router.push(`/organisations/${org.id}?tab=members`); setMenuOpen(false); }}
-                className="flex w-full items-center gap-2 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-50 dark:text-zinc-300 dark:hover:bg-white/5">
-                <Users className="h-3.5 w-3.5" /> Members
-              </button>
-              <button onClick={() => { router.push(`/organisations/${org.id}?tab=agents`); setMenuOpen(false); }}
-                className="flex w-full items-center gap-2 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-50 dark:text-zinc-300 dark:hover:bg-white/5">
-                <Bot className="h-3.5 w-3.5" /> Agents
-              </button>
-              {!isArchived && onArchive && (
-                <button onClick={() => { onArchive(); setMenuOpen(false); }}
-                  className="flex w-full items-center gap-2 px-3 py-2 text-sm text-amber-600 hover:bg-amber-50 dark:text-amber-400 dark:hover:bg-amber-500/10">
-                  <Archive className="h-3.5 w-3.5" /> Archive
-                </button>
-              )}
-            </div>
-          )}
-        </div>
       </div>
     </div>
   );
 }
 
-// ─── Page ─────────────────────────────────────────────────────────────────────
+// â”€â”€â”€ [REMOVED] OwnOrgCard, MemberOrgCard, ExternalOrgCard, ExternalOrgListRow â”€
+
+// â”€â”€â”€ Page â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export default function OrganisationsPage() {
   const [orgs,      setOrgs]      = React.useState<ExtOrg[]>([]);
   const [loading,   setLoading]   = React.useState(true);
@@ -1206,57 +893,38 @@ export default function OrganisationsPage() {
     }
   }
 
-  // "Own" = orgs where you are the actual owner
-  const ownOrgs      = orgs.filter(o => o.type === "own" && (o.my_role === "owner" || !o.my_role));
-  // "Member" = own orgs where you're admin/contributor/viewer (someone else's org you belong to)
-  const memberOrgs   = orgs.filter(o => o.type === "own" && o.my_role && o.my_role !== "owner");
-  // "External" = partner/client/vendor orgs (created by you or linked externally)
-  const externalOrgs = orgs.filter(o => o.type !== "own");
-  const totalAgents  = orgs.reduce((s, o) => s + (o.agent_count ?? 0), 0);
+  // Split purely by role â€” no type
+  const ownOrgs        = orgs.filter(o => o.my_role === "owner" || !o.my_role);
+  const memberOrgs     = orgs.filter(o => o.my_role && o.my_role !== "owner");
+  const archivedCount  = orgs.filter(o => (o as unknown as { status?: string }).status === "archived").length;
 
-  const roleFilters = new Set(["admin", "contributor", "viewer"]);
-  const typeFilters = new Set(["partner", "client", "vendor", "own"]);
-
-  const filteredMember = memberOrgs.filter(o => {
+  function matchesFilter(o: ExtOrg): boolean {
     const st = (o as unknown as { status?: string }).status ?? "active";
-    if (filter === "archived" && st !== "archived") return false;
-    if (roleFilters.has(filter) && o.my_role !== filter) return false;
-    if (typeFilters.has(filter)) return false; // type filter → hide member orgs
-    if (query) {
-      const q = query.toLowerCase();
-      if (![o.name, o.slug, o.description ?? ""].some(s => s.toLowerCase().includes(q))) return false;
-    }
-    return true;
-  });
+    if (filter === "archived") return st === "archived";
+    if (st === "archived") return false;
+    if (filter === "owner")       return o.my_role === "owner" || !o.my_role;
+    if (filter === "admin")       return o.my_role === "admin";
+    if (filter === "contributor") return o.my_role === "contributor";
+    if (filter === "viewer")      return o.my_role === "viewer";
+    return true; // "all"
+  }
 
-  const filteredExternal = externalOrgs.filter(o => {
-    const st = (o as unknown as { status?: string }).status ?? "active";
-    if (filter === "archived" && st !== "archived") return false;
-    if (roleFilters.has(filter)) return false; // role filter → hide external orgs
-    if (filter === "own") return false;
-    if (typeFilters.has(filter) && o.type !== filter) return false;
-    if (query) {
-      const q = query.toLowerCase();
-      if (![o.name, o.slug, o.description ?? ""].some(s => s.toLowerCase().includes(q))) return false;
-    }
-    return true;
-  });
+  function matchesQuery(o: ExtOrg): boolean {
+    if (!query) return true;
+    const q = query.toLowerCase();
+    return [o.name, o.slug, o.description ?? ""].some(s => s.toLowerCase().includes(q));
+  }
 
-  const allTabs: { id: OrgFilter; label: string; count: number; alwaysShow: boolean }[] = [
-    { id: "all",         label: "All",         count: orgs.length,                                                    alwaysShow: true  },
-    // Ownership + roles — always visible so user sees the full picture
-    { id: "own",         label: "Own",         count: ownOrgs.length,                                                 alwaysShow: true  },
-    { id: "admin",       label: "Admin",       count: memberOrgs.filter(o => o.my_role === "admin").length,           alwaysShow: true  },
-    { id: "contributor", label: "Contributor", count: memberOrgs.filter(o => o.my_role === "contributor").length,     alwaysShow: true  },
-    { id: "viewer",      label: "Viewer",      count: memberOrgs.filter(o => o.my_role === "viewer").length,          alwaysShow: true  },
-    // External org types — only show when they have orgs
-    { id: "partner",     label: "Partner",     count: externalOrgs.filter(o => o.type === "partner").length,          alwaysShow: false },
-    { id: "client",      label: "Client",      count: externalOrgs.filter(o => o.type === "client").length,           alwaysShow: false },
-    { id: "vendor",      label: "Vendor",      count: externalOrgs.filter(o => o.type === "vendor").length,           alwaysShow: false },
-    { id: "archived",    label: "Archived",    count: orgs.filter(o => (o as unknown as { status?: string }).status === "archived").length, alwaysShow: false },
+  const filteredOrgs = orgs.filter(o => matchesFilter(o) && matchesQuery(o));
+
+  const FILTER_TABS: { id: OrgFilter; label: string; count: number }[] = [
+    { id: "all",         label: "All",         count: orgs.length },
+    { id: "owner",       label: "Owner",       count: ownOrgs.length },
+    { id: "admin",       label: "Admin",       count: orgs.filter(o => o.my_role === "admin").length },
+    { id: "contributor", label: "Contributor", count: orgs.filter(o => o.my_role === "contributor").length },
+    { id: "viewer",      label: "Viewer",      count: orgs.filter(o => o.my_role === "viewer").length },
+    ...(archivedCount > 0 ? [{ id: "archived" as OrgFilter, label: "Archived", count: archivedCount }] : []),
   ];
-  // Role tabs always show; type tabs only when they have orgs
-  const FILTER_TABS = allTabs.filter(t => t.alwaysShow || t.count > 0);
 
   return (
     <div className="flex min-h-0 flex-1 overflow-hidden">
@@ -1267,7 +935,7 @@ export default function OrganisationsPage() {
             <div>
               <h1 className="font-display text-2xl font-bold text-zinc-900 dark:text-white">Organisations</h1>
               <p className="mt-0.5 text-sm text-zinc-500">
-                {orgs.length} orgs · {ownOrgs.length} own · {externalOrgs.length} external · {totalAgents} agents
+                {orgs.length} {orgs.length === 1 ? "organisation" : "organisations"}
               </p>
             </div>
             <button onClick={() => { setShowNew(true); setDetailOrg(null); }}
@@ -1276,17 +944,19 @@ export default function OrganisationsPage() {
             </button>
           </div>
 
-          {/* Stats */}
-          <div className="flex gap-4">
+          {/* Stats â€” role-based org counts */}
+          <div className="grid grid-cols-4 gap-3">
             {[
-              { label: "Total Orgs",   value: orgs.length,                          icon: Building2, cls: "bg-brand-600"   },
-              ...(ownOrgs.length > 0
-                ? [{ label: "Own",        value: ownOrgs.length,    icon: Crown,     cls: "bg-indigo-500"  }]
-                : [{ label: "Member of",  value: memberOrgs.length, icon: Users,     cls: "bg-blue-500"    }]),
-              { label: "External",     value: externalOrgs.length,                  icon: Building2, cls: "bg-sky-500"     },
-              { label: "Agents total", value: totalAgents,                           icon: Bot,       cls: "bg-emerald-500" },
-            ].map(({ label, value, icon: Icon, cls }) => (
-              <div key={label} className="flex flex-1 items-center gap-3 rounded-2xl bg-white p-4 ring-1 ring-zinc-200 shadow-sm dark:bg-[#16132A] dark:ring-[#2D2A45]">
+              { label: "Owner",       value: ownOrgs.length,                                          icon: Crown,    cls: "bg-purple-500", filter: "owner"       as OrgFilter },
+              { label: "Admin",       value: orgs.filter(o => o.my_role === "admin").length,           icon: Settings, cls: "bg-blue-500",   filter: "admin"       as OrgFilter },
+              { label: "Contributor", value: orgs.filter(o => o.my_role === "contributor").length,     icon: Users,    cls: "bg-brand-600",  filter: "contributor" as OrgFilter },
+              { label: "Viewer",      value: orgs.filter(o => o.my_role === "viewer").length,          icon: UserCircle, cls: "bg-zinc-500", filter: "viewer"      as OrgFilter },
+            ].map(({ label, value, icon: Icon, cls, filter: f }) => (
+              <button key={label} onClick={() => setFilter(filter === f ? "all" : f)}
+                className={cn(
+                  "flex items-center gap-3 rounded-2xl bg-white p-4 ring-1 shadow-sm text-left transition-all dark:bg-[#16132A]",
+                  filter === f ? "ring-2 ring-brand-500" : "ring-zinc-200 hover:ring-zinc-300 dark:ring-[#2D2A45]"
+                )}>
                 <div className={cn("grid h-9 w-9 shrink-0 place-items-center rounded-xl", cls)}>
                   <Icon className="h-4 w-4 text-white" />
                 </div>
@@ -1294,11 +964,11 @@ export default function OrganisationsPage() {
                   <div className="font-display text-2xl font-extrabold leading-none text-zinc-900 dark:text-white">{value}</div>
                   <div className="mt-0.5 text-xs text-zinc-400">{label}</div>
                 </div>
-              </div>
+              </button>
             ))}
           </div>
 
-          {/* Filter tabs + search — only show tabs when there's something to filter */}
+          {/* Filter tabs + search â€” only show tabs when there's something to filter */}
           <div className="flex items-center border-b border-zinc-200 dark:border-[#2D2A45]">
             {FILTER_TABS.length > 1 && FILTER_TABS.map(tab => (
               <button key={tab.id} onClick={() => setFilter(tab.id)}
@@ -1315,7 +985,7 @@ export default function OrganisationsPage() {
             <div className="ml-auto flex items-center gap-2 pb-2">
               <div className="relative">
                 <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-400" />
-                <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search orgs…"
+                <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search orgsâ€¦"
                   className="w-44 rounded-lg bg-zinc-100 py-1.5 pl-8 pr-3 text-xs focus:outline-none focus:ring-2 focus:ring-brand-400/40 dark:bg-white/10 dark:text-white" />
               </div>
               <div className="flex rounded-lg bg-zinc-100 p-0.5 dark:bg-white/10">
@@ -1332,86 +1002,51 @@ export default function OrganisationsPage() {
 
           {/* Content */}
           {loading ? (
-            <div className="py-16 text-center text-sm text-zinc-400">Loading…</div>
-          ) : (
-            <div>
-              {/* Own org (workspace owner) */}
-              {(filter === "all" || filter === "own") && ownOrgs.map(o => (
-                <OwnOrgCard key={o.id} org={o} onView={() => { setDetailOrg(o); setShowNew(false); }} />
-              ))}
-
-              {/* Member orgs (admin / contributor / viewer) */}
-              {(filter === "all" || roleFilters.has(filter)) && filteredMember.length > 0 && (
+            <div className="py-16 text-center text-sm text-zinc-400">Loadingâ€¦</div>
+          ) : filteredOrgs.length === 0 ? (
+            <div className="py-20 text-center">
+              {query ? (
                 <>
-                  {filter === "all" && (ownOrgs.length > 0) && (
-                    <div className="mb-2 flex items-center gap-3">
-                      <div className="h-px flex-1 bg-zinc-200 dark:bg-white/10" />
-                      <span className="text-xs font-semibold uppercase tracking-widest text-zinc-400">Organisations I belong to</span>
-                      <div className="h-px flex-1 bg-zinc-200 dark:bg-white/10" />
-                    </div>
-                  )}
-                  {filteredMember.map(o => <MemberOrgCard key={o.id} org={o} />)}
+                  <Search className="mx-auto mb-3 h-8 w-8 text-zinc-300" />
+                  <p className="font-display font-bold text-zinc-700 dark:text-zinc-200">No orgs match &quot;{query}&quot;</p>
+                  <button onClick={() => setQuery("")} className="mt-2 text-sm text-brand-600 hover:underline">Ã— Clear</button>
+                </>
+              ) : (
+                <>
+                  <Building2 className="mx-auto mb-3 h-10 w-10 text-zinc-300" />
+                  <p className="font-display font-bold text-zinc-700 dark:text-zinc-200">No organisations yet</p>
+                  <p className="mt-1 text-sm text-zinc-400">Create your first organisation to get started.</p>
+                  <button onClick={() => setShowNew(true)}
+                    className="mt-4 mx-auto flex items-center gap-2 rounded-xl bg-brand-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-brand-700 transition-colors">
+                    <Plus className="h-4 w-4" /> New Organisation
+                  </button>
                 </>
               )}
-
-              {/* External section divider */}
-              {filter === "all" && filteredExternal.length > 0 && (filteredMember.length > 0 || ownOrgs.length > 0) && (
-                <div className="mb-4 flex items-center gap-3">
-                  <div className="h-px flex-1 bg-zinc-200 dark:bg-white/10" />
-                  <span className="text-xs font-semibold uppercase tracking-widest text-zinc-400">External Organisations</span>
-                  <div className="h-px flex-1 bg-zinc-200 dark:bg-white/10" />
-                </div>
+            </div>
+          ) : view === "grid" ? (
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+              {filteredOrgs.map(o => (
+                <OrgCard key={o.id} org={o} onView={() => { setDetailOrg(o); setShowNew(false); }} onArchive={() => handleArchive(o.id)} />
+              ))}
+              {!query && (
+                <button onClick={() => { setShowNew(true); setDetailOrg(null); }}
+                  className="flex min-h-[160px] flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-zinc-200 text-zinc-400 hover:border-brand-400 hover:bg-brand-50/30 hover:text-brand-600 dark:border-white/10 dark:hover:border-brand-500/50 transition-all">
+                  <Building2 className="h-8 w-8" />
+                  <span className="text-sm font-semibold">New Organisation</span>
+                </button>
               )}
-
-              {/* External orgs */}
-              {filter !== "own" && (
-                filteredExternal.length === 0 ? (
-                  <div className="py-20 text-center">
-                    {query ? (
-                      <>
-                        <Search className="mx-auto mb-3 h-8 w-8 text-zinc-300" />
-                        <p className="font-display font-bold text-zinc-700 dark:text-zinc-200">No orgs match "{query}"</p>
-                        <button onClick={() => setQuery("")} className="mt-2 text-sm text-brand-600 hover:underline">× Clear</button>
-                      </>
-                    ) : (
-                      <>
-                        <Building2 className="mx-auto mb-3 h-10 w-10 text-zinc-300" />
-                        <p className="font-display font-bold text-zinc-700 dark:text-zinc-200">No external organisations</p>
-                        <p className="mt-1 text-sm text-zinc-400">Add partner, client, or vendor organisations.</p>
-                        <button onClick={() => setShowNew(true)}
-                          className="mt-4 mx-auto flex items-center gap-2 rounded-xl bg-brand-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-brand-700 transition-colors">
-                          <Plus className="h-4 w-4" /> Add Organisation
-                        </button>
-                      </>
-                    )}
-                  </div>
-                ) : view === "grid" ? (
-                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-                    {filteredExternal.map(o => (
-                      <ExternalOrgCard key={o.id} org={o} onView={() => { setDetailOrg(o); setShowNew(false); }} onArchive={() => handleArchive(o.id)} />
-                    ))}
-                    {!query && (
-                      <button onClick={() => { setShowNew(true); setDetailOrg(null); }}
-                        className="flex min-h-[160px] flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-zinc-200 text-zinc-400 hover:border-brand-400 hover:bg-brand-50/30 hover:text-brand-600 dark:border-white/10 dark:hover:border-brand-500/50 transition-all">
-                        <Building2 className="h-8 w-8" />
-                        <span className="text-sm font-semibold">Add Organisation</span>
-                      </button>
-                    )}
-                  </div>
-                ) : (
-                  <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white dark:border-[#2D2A45] dark:bg-[#16132A]">
-                    <div className="flex items-center gap-4 border-b border-zinc-100 bg-zinc-50 px-2 py-2 dark:border-[#2D2A45] dark:bg-[#0F0D1E]">
-                      <div className="w-8" />
-                      {[["w-40","Organisation"],["w-24","Type"],["w-20","Status"],["w-16","Agents"],["w-20","Projects"],["flex-1","Description"],["w-20","Added"],["w-20",""]].map(([w,l]) => (
-                        <div key={l} className={cn("text-[11px] font-semibold uppercase tracking-wide text-zinc-400 shrink-0", w)}>{l}</div>
-                      ))}
-                    </div>
-                    {filteredExternal.map(o => (
-                      <ExternalOrgListRow key={o.id} org={o} onView={() => { setDetailOrg(o); setShowNew(false); }} onArchive={() => handleArchive(o.id)} />
-                    ))}
-                  </div>
-                )
-              )}
+            </div>
+          ) : (
+            <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white dark:border-[#2D2A45] dark:bg-[#16132A]">
+              <div className="flex items-center gap-4 border-b border-zinc-100 bg-zinc-50 px-2 py-2 dark:border-[#2D2A45] dark:bg-[#0F0D1E]">
+                <div className="w-8" />
+                {[["w-40","Organisation"],["w-24","Role"],["w-20","Status"],["w-16","Agents"],["w-20","Projects"],["flex-1","Description"],["w-20",""]].map(([w,l]) => (
+                  <div key={l} className={cn("text-[11px] font-semibold uppercase tracking-wide text-zinc-400 shrink-0", w)}>{l}</div>
+                ))}
+              </div>
+              {filteredOrgs.map(o => (
+                <OrgListRow key={o.id} org={o} onView={() => { setDetailOrg(o); setShowNew(false); }} />
+              ))}
             </div>
           )}
         </div>

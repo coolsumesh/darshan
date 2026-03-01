@@ -27,16 +27,11 @@ import type { Agent } from "@/lib/agents";
 const MITHRAN_AGENT_ID = "00000000-0000-0000-0000-000000000101";
 const AVATAR_COLORS = ["#7C3AED", "#2563EB", "#0284C7", "#059669", "#D97706", "#DC2626"];
 
-const ORG_TYPE_META: Record<string, {
-  label: string; badge: string; accent: string;
-}> = {
-  own:         { label: "Own workspace", badge: "bg-brand-100 text-brand-700 dark:bg-brand-500/10 dark:text-brand-300",     accent: "border-brand-500"   },
-  admin:       { label: "Admin",         badge: "bg-blue-100 text-blue-700 dark:bg-blue-500/10 dark:text-blue-300",       accent: "border-blue-500"    },
-  contributor: { label: "Contributor",   badge: "bg-brand-100 text-brand-700 dark:bg-brand-500/10 dark:text-brand-300",   accent: "border-brand-400"   },
-  viewer:      { label: "Viewer",        badge: "bg-zinc-100 text-zinc-500 dark:bg-white/10 dark:text-zinc-400",           accent: "border-zinc-300"    },
-  partner:     { label: "Partner",       badge: "bg-sky-100 text-sky-700 dark:bg-sky-500/10 dark:text-sky-300",            accent: "border-sky-500"     },
-  client:      { label: "Client",        badge: "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400", accent: "border-emerald-500" },
-  vendor:      { label: "Vendor",        badge: "bg-amber-100 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400",   accent: "border-amber-500"   },
+const ROLE_META: Record<string, { label: string; badge: string; accent: string }> = {
+  owner:       { label: "Owner",       badge: "bg-purple-100 text-purple-700 dark:bg-purple-500/10 dark:text-purple-300", accent: "border-purple-500" },
+  admin:       { label: "Admin",       badge: "bg-blue-100 text-blue-700 dark:bg-blue-500/10 dark:text-blue-300",         accent: "border-blue-500"   },
+  contributor: { label: "Contributor", badge: "bg-brand-100 text-brand-700 dark:bg-brand-500/10 dark:text-brand-300",     accent: "border-brand-400"  },
+  viewer:      { label: "Viewer",      badge: "bg-zinc-100 text-zinc-500 dark:bg-white/10 dark:text-zinc-400",             accent: "border-zinc-300"   },
 };
 
 const ROLE_BADGE: Record<string, string> = {
@@ -278,7 +273,7 @@ function GeneralTab({ org, canEdit, onUpdated, onDeleted }: {
   const [name, setName] = React.useState(org.name);
   const [slug, setSlug] = React.useState(org.slug);
   const [desc, setDesc] = React.useState(org.description ?? "");
-  const [type, setType] = React.useState(org.type);
+
   const [color, setColor] = React.useState(org.avatar_color ?? avatarColor(org.name));
   const [pendingFile, setPendingFile] = React.useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = React.useState<string | null>(null);
@@ -291,7 +286,6 @@ function GeneralTab({ org, canEdit, onUpdated, onDeleted }: {
 
   const currentAvatarUrl = previewUrl ?? org.avatar_url;
   const isArchived = (org as unknown as { status?: string }).status === "archived";
-  const isOwn = org.type === "own";
 
   async function handleSave() {
     setSaving(true);
@@ -303,7 +297,6 @@ function GeneralTab({ org, canEdit, onUpdated, onDeleted }: {
     const updated = await updateOrg(org.id, {
       name: name.trim(), slug: slug.trim(),
       description: desc.trim() || undefined,
-      type: type as string,
       avatar_color: color,
     });
     setSaving(false);
@@ -376,24 +369,6 @@ function GeneralTab({ org, canEdit, onUpdated, onDeleted }: {
           <textarea value={desc} onChange={e => setDesc(e.target.value)} disabled={!canEdit}
             rows={3} placeholder="What does this org do?"
             className={cn(inp, "resize-none")} />
-        </div>
-        <div>
-          <label className="mb-1.5 block text-xs font-semibold text-zinc-700 dark:text-zinc-300">Type</label>
-          {canEdit && !isOwn ? (
-            <div className="flex gap-2">
-              {(["partner", "client", "vendor"] as const).map(t => (
-                <button key={t} onClick={() => setType(t)}
-                  className={cn("flex-1 rounded-xl py-2 text-sm font-semibold ring-1 transition-colors capitalize",
-                    type === t ? "bg-brand-600 text-white ring-brand-600" : "bg-zinc-50 text-zinc-600 ring-zinc-200 hover:bg-zinc-100 dark:bg-white/5 dark:text-zinc-400 dark:ring-white/10")}>
-                  {t}
-                </button>
-              ))}
-            </div>
-          ) : (
-            <div className="flex items-center gap-2 rounded-xl bg-zinc-100 px-3 py-2.5 dark:bg-white/5">
-              <span className="text-sm text-zinc-500 capitalize">{org.type} {isOwn ? "— locked" : ""}</span>
-            </div>
-          )}
         </div>
       </div>
 
@@ -1054,9 +1029,7 @@ export default function OrgSettingsPage() {
     );
   }
 
-  // For own orgs where user isn't the owner, show their role as the display type
-  const effectiveOrgType = (org.type === "own" && currentRole !== "owner") ? currentRole : org.type;
-  const tm = ORG_TYPE_META[effectiveOrgType] ?? ORG_TYPE_META.partner;
+  const tm = ROLE_META[currentRole] ?? ROLE_META.viewer;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
@@ -1077,7 +1050,7 @@ export default function OrgSettingsPage() {
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
               <h1 className="font-display text-xl font-extrabold text-zinc-900 dark:text-white">{org.name}</h1>
-              {org.type === "own" && <Crown className="h-4 w-4 text-brand-500" />}
+              {currentRole === "owner" && <Crown className="h-4 w-4 text-purple-500" />}
               <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-semibold", tm.badge)}>{tm.label}</span>
               {!canEdit && (
                 <span className="flex items-center gap-1 rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-semibold text-zinc-500 dark:bg-white/10">

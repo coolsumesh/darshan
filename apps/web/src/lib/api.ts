@@ -201,8 +201,8 @@ export async function fetchAgents(): Promise<Agent[]> {
 
 export type Org = {
   id: string; name: string; slug: string; description?: string;
-  type: "own" | "partner" | "client" | "vendor"; status: string;
-  agent_count?: number; project_count?: number;
+  status: string;
+  agent_count?: number; project_count?: number; online_count?: number;
   created_at?: string; updated_at?: string;
   avatar_color?: string; avatar_url?: string;
   my_role?: OrgUserRole;
@@ -218,7 +218,7 @@ export async function pingAgent(agentId: string): Promise<boolean> {
   return data?.ok ?? false;
 }
 
-export async function createOrg(payload: { name: string; slug: string; description?: string; type?: string }): Promise<Org | null> {
+export async function createOrg(payload: { name: string; slug: string; description?: string }): Promise<Org | null> {
   const data = await apiFetch<{ ok: boolean; org: Org }>("/api/v1/orgs", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -266,14 +266,7 @@ export async function deleteAgent(agentId: string): Promise<boolean> {
 }
 
 export type OrgDetail = Org & {
-  online_count?: number;
-  avatar_color?: string;
-  status?: string;
-  description?: string;
-  created_at?: string;
-  updated_at?: string;
   owner_user_id?: string;
-  my_role?: OrgUserRole;
 };
 
 export async function fetchOrg(idOrSlug: string): Promise<OrgDetail | null> {
@@ -283,7 +276,7 @@ export async function fetchOrg(idOrSlug: string): Promise<OrgDetail | null> {
 
 export async function updateOrg(idOrSlug: string, payload: Partial<{
   name: string; slug: string; description: string;
-  type: string; status: string; avatar_color: string;
+  status: string; avatar_color: string;
 }>): Promise<OrgDetail | null> {
   const data = await apiFetch<{ ok: boolean; org: OrgDetail }>(`/api/v1/orgs/${idOrSlug}`, {
     method: "PATCH",
