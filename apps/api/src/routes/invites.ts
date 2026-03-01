@@ -117,9 +117,9 @@ export async function registerInvites(server: FastifyInstance, db: pg.Pool) {
         return reply.status(403).send({ ok: false, error: "this invite is for a different email" });
       }
 
-      // Add to project_user_members (upsert — idempotent)
+      // Add to project_users (upsert — idempotent)
       await db.query(
-        `insert into project_user_members (project_id, user_id, role, invited_by)
+        `insert into project_users (project_id, user_id, role, invited_by)
          values ($1, $2, $3, $4)
          on conflict (project_id, user_id) do update set role = excluded.role`,
         [inv.project_id, user.userId, inv.role, inv.invited_by]
@@ -211,9 +211,9 @@ export async function registerInvites(server: FastifyInstance, db: pg.Pool) {
         return reply.status(403).send({ ok: false, error: "this invite is for a different email" });
       }
 
-      // Add to org_user_members (upsert)
+      // Add to org_users (upsert)
       await db.query(
-        `insert into org_user_members (org_id, user_id, role)
+        `insert into org_users (org_id, user_id, role)
          values ($1, $2, $3)
          on conflict (org_id, user_id) do update set role = excluded.role`,
         [inv.org_id, user.userId, inv.role]

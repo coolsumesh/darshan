@@ -16,15 +16,12 @@ export async function registerAgents(server: FastifyInstance, db: pg.Pool) {
     const userId = getRequestUser(req)?.userId ?? null;
     const { rows } = await db.query(`
       select a.*,
-             o.name  as org_name,
-             o.slug  as org_slug,
              (select count(*)::int from tasks t
               where lower(t.assignee) = lower(a.name)
                 and t.status in ('proposed','approved','in-progress','review')
              ) as open_task_count
       from agents a
-      left join organisations o on o.id = a.org_id
-      where ($1::uuid is null or o.owner_user_id = $1::uuid or a.org_id is null)
+      where ($1::uuid is null or a.owner_user_id = $1::uuid)
       order by lower(a.name) asc
     `, [userId]);
     return { ok: true, agents: rows };
@@ -58,7 +55,7 @@ export async function registerAgents(server: FastifyInstance, db: pg.Pool) {
                 when $1::uuid is null           then 'member'
                 when o.owner_user_id = $1::uuid then 'owner'
                 else coalesce(
-                  (select oum.role from org_user_members oum
+                  (select oum.role from org_users oum
                    where oum.org_id = o.id and oum.user_id = $1::uuid limit 1),
                   'member'
                 )
@@ -68,7 +65,7 @@ export async function registerAgents(server: FastifyInstance, db: pg.Pool) {
        left join projects p on p.org_id = o.id
        where ($1::uuid is null
           or o.owner_user_id = $1::uuid
-          or exists (select 1 from org_user_members oum where oum.org_id = o.id and oum.user_id = $1::uuid))
+          or exists (select 1 from org_users oum where oum.org_id = o.id and oum.user_id = $1::uuid))
        group by o.id
        order by
          case when o.owner_user_id = $1::uuid then 0 else 1 end,
@@ -106,7 +103,7 @@ export async function registerAgents(server: FastifyInstance, db: pg.Pool) {
                 when $2::uuid is null            then 'member'
                 when o.owner_user_id = $2::uuid  then 'owner'
                 else coalesce(
-                  (select oum.role from org_user_members oum
+                  (select oum.role from org_users oum
                    where oum.org_id = o.id and oum.user_id = $2::uuid
                    limit 1),
                   'member'
@@ -159,7 +156,7 @@ export async function registerAgents(server: FastifyInstance, db: pg.Pool) {
     return { ok: true };
   });
 
-  // ── Projects linked to an org (via agents in project_team) ─────────────────
+  // ── Projects linked to an org (via agents in project_agents) ─────────────────
   server.get<{ Params: { id: string } }>("/api/v1/orgs/:id/projects", async (req, reply) => {
     const { rows: orgs } = await db.query(
       `select id from organisations where id::text = $1 or slug = $1`, [req.params.id]
@@ -168,7 +165,7 @@ export async function registerAgents(server: FastifyInstance, db: pg.Pool) {
     const { rows } = await db.query(
       `select distinct p.id, p.name, p.slug, p.status, p.progress
        from projects p
-       join project_team pt on pt.project_id = p.id
+       join project_agents pt on pt.project_id = p.id
        join agents a        on a.id = pt.agent_id
        where a.org_id = $1
        order by p.name asc`,
@@ -177,7 +174,7 @@ export async function registerAgents(server: FastifyInstance, db: pg.Pool) {
     return { ok: true, projects: rows };
   });
 
-  // ── List agents for an org (via org_members, ai_agent type only) ───────────
+  // ── List agents for an org (via org_agents, ai_agent type only) ───────────
   server.get<{ Params: { id: string } }>("/api/v1/orgs/:id/agents", async (req, reply) => {
     const { rows: orgs } = await db.query(
       `select id from organisations where id::text = $1 or slug = $1`, [req.params.id]
@@ -186,26 +183,15 @@ export async function registerAgents(server: FastifyInstance, db: pg.Pool) {
     const orgId = orgs[0].id;
     const { rows } = await db.query(
       `select a.id, a.name, a.status, a.agent_type, a.model, a.provider,
-              a.capabilities, a.ping_status, a.last_seen_at, a.org_id,
-              coalesce(om.role, 'member') as member_role,
-              'native'::text as source,
-              null::uuid as contributed_by_user_id,
-              null::text as contributed_by_name
-       from agents a
-       left join org_members om on om.agent_id = a.id and om.org_id = $1
-       where a.org_id = $1 and a.agent_type = 'ai_agent'
-       union all
-       select a.id, a.name, a.status, a.agent_type, a.model, a.provider,
-              a.capabilities, a.ping_status, a.last_seen_at, a.org_id,
-              'contributor'::text as member_role,
-              'contributed'::text as source,
-              oac.contributed_by as contributed_by_user_id,
+              a.capabilities, a.ping_status, a.last_seen_at,
+              oa.role as member_role,
+              oa.contributed_by as contributed_by_user_id,
               u.name as contributed_by_name
-       from org_agent_contributions oac
-       join agents a on a.id = oac.agent_id
-       join users u on u.id = oac.contributed_by
-       where oac.org_id = $1 and oac.status = 'active'
-       order by lower(name) asc`,
+       from org_agents oa
+       join agents a on a.id = oa.agent_id
+       left join users u on u.id = oa.contributed_by
+       where oa.org_id = $1 and oa.status = 'active'
+       order by lower(a.name) asc`,
       [orgId]
     );
     return { ok: true, agents: rows };
@@ -226,7 +212,7 @@ export async function registerAgents(server: FastifyInstance, db: pg.Pool) {
 
       // Check user is a member of target org (any role)
       const { rows: membership } = await db.query(`
-        select 1 from org_user_members where org_id = $1 and user_id = $2
+        select 1 from org_users where org_id = $1 and user_id = $2
         union all
         select 1 from organisations where id = $1 and owner_user_id = $2
         limit 1
@@ -238,24 +224,14 @@ export async function registerAgents(server: FastifyInstance, db: pg.Pool) {
 
       // Check user has control over the agent (owns or admins the agent's org)
       const { rows: agentRows } = await db.query(`
-        select a.id, a.org_id from agents a
-        join organisations o on o.id = a.org_id
-        where a.id::text = $1
-          and (
-            o.owner_user_id = $2
-            or exists (
-              select 1 from org_user_members
-              where org_id = a.org_id and user_id = $2 and role in ('owner', 'admin')
-            )
-          )
+        select id from agents where id::text = $1 and owner_user_id = $2
       `, [agentId, user.userId]);
-      if (!agentRows.length) return reply.status(403).send({ ok: false, error: "agent not found or you don't have permission to contribute it" });
-      if (agentRows[0].org_id === orgId) return reply.status(400).send({ ok: false, error: "agent already belongs to this org" });
+      if (!agentRows.length) return reply.status(403).send({ ok: false, error: "agent not found or you don't own it" });
 
       // Upsert — re-activate if previously withdrawn
       const { rows } = await db.query(`
-        insert into org_agent_contributions (org_id, agent_id, contributed_by, status)
-        values ($1, $2, $3, 'active')
+        insert into org_agents (org_id, agent_id, role, contributed_by, status)
+        values ($1, $2, 'member', $3, 'active')
         on conflict (org_id, agent_id) do update set status = 'active', contributed_by = $3
         returning *
       `, [orgId, agentId, user.userId]);
@@ -278,7 +254,7 @@ export async function registerAgents(server: FastifyInstance, db: pg.Pool) {
       const orgId = orgs[0].id;
 
       const { rows: contributions } = await db.query(`
-        select contributed_by from org_agent_contributions
+        select contributed_by from org_agents
         where org_id = $1 and agent_id::text = $2 and status = 'active'
       `, [orgId, req.params.agentId]);
       if (!contributions.length) return reply.status(404).send({ ok: false, error: "contribution not found" });
@@ -287,7 +263,7 @@ export async function registerAgents(server: FastifyInstance, db: pg.Pool) {
 
       // Check if user is admin/owner of target org
       const { rows: adminCheck } = await db.query(`
-        select 1 from org_user_members where org_id = $1 and user_id = $2 and role in ('owner', 'admin')
+        select 1 from org_users where org_id = $1 and user_id = $2 and role in ('owner', 'admin')
         union all
         select 1 from organisations where id = $1 and owner_user_id = $2
         limit 1
@@ -299,7 +275,7 @@ export async function registerAgents(server: FastifyInstance, db: pg.Pool) {
       }
 
       await db.query(`
-        update org_agent_contributions set status = 'withdrawn'
+        update org_agents set status = 'withdrawn'
         where org_id = $1 and agent_id::text = $2
       `, [orgId, req.params.agentId]);
 
@@ -318,12 +294,21 @@ export async function registerAgents(server: FastifyInstance, db: pg.Pool) {
     const { name, desc, model, provider, agent_type = "ai_agent", capabilities = [], endpoint_type = "openclaw_poll", endpoint_config = {} } = req.body;
     if (!name) return reply.status(400).send({ ok: false, error: "name required" });
 
+    const userId = getRequestUser(req)?.userId ?? null;
     const token = randomBytes(32).toString("hex");
     const { rows } = await db.query(
-      `insert into agents (name, description, status, org_id, agent_type, model, provider, capabilities, endpoint_type, endpoint_config, callback_token, ping_status)
-       values ($1,$2,'offline',$3,$4,$5,$6,$7,$8,$9,$10,'unknown') returning *`,
-      [name, desc ?? null, req.params.id, agent_type, model ?? null, provider ?? null,
+      `insert into agents (name, description, status, org_id, owner_user_id, agent_type, model, provider, capabilities, endpoint_type, endpoint_config, callback_token, ping_status)
+       values ($1,$2,'offline',$3,$4,$5,$6,$7,$8,$9,$10,$11,'unknown') returning *`,
+      [name, desc ?? null, req.params.id, userId, agent_type, model ?? null, provider ?? null,
        JSON.stringify(capabilities), endpoint_type, JSON.stringify(endpoint_config), token]
+    );
+
+    // Also link agent to the org via org_agents
+    await db.query(
+      `insert into org_agents (org_id, agent_id, role, contributed_by, status)
+       values ($1, $2, 'member', $3, 'active')
+       on conflict (org_id, agent_id) do nothing`,
+      [req.params.id, rows[0].id, userId]
     );
 
     const agent = rows[0];
@@ -416,10 +401,10 @@ ACK_URL: ${ackUrl}
     if (!rows.length) return reply.status(404).send({ ok: false, error: "agent not found" });
 
     // Remove from project teams, inbox, invites, org membership, then delete agent
-    await db.query(`delete from project_team  where agent_id = $1`, [rows[0].id]);
+    await db.query(`delete from project_agents  where agent_id = $1`, [rows[0].id]);
     await db.query(`delete from agent_inbox   where agent_id = $1`, [rows[0].id]);
     await db.query(`delete from agent_invites where agent_id = $1`, [rows[0].id]);
-    await db.query(`delete from org_members   where agent_id = $1`, [rows[0].id]);
+    await db.query(`delete from org_agents   where agent_id = $1`, [rows[0].id]);
     await db.query(`delete from agents        where id = $1`,       [rows[0].id]);
 
     broadcast("agent:removed", { agentId: rows[0].id, name: rows[0].name });
@@ -592,7 +577,7 @@ ACK_URL: ${ackUrl}
     const { rows } = await db.query(
       `select om.id, om.role, om.created_at,
               a.id as agent_id, a.name, a.status, a.agent_type, a.model, a.org_id
-       from org_members om
+       from org_agents om
        join agents a on a.id = om.agent_id
        where om.org_id = $1
        order by
@@ -615,7 +600,7 @@ ACK_URL: ${ackUrl}
     if (!orgs.length) return reply.status(404).send({ ok: false, error: "org not found" });
     try {
       const { rows } = await db.query(
-        `insert into org_members (org_id, agent_id, role)
+        `insert into org_agents (org_id, agent_id, role)
          values ($1, $2, $3)
          on conflict (org_id, agent_id) do update set role = excluded.role
          returning *`,
@@ -637,7 +622,7 @@ ACK_URL: ${ackUrl}
     );
     if (!orgs.length) return reply.status(404).send({ ok: false, error: "org not found" });
     const { rows } = await db.query(
-      `update org_members set role = $3
+      `update org_agents set role = $3
        where org_id = $1 and agent_id::text = $2
        returning *`,
       [orgs[0].id, req.params.agentId, req.body.role]
@@ -653,7 +638,7 @@ ACK_URL: ${ackUrl}
     );
     if (!orgs.length) return reply.status(404).send({ ok: false, error: "org not found" });
     await db.query(
-      `delete from org_members where org_id = $1 and agent_id::text = $2`,
+      `delete from org_agents where org_id = $1 and agent_id::text = $2`,
       [orgs[0].id, req.params.agentId]
     );
     return { ok: true };
@@ -689,10 +674,10 @@ ACK_URL: ${ackUrl}
                    'id', a.id, 'name', a.name, 'status', a.status,
                    'model', a.model, 'ping_status', a.ping_status
                  ) order by lower(a.name))
-                 from org_agent_contributions oac
+                 from org_agents oac
                  join agents a on a.id = oac.agent_id
                  where oac.org_id = $1 and oac.contributed_by = u.id and oac.status = 'active') as agents
-         from org_user_members oum
+         from org_users oum
          join users u on u.id = oum.user_id
          where oum.org_id = $1
            and oum.user_id != (select owner_user_id from organisations where id = $1)
@@ -722,7 +707,7 @@ ACK_URL: ${ackUrl}
     if (!users.length) return reply.status(404).send({ ok: false, error: "no user found with that email" });
     try {
       const { rows } = await db.query(
-        `insert into org_user_members (org_id, user_id, role)
+        `insert into org_users (org_id, user_id, role)
          values ($1, $2, $3)
          on conflict (org_id, user_id) do update set role = excluded.role
          returning *`,
@@ -744,13 +729,13 @@ ACK_URL: ${ackUrl}
 
     // Auto-withdraw any agents this user contributed to the org
     await db.query(
-      `update org_agent_contributions set status = 'withdrawn'
+      `update org_agents set status = 'withdrawn'
        where org_id = $1 and contributed_by = $2::uuid and status = 'active'`,
       [orgId, req.params.userId]
     );
 
     await db.query(
-      `delete from org_user_members where org_id = $1 and user_id::text = $2`,
+      `delete from org_users where org_id = $1 and user_id::text = $2`,
       [orgId, req.params.userId]
     );
     return { ok: true };
@@ -842,11 +827,11 @@ ACK_URL: ${ackUrl}
 
     const { rows } = await db.query(
       `select p.id, p.name, p.slug, p.status,
-              pt.role, pt.assigned_at
-       from project_team pt
+              pt.role, pt.joined_at
+       from project_agents pt
        join projects p on p.id = pt.project_id
        where pt.agent_id = $1
-       order by pt.assigned_at desc nulls last`,
+       order by pt.joined_at desc nulls last`,
       [agents[0].id]
     );
     return { ok: true, projects: rows };
