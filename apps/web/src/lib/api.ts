@@ -553,15 +553,16 @@ export type PendingOrgInvite = {
   invited_by_name?: string;
 };
 
-/** Invite a user to an org by email — creates invite record, shows in their bell */
+/** Invite a user to an org by email — creates invite record, shows in their bell.
+ *  Returns `registered: false` if the email has no Darshan account yet (invite still created). */
 export async function inviteOrgUser(
   idOrSlug: string, email: string, role = "member"
-): Promise<PendingOrgInvite | null> {
-  const data = await apiFetch<{ ok: boolean; invite: PendingOrgInvite }>(
+): Promise<{ invite: PendingOrgInvite; registered: boolean } | null> {
+  const data = await apiFetch<{ ok: boolean; invite: PendingOrgInvite; registered: boolean }>(
     `/api/v1/orgs/${idOrSlug}/user-invites`,
     { method: "POST", body: JSON.stringify({ email, role }) }
   );
-  return data?.ok ? data.invite : null;
+  return data?.ok ? { invite: data.invite, registered: data.registered } : null;
 }
 
 /** List pending (unaccepted) org user invites — for admin view */

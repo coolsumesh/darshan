@@ -433,6 +433,7 @@ function MembersTab({ orgId, canEdit }: { orgId: string; canEdit: boolean }) {
   const [emailError,     setEmailError]     = React.useState("");
   const [invitingUser,   setInvitingUser]   = React.useState(false);
   const [inviteSent,     setInviteSent]     = React.useState("");
+  const [inviteUnknown,  setInviteUnknown]  = React.useState(false);
 
   async function reload() {
     setLoading(true);
@@ -455,10 +456,12 @@ function MembersTab({ orgId, canEdit }: { orgId: string; canEdit: boolean }) {
     setInvitingUser(true);
     setEmailError("");
     setInviteSent("");
+    setInviteUnknown(false);
     const result = await inviteOrgUser(orgId, email);
     if (result) {
-      setPendingInvites(prev => [result, ...prev.filter(i => i.invitee_email !== result.invitee_email)]);
+      setPendingInvites(prev => [result.invite, ...prev.filter(i => i.invitee_email !== result.invite.invitee_email)]);
       setInviteSent(email);
+      setInviteUnknown(!result.registered);
       setEmailInput("");
     } else {
       setEmailError("Failed to send invite. Please try again.");
@@ -546,7 +549,7 @@ function MembersTab({ orgId, canEdit }: { orgId: string; canEdit: boolean }) {
                   <input
                     type="email"
                     value={emailInput}
-                    onChange={e => { setEmailInput(e.target.value); setEmailError(""); setInviteSent(""); }}
+                    onChange={e => { setEmailInput(e.target.value); setEmailError(""); setInviteSent(""); setInviteUnknown(false); }}
                     onKeyDown={e => e.key === "Enter" && handleInviteUser()}
                     placeholder="Invite person by email…"
                     disabled={invitingUser}
@@ -559,9 +562,14 @@ function MembersTab({ orgId, canEdit }: { orgId: string; canEdit: boolean }) {
                   </button>
                 </div>
                 {emailError && <p className="text-xs text-red-500">{emailError}</p>}
-                {inviteSent && (
+                {inviteSent && !inviteUnknown && (
                   <p className="flex items-center gap-1.5 text-xs text-emerald-600 dark:text-emerald-400">
                     <Check className="h-3.5 w-3.5" /> Invite sent to {inviteSent}
+                  </p>
+                )}
+                {inviteSent && inviteUnknown && (
+                  <p className="flex items-center gap-1.5 text-xs text-amber-600 dark:text-amber-400">
+                    <Clock className="h-3.5 w-3.5" /> Invite saved — {inviteSent} doesn&apos;t have a Darshan account yet. They&apos;ll see it when they sign up.
                   </p>
                 )}
               </div>

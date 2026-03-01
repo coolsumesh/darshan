@@ -640,6 +640,13 @@ ACK_URL: ${ackUrl}
     );
     if (!orgs.length) return reply.status(404).send({ ok: false, error: "org not found" });
 
+    // Check if the email belongs to a registered user (for UI hint only — invite is created either way)
+    const { rows: userRows } = await db.query(
+      `select id from users where lower(email) = lower($1) limit 1`,
+      [email.trim()]
+    );
+    const registered = userRows.length > 0;
+
     try {
       const { rows } = await db.query(
         `insert into org_user_invites (org_id, invitee_email, invited_by, role)
@@ -656,9 +663,9 @@ ACK_URL: ${ackUrl}
              and accepted_at is null and declined_at is null and expires_at > now()`,
           [orgs[0].id, email.trim()]
         );
-        return { ok: true, invite: existing[0] ?? null };
+        return { ok: true, invite: existing[0] ?? null, registered };
       }
-      return { ok: true, invite: rows[0] };
+      return { ok: true, invite: rows[0], registered };
     } catch (err: unknown) {
       return reply.status(500).send({ ok: false, error: String(err) });
     }
