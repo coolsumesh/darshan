@@ -669,16 +669,29 @@ ACK_URL: ${ackUrl}
     if (!orgs.length) return reply.status(404).send({ ok: false, error: "org not found" });
     const { rows } = await db.query(
       `select * from (
-         -- org owner (always shown, from organisations table)
+         -- org owner: gets all org-owned ai agents nested
          select u.id::text as id, 'owner'::text as role, o.created_at,
-                u.id as user_id, u.name, u.email, u.avatar_url
+                u.id as user_id, u.name, u.email, u.avatar_url,
+                (select json_agg(json_build_object(
+                   'id', a.id, 'name', a.name, 'status', a.status,
+                   'model', a.model, 'ping_status', a.ping_status
+                 ) order by lower(a.name))
+                 from agents a
+                 where a.org_id = o.id and a.agent_type = 'ai_agent') as agents
          from organisations o
          join users u on u.id = o.owner_user_id
          where o.id = $1
          union all
-         -- explicit members (exclude owner to avoid duplication)
+         -- members: get their contributed agents
          select oum.id::text as id, oum.role, oum.created_at,
-                u.id as user_id, u.name, u.email, u.avatar_url
+                u.id as user_id, u.name, u.email, u.avatar_url,
+                (select json_agg(json_build_object(
+                   'id', a.id, 'name', a.name, 'status', a.status,
+                   'model', a.model, 'ping_status', a.ping_status
+                 ) order by lower(a.name))
+                 from org_agent_contributions oac
+                 join agents a on a.id = oac.agent_id
+                 where oac.org_id = $1 and oac.contributed_by = u.id and oac.status = 'active') as agents
          from org_user_members oum
          join users u on u.id = oum.user_id
          where oum.org_id = $1

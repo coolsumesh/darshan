@@ -548,6 +548,10 @@ export async function revokeProjectInvite(projectId: string, inviteId: string): 
 
 export type OrgUserRole = "owner" | "admin" | "contributor" | "viewer";
 
+export type OrgUserMemberAgent = {
+  id: string; name: string; status: string; model?: string | null; ping_status?: string | null;
+};
+
 export type OrgUserMember = {
   id: string;
   user_id: string;
@@ -556,6 +560,7 @@ export type OrgUserMember = {
   avatar_url?: string | null;
   role: OrgUserRole;
   created_at: string;
+  agents?: OrgUserMemberAgent[] | null;
 };
 
 export async function fetchOrgUserMembers(idOrSlug: string): Promise<OrgUserMember[]> {
