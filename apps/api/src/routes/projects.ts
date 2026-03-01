@@ -16,7 +16,7 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
   // so agent workflows continue to work unimpeded.
   async function checkAccess(
     idOrSlug: string,
-    req: { cookies?: unknown },
+    req: unknown,
     minRole: ProjectRole = "member"
   ): Promise<{ projectId: string; role: ProjectRole } | { deny: 404 | 403 }> {
     const { rows } = await db.query(
