@@ -205,7 +205,7 @@ export type Org = {
   agent_count?: number; project_count?: number;
   created_at?: string; updated_at?: string;
   avatar_color?: string; avatar_url?: string;
-  my_role?: "owner" | "admin" | "member";
+  my_role?: OrgUserRole;
 };
 
 export async function fetchOrgs(): Promise<Org[]> {
@@ -273,7 +273,7 @@ export type OrgDetail = Org & {
   created_at?: string;
   updated_at?: string;
   owner_user_id?: string;
-  my_role?: "owner" | "admin" | "member";
+  my_role?: OrgUserRole;
 };
 
 export async function fetchOrg(idOrSlug: string): Promise<OrgDetail | null> {
