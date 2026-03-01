@@ -271,6 +271,8 @@ export type OrgDetail = Org & {
   description?: string;
   created_at?: string;
   updated_at?: string;
+  owner_user_id?: string;
+  my_role?: "owner" | "admin" | "member";
 };
 
 export async function fetchOrg(idOrSlug: string): Promise<OrgDetail | null> {

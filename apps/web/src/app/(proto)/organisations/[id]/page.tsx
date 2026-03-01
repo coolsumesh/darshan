@@ -782,14 +782,9 @@ export default function OrgSettingsPage() {
 
   React.useEffect(() => {
     async function load() {
-      const [orgData, members] = await Promise.all([
-        fetchOrg(orgId),
-        fetchOrgMembers(orgId),
-      ]);
+      const orgData = await fetchOrg(orgId);
       setOrg(orgData);
-
-      const me = members.find(m => m.agent_id === MITHRAN_AGENT_ID);
-      setCurrentRole(me?.role ?? "member");
+      setCurrentRole(orgData?.my_role ?? "member");
       setLoading(false);
     }
     load();
