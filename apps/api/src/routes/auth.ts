@@ -83,13 +83,41 @@ export async function registerAuth(server: FastifyInstance) {
     if (!token) return reply.status(401).send({ ok: false, error: "not authenticated" });
     const payload = verifyToken(token);
     if (!payload) return reply.status(401).send({ ok: false, error: "invalid token" });
-    // Fetch avatar_url from DB (not in JWT to keep tokens small)
+    // Fetch user from DB — also checks for forced session invalidation
     const { rows } = await db.query(
-      `select avatar_url from users where id = $1`,
+      `select avatar_url, sessions_invalidated_at from users where id = $1`,
       [payload.userId]
     );
-    return { ok: true, user: { ...payload, avatar_url: rows[0]?.avatar_url ?? null } };
+    if (!rows.length) {
+      // User deleted — clear cookie and reject
+      reply.clearCookie(COOKIE_NAME, { path: "/" });
+      return reply.status(401).send({ ok: false, error: "account not found" });
+    }
+    const { avatar_url, sessions_invalidated_at } = rows[0];
+    // If the token was issued before the invalidation timestamp, force logout
+    if (sessions_invalidated_at) {
+      const iat = (payload as unknown as { iat?: number }).iat ?? 0;
+      const invalidatedMs = new Date(sessions_invalidated_at).getTime();
+      if (iat * 1000 < invalidatedMs) {
+        reply.clearCookie(COOKIE_NAME, { path: "/" });
+        return reply.status(401).send({ ok: false, error: "session invalidated" });
+      }
+    }
+    return { ok: true, user: { ...payload, avatar_url: avatar_url ?? null } };
   });
+
+  // DELETE /api/v1/auth/sessions/:userId — admin: force-logout a user
+  server.delete<{ Params: { userId: string } }>(
+    "/api/v1/auth/sessions/:userId",
+    async (req, reply) => {
+      const { userId } = req.params;
+      await db.query(
+        `update users set sessions_invalidated_at = now() where id = $1`,
+        [userId]
+      );
+      return { ok: true, message: `Sessions invalidated for user ${userId}` };
+    }
+  );
 
   // ── Google OAuth 2.0 ────────────────────────────────────────────────────────
 
