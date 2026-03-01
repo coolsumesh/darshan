@@ -306,7 +306,7 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
       const access = await checkAccess(req.params.id, req, "member");
       if ("deny" in access) return reply.status(access.deny).send({ ok: false, error: access.deny === 404 ? "project not found" : "forbidden" });
 
-      const allowed = ["title", "description", "status", "assignee", "proposer", "type", "estimated_sp", "priority", "due_date"];
+      const allowed = ["title", "description", "status", "assignee", "proposer", "type", "estimated_sp", "priority", "due_date", "completion_note"];
       const sets: string[] = [];
       const vals: unknown[] = [];
       for (const key of allowed) {
