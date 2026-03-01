@@ -42,7 +42,7 @@ const ROLE_BADGE: Record<string, string> = {
   member:      "bg-zinc-100 text-zinc-600 dark:bg-white/10 dark:text-zinc-400", // legacy fallback
 };
 
-type TabId = "general" | "members" | "agents" | "projects";
+type TabId = "general" | "members" | "projects";
 
 // ─── Helper types ─────────────────────────────────────────────────────────────
 type OrgAgent = {
@@ -990,7 +990,8 @@ export default function OrgSettingsPage() {
   const searchParams = useSearchParams();
 
   const orgId = params.id as string;
-  const initialTab = (searchParams.get("tab") as TabId) ?? "general";
+  const rawTab = searchParams.get("tab");
+  const initialTab: TabId = (rawTab === "members" || rawTab === "projects") ? rawTab : "general";
 
   const [org, setOrg] = React.useState<OrgDetail | null>(null);
   const [loading, setLoading] = React.useState(true);
@@ -1012,7 +1013,6 @@ export default function OrgSettingsPage() {
   const TABS: { id: TabId; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
     { id: "general",  label: "General",  icon: Building2   },
     { id: "members",  label: "Members",  icon: Users       },
-    { id: "agents",   label: "Agents",   icon: Bot         },
     { id: "projects", label: "Projects", icon: FolderKanban },
   ];
 
@@ -1071,7 +1071,7 @@ export default function OrgSettingsPage() {
         </div>
 
         {/* Tab bar */}
-        <div className="flex border-b border-zinc-200 dark:border-[#2D2A45]">
+        <div className="flex items-center border-b border-zinc-200 dark:border-[#2D2A45]">
           {TABS.map(tab => {
             const Icon = tab.icon;
             return (
@@ -1087,6 +1087,14 @@ export default function OrgSettingsPage() {
               </button>
             );
           })}
+          <div className="ml-auto flex items-center pb-px">
+            <Link href="/agents"
+              className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold text-zinc-500 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-white/10 dark:hover:text-zinc-300 transition-colors">
+              <Bot className="h-3.5 w-3.5" />
+              Manage Agents
+              <ExternalLink className="h-3 w-3 opacity-50" />
+            </Link>
+          </div>
         </div>
 
         {/* Tab content */}
@@ -1101,9 +1109,6 @@ export default function OrgSettingsPage() {
           )}
           {activeTab === "members" && (
             <MembersTab orgId={org.id} canEdit={canEdit} />
-          )}
-          {activeTab === "agents" && (
-            <AgentsTab orgId={org.id} canEdit={canEdit} currentRole={currentRole} />
           )}
           {activeTab === "projects" && (
             <ProjectsTab orgId={org.id} />

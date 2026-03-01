@@ -25,7 +25,7 @@ type ExtAgent = Agent & {
   last_ping_ms?: number;
   open_task_count?: number;
 };
-type StatusFilter = "all" | "online" | "offline" | "ai_agent" | "human";
+type StatusFilter = "all" | "online" | "offline";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function relativeTime(dateStr?: string): string {
@@ -57,22 +57,23 @@ function pingLabel(status: string, ms?: number) {
   return PING_META[status]?.label ?? "Unknown";
 }
 
-const AGENT_TYPES   = ["ai_agent", "human"] as const;
-type AgentType = typeof AGENT_TYPES[number];
 const PROVIDERS     = ["anthropic", "openai", "google", "mistral", "other"];
 const CAPABILITIES  = ["code", "design", "ux", "review", "api", "infra", "deploy", "plan", "data", "writing"];
 const POPULAR_MODELS = ["claude-sonnet-4-6", "claude-opus-4-6", "gpt-4o", "gpt-4-turbo", "gemini-1.5-pro", "mistral-large"];
 
-const TYPE_BADGE: Record<string, string> = {
-  ai_agent: "bg-violet-100 text-violet-700 dark:bg-violet-500/10 dark:text-violet-300",
-  human:    "bg-sky-100 text-sky-700 dark:bg-sky-500/10 dark:text-sky-300",
-};
-const TYPE_LABEL: Record<string, string> = { ai_agent: "AI Agent", human: "Human" };
+// ─── Platform helpers (derived from endpoint_type) ────────────────────────────
+function platformLabel(endpointType?: string): string {
+  if (!endpointType || endpointType === "openclaw_poll") return "OpenClaw";
+  if (endpointType === "webhook") return "Webhook";
+  if (endpointType === "manual")  return "Manual";
+  return endpointType;
+}
+const PLATFORM_BADGE = "bg-violet-100 text-violet-700 dark:bg-violet-500/10 dark:text-violet-300";
 
 // ─── Column config ─────────────────────────────────────────────────────────────
 const COLS = [
   { label: "Name",         cls: "flex-1 min-w-0"  },
-  { label: "Type",         cls: "w-24 shrink-0"   },
+  { label: "Platform",     cls: "w-24 shrink-0"   },
   { label: "Model",        cls: "w-36 shrink-0"   },
   { label: "Capabilities", cls: "w-48 shrink-0"   },
   { label: "Ping",         cls: "w-24 shrink-0"   },
@@ -104,10 +105,7 @@ function AgentRow({ agent, onInspect, onPing, onDelete, pinging }: {
 
       {/* Name + desc */}
       <div className="flex-1 min-w-0 flex items-center gap-2">
-        <div className={cn(
-          "grid h-7 w-7 shrink-0 place-items-center rounded-lg text-xs font-bold text-white",
-          agent.agent_type === "human" ? "bg-sky-700" : "bg-zinc-800 dark:bg-zinc-700"
-        )}>
+        <div className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-zinc-800 dark:bg-zinc-700 text-xs font-bold text-white">
           {agent.name[0]?.toUpperCase()}
         </div>
         <div className="min-w-0">
@@ -118,10 +116,10 @@ function AgentRow({ agent, onInspect, onPing, onDelete, pinging }: {
         </div>
       </div>
 
-      {/* Type */}
+      {/* Platform */}
       <div className="w-24 shrink-0">
-        <span className={cn("rounded-full px-2 py-0.5 text-[10px] font-semibold", TYPE_BADGE[agent.agent_type ?? "ai_agent"])}>
-          {TYPE_LABEL[agent.agent_type ?? "ai_agent"] ?? agent.agent_type}
+        <span className={cn("rounded-full px-2 py-0.5 text-[10px] font-semibold", PLATFORM_BADGE)}>
+          {platformLabel((agent as unknown as { endpoint_type?: string }).endpoint_type)}
         </span>
       </div>
 
@@ -452,7 +450,6 @@ function AgentDetailPanel({ agent, onClose, onPing, onRemove, onUpdated, pinging
   React.useEffect(() => { setShowCreds(false); setEditing(false); }, [agent.id]);
   const [editName, setEditName]         = React.useState(agent.name);
   const [editDesc, setEditDesc]         = React.useState(agent.desc ?? "");
-  const [editType, setEditType]         = React.useState<AgentType>((agent.agent_type as AgentType) ?? "ai_agent");
   const [editModel, setEditModel]       = React.useState(agent.model ?? "");
   const [editProvider, setEditProvider] = React.useState(agent.provider ?? "anthropic");
   const [editCaps, setEditCaps]         = React.useState<string[]>(Array.isArray(agent.capabilities) ? agent.capabilities : []);
@@ -461,7 +458,6 @@ function AgentDetailPanel({ agent, onClose, onPing, onRemove, onUpdated, pinging
   function startEdit() {
     setShowCreds(false);
     setEditName(agent.name); setEditDesc(agent.desc ?? "");
-    setEditType((agent.agent_type as AgentType) ?? "ai_agent");
     setEditModel(agent.model ?? ""); setEditProvider(agent.provider ?? "anthropic");
     setEditCaps(Array.isArray(agent.capabilities) ? agent.capabilities : []); setEditing(true);
   }
@@ -469,7 +465,7 @@ function AgentDetailPanel({ agent, onClose, onPing, onRemove, onUpdated, pinging
     setSaving(true);
     await updateAgent(agent.id, {
       name: editName.trim(), desc: editDesc.trim(),
-      agent_type: editType, model: editModel, provider: editProvider, capabilities: editCaps,
+      agent_type: "ai_agent", model: editModel, provider: editProvider, capabilities: editCaps,
     });
     setSaving(false); setEditing(false); onUpdated();
   }
@@ -486,15 +482,14 @@ function AgentDetailPanel({ agent, onClose, onPing, onRemove, onUpdated, pinging
         <button onClick={onClose} className="grid h-7 w-7 place-items-center rounded-lg text-zinc-400 hover:bg-zinc-100 dark:hover:bg-white/10">
           <X className="h-4 w-4" />
         </button>
-        <div className={cn("grid h-7 w-7 shrink-0 place-items-center rounded-lg text-xs font-bold text-white",
-          agent.agent_type === "human" ? "bg-sky-700" : "bg-zinc-800")}>
+        <div className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-zinc-800 text-xs font-bold text-white">
           {agent.name[0]?.toUpperCase()}
         </div>
         <span className="flex-1 truncate font-display font-bold text-zinc-900 dark:text-white">
           {editing ? <span className="text-brand-600">Editing</span> : agent.name}
         </span>
-        <span className={cn("shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold", TYPE_BADGE[agent.agent_type ?? "ai_agent"])}>
-          {TYPE_LABEL[agent.agent_type ?? "ai_agent"]}
+        <span className={cn("shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold", PLATFORM_BADGE)}>
+          {platformLabel((agent as unknown as { endpoint_type?: string }).endpoint_type)}
         </span>
         {!editing && (
           <>
@@ -571,20 +566,11 @@ function AgentDetailPanel({ agent, onClose, onPing, onRemove, onUpdated, pinging
                 <textarea value={editDesc} onChange={e => setEditDesc(e.target.value)} rows={3}
                   className={cn(sel, "resize-none")} placeholder="What does this agent do?" />
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="mb-1.5 block text-xs font-semibold text-zinc-500 uppercase tracking-wide">Type</label>
-                  <select value={editType} onChange={e => setEditType(e.target.value as AgentType)} className={sel}>
-                    <option value="ai_agent">AI Agent</option>
-                    <option value="human">Human</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="mb-1.5 block text-xs font-semibold text-zinc-500 uppercase tracking-wide">Provider</label>
-                  <select value={editProvider} onChange={e => setEditProvider(e.target.value)} className={sel}>
-                    {PROVIDERS.map(p => <option key={p}>{p}</option>)}
-                  </select>
-                </div>
+              <div>
+                <label className="mb-1.5 block text-xs font-semibold text-zinc-500 uppercase tracking-wide">Provider</label>
+                <select value={editProvider} onChange={e => setEditProvider(e.target.value)} className={sel}>
+                  {PROVIDERS.map(p => <option key={p}>{p}</option>)}
+                </select>
               </div>
               <div>
                 <label className="mb-1.5 block text-xs font-semibold text-zinc-500 uppercase tracking-wide">Model</label>
@@ -624,8 +610,7 @@ function AgentDetailPanel({ agent, onClose, onPing, onRemove, onUpdated, pinging
           <>
             {/* Status + identity */}
             <div className="flex items-start gap-3">
-              <div className={cn("relative grid h-14 w-14 shrink-0 place-items-center rounded-2xl text-xl font-bold text-white",
-                agent.agent_type === "human" ? "bg-sky-700" : "bg-zinc-800")}>
+              <div className="relative grid h-14 w-14 shrink-0 place-items-center rounded-2xl bg-zinc-800 text-xl font-bold text-white">
                 {agent.name[0]?.toUpperCase()}
                 <span className={cn("absolute -bottom-1 -right-1 h-4 w-4 rounded-full ring-2 ring-white dark:ring-[#16132A]", sm.dot)} />
               </div>
@@ -764,7 +749,6 @@ function OnboardAgentModal({ orgs, defaultOrgId, onDone, onClose }: {
   const [orgId,       setOrgId]       = React.useState(defaultOrgId ?? orgs[0]?.id ?? "");
   const [name,        setName]        = React.useState("");
   const [desc,        setDesc]        = React.useState("");
-  const [agentType,   setAgentType]   = React.useState<AgentType>("ai_agent");
   const [endpointType, setEndpointType] = React.useState("openclaw_poll");
   const [saving,      setSaving]      = React.useState(false);
   const [error,       setError]       = React.useState("");
@@ -774,7 +758,7 @@ function OnboardAgentModal({ orgs, defaultOrgId, onDone, onClose }: {
     setSaving(true); setError("");
     const ok = await createOrgAgent(orgId, {
       name: name.trim(), desc: desc.trim() || undefined,
-      agent_type: agentType, endpoint_type: endpointType,
+      agent_type: "ai_agent", endpoint_type: endpointType,
     });
     if (ok) onDone();
     else { setError("Failed to onboard agent."); setSaving(false); }
@@ -783,9 +767,9 @@ function OnboardAgentModal({ orgs, defaultOrgId, onDone, onClose }: {
   const sel = "w-full rounded-xl border-0 bg-zinc-50 px-3 py-2.5 text-sm text-zinc-900 ring-1 ring-zinc-200 focus:outline-none dark:bg-zinc-900 dark:text-zinc-100 dark:ring-zinc-700";
 
   const ENDPOINT_TIPS: Record<string, string> = {
-    openclaw_poll: "Agent polls OpenClaw for tasks.",
-    webhook: "Darshan pushes tasks to the agent's URL.",
-    manual: "Human-operated. Tasks handled manually.",
+    openclaw_poll: "Agent polls OpenClaw for tasks — the standard connection method.",
+    webhook: "Darshan pushes tasks to the agent's endpoint URL.",
+    manual: "Agent is managed externally; tasks are handled outside of Darshan.",
   };
 
   return (
@@ -808,39 +792,26 @@ function OnboardAgentModal({ orgs, defaultOrgId, onDone, onClose }: {
               {orgs.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
             </select>
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="mb-1.5 block text-xs font-semibold text-zinc-700 dark:text-zinc-300">Name <span className="text-red-500">*</span></label>
-              <Input autoFocus placeholder="e.g. Komal, Sanjaya…" value={name} onChange={e => setName(e.target.value)} />
-            </div>
-            <div>
-              <label className="mb-1.5 block text-xs font-semibold text-zinc-700 dark:text-zinc-300">Type</label>
-              <select value={agentType} onChange={e => setAgentType(e.target.value as AgentType)} className={sel}>
-                <option value="ai_agent">AI Agent</option>
-                <option value="human">Human</option>
-              </select>
-            </div>
+          <div>
+            <label className="mb-1.5 block text-xs font-semibold text-zinc-700 dark:text-zinc-300">Name <span className="text-red-500">*</span></label>
+            <Input autoFocus placeholder="e.g. Komal, Sanjaya…" value={name} onChange={e => setName(e.target.value)} />
           </div>
           <div>
             <label className="mb-1.5 block text-xs font-semibold text-zinc-700 dark:text-zinc-300">Description</label>
             <Input placeholder="What does this agent do?" value={desc} onChange={e => setDesc(e.target.value)} />
           </div>
-          {agentType === "ai_agent" && (
-            <div className="rounded-xl bg-zinc-50 px-4 py-3 text-xs text-zinc-500 ring-1 ring-zinc-200 dark:bg-white/5 dark:ring-white/10">
-              <span className="font-semibold text-zinc-700 dark:text-zinc-300">Model &amp; capabilities</span> are self-reported by the agent on its first ping — no need to set them here.
-            </div>
-          )}
-          {agentType === "ai_agent" && (
-            <div>
-              <label className="mb-1.5 block text-xs font-semibold text-zinc-700 dark:text-zinc-300">Connection type</label>
-              <select value={endpointType} onChange={e => setEndpointType(e.target.value)} className={sel}>
-                <option value="openclaw_poll">OpenClaw (poll-based)</option>
-                <option value="webhook">Webhook (push)</option>
-                <option value="manual">Manual</option>
-              </select>
-              <p className="mt-1 text-[11px] text-zinc-400">{ENDPOINT_TIPS[endpointType]}</p>
-            </div>
-          )}
+          <div className="rounded-xl bg-zinc-50 px-4 py-3 text-xs text-zinc-500 ring-1 ring-zinc-200 dark:bg-white/5 dark:ring-white/10">
+            <span className="font-semibold text-zinc-700 dark:text-zinc-300">Model &amp; capabilities</span> are self-reported by the agent on its first ping — no need to set them here.
+          </div>
+          <div>
+            <label className="mb-1.5 block text-xs font-semibold text-zinc-700 dark:text-zinc-300">Connection type</label>
+            <select value={endpointType} onChange={e => setEndpointType(e.target.value)} className={sel}>
+              <option value="openclaw_poll">OpenClaw (poll-based)</option>
+              <option value="webhook">Webhook (push)</option>
+              <option value="manual">Manual</option>
+            </select>
+            <p className="mt-1 text-[11px] text-zinc-400">{ENDPOINT_TIPS[endpointType]}</p>
+          </div>
           {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-600 dark:bg-red-500/10">{error}</p>}
         </div>
         <div className="flex shrink-0 justify-end gap-3 border-t border-zinc-200 px-5 py-4 dark:border-[#2D2A45]">
@@ -1180,15 +1151,11 @@ export default function AgentsPage() {
 
   // Derived
   const totalOnline = agents.filter(a => a.status === "online").length;
-  const aiCount     = agents.filter(a => a.agent_type === "ai_agent").length;
-  const humanCount  = agents.filter(a => a.agent_type === "human").length;
 
   // Filter
   const filtered = agents.filter(a => {
-    if (statusFilter === "online"   && a.status !== "online") return false;
-    if (statusFilter === "offline"  && a.status === "online") return false;
-    if (statusFilter === "ai_agent" && a.agent_type !== "ai_agent") return false;
-    if (statusFilter === "human"    && a.agent_type !== "human") return false;
+    if (statusFilter === "online"  && a.status !== "online") return false;
+    if (statusFilter === "offline" && a.status === "online") return false;
     if (query) {
       const q = query.toLowerCase();
       if (![a.name, a.desc ?? "", a.model ?? "", a.org_name ?? "", ...(Array.isArray(a.capabilities) ? a.capabilities : [])].some(s => s.toLowerCase().includes(q))) return false;
@@ -1202,11 +1169,9 @@ export default function AgentsPage() {
   const unassigned  = filtered.filter(a => !a.org_id);
 
   const STATUS_TABS: { id: StatusFilter; label: string; count: number }[] = [
-    { id: "all",      label: "All",      count: agents.length },
-    { id: "online",   label: "Online",   count: agents.filter(a => a.status === "online").length },
-    { id: "offline",  label: "Offline",  count: agents.filter(a => a.status !== "online").length },
-    { id: "ai_agent", label: "AI Agent", count: aiCount },
-    { id: "human",    label: "Human",    count: humanCount },
+    { id: "all",     label: "All",     count: agents.length },
+    { id: "online",  label: "Online",  count: agents.filter(a => a.status === "online").length },
+    { id: "offline", label: "Offline", count: agents.filter(a => a.status !== "online").length },
   ];
 
   return (
@@ -1219,7 +1184,7 @@ export default function AgentsPage() {
             <div>
               <h1 className="font-display text-2xl font-bold text-zinc-900 dark:text-white">Agents</h1>
               <p className="mt-0.5 text-sm text-zinc-500">
-                {agents.length} agents · {totalOnline} online · {orgs.length} orgs
+                {agents.length} AI agents · {totalOnline} online · {orgs.length} orgs
               </p>
             </div>
             <div className="flex items-center gap-2">
