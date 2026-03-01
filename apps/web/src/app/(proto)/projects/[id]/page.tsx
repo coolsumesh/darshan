@@ -567,9 +567,10 @@ function TaskDetailPanel({
 
 // ─── Table row ────────────────────────────────────────────────────────────────
 function TableRow({
-  task, taskNumber, acting, team, onUpdate, onDelete, onOpen,
+  task, taskNumber, acting, team, selected, onToggleSelect, onUpdate, onDelete, onOpen,
 }: {
   task: Task; taskNumber: number; acting: boolean; team: TeamMemberWithAgent[];
+  selected: boolean; onToggleSelect: () => void;
   onUpdate: (id: string, patch: Partial<Task>) => void;
   onDelete: () => void; onOpen: () => void;
 }) {
@@ -617,13 +618,15 @@ function TableRow({
         onClick={onOpen}
         className={cn(
           "hidden md:flex items-center border-b border-zinc-100 dark:border-[#2D2A45] transition-colors min-h-[40px] cursor-pointer",
-          "hover:bg-zinc-50 dark:hover:bg-white/5"
+          selected ? "bg-brand-50 dark:bg-brand-500/10" : "hover:bg-zinc-50 dark:hover:bg-white/5"
         )}>
       {/* Checkbox */}
       <div className="flex w-8 shrink-0 items-center justify-center">
         <input type="checkbox"
-          className="h-3.5 w-3.5 rounded border-zinc-300 text-brand-600 opacity-0 group-hover:opacity-100 transition-opacity"
-          onClick={(e) => e.stopPropagation()} />
+          checked={selected}
+          onChange={onToggleSelect}
+          onClick={(e) => e.stopPropagation()}
+          className={cn("h-3.5 w-3.5 rounded border-zinc-300 text-brand-600 transition-opacity", selected ? "opacity-100" : "opacity-0 group-hover:opacity-100")} />
       </div>
       {/* Drag */}
       <div className="w-5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
@@ -745,10 +748,11 @@ const COL_HEADERS = [
 
 // ─── Table section ────────────────────────────────────────────────────────────
 function TableSection({
-  section, tasks, startIndex, acting, team, onUpdate, onDelete, onAddTask, onQuickAdd, onOpenTask,
+  section, tasks, startIndex, acting, team, selectedIds, onToggleSelect, onUpdate, onDelete, onAddTask, onQuickAdd, onOpenTask,
 }: {
   section: typeof TABLE_SECTIONS[number]; tasks: Task[]; startIndex: number;
   acting: string | null; team: TeamMemberWithAgent[];
+  selectedIds: Set<string>; onToggleSelect: (id: string) => void;
   onUpdate: (id: string, patch: Partial<Task>) => void;
   onDelete: (id: string) => void;
   onAddTask: () => void;
@@ -794,15 +798,27 @@ function TableSection({
       {!collapsed && (
         <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white dark:border-[#2D2A45] dark:bg-[#16132A]">
           {/* Column headers — desktop only */}
-          <div className="hidden md:flex items-center border-b border-zinc-100 bg-zinc-50 dark:border-[#2D2A45] dark:bg-[#0F0D1E]">
-            <div className="w-8 shrink-0" />
-            <div className="w-5 shrink-0" />
-            {COL_HEADERS.map((h) => (
-              <div key={h.label} className={cn("px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-zinc-400", h.cls)}>
-                {h.label}
+          {(() => {
+            const allSelected = tasks.length > 0 && tasks.every((t) => selectedIds.has(t.id));
+            const someSelected = tasks.some((t) => selectedIds.has(t.id));
+            return (
+              <div className="hidden md:flex items-center border-b border-zinc-100 bg-zinc-50 dark:border-[#2D2A45] dark:bg-[#0F0D1E]">
+                <div className="flex w-8 shrink-0 items-center justify-center">
+                  <input type="checkbox"
+                    checked={allSelected}
+                    ref={(el) => { if (el) el.indeterminate = someSelected && !allSelected; }}
+                    onChange={() => tasks.forEach((t) => { if (allSelected || !selectedIds.has(t.id)) onToggleSelect(t.id); })}
+                    className="h-3.5 w-3.5 rounded border-zinc-300 text-brand-600 opacity-0 group-hover/sh:opacity-100 transition-opacity" />
+                </div>
+                <div className="w-5 shrink-0" />
+                {COL_HEADERS.map((h) => (
+                  <div key={h.label} className={cn("px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-zinc-400", h.cls)}>
+                    {h.label}
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
+            );
+          })()}
 
           {/* Rows */}
           {tasks.length === 0 ? (
@@ -811,6 +827,8 @@ function TableSection({
             <TableRow
               key={task.id} task={task} taskNumber={startIndex + i + 1}
               acting={acting === task.id} team={team}
+              selected={selectedIds.has(task.id)}
+              onToggleSelect={() => onToggleSelect(task.id)}
               onUpdate={onUpdate}
               onDelete={() => onDelete(task.id)}
               onOpen={() => onOpenTask(task, startIndex + i)}
@@ -868,9 +886,10 @@ function TableSection({
 
 // ─── Main Table view ──────────────────────────────────────────────────────────
 function MainTableView({
-  tasks, acting, team, onUpdate, onDelete, onAddTask, onQuickAdd, onOpenTask,
+  tasks, acting, team, selectedIds, onToggleSelect, onUpdate, onDelete, onAddTask, onQuickAdd, onOpenTask,
 }: {
   tasks: Task[]; acting: string | null; team: TeamMemberWithAgent[];
+  selectedIds: Set<string>; onToggleSelect: (id: string) => void;
   onUpdate: (id: string, patch: Partial<Task>) => void;
   onDelete: (id: string) => void;
   onAddTask: (status: TaskStatus) => void;
@@ -886,13 +905,109 @@ function MainTableView({
         counter += st.length;
         return (
           <TableSection key={section.status} section={section} tasks={st} startIndex={si}
-            acting={acting} team={team} onUpdate={onUpdate} onDelete={onDelete}
+            acting={acting} team={team}
+            selectedIds={selectedIds} onToggleSelect={onToggleSelect}
+            onUpdate={onUpdate} onDelete={onDelete}
             onAddTask={() => onAddTask(section.status)}
             onQuickAdd={(title) => onQuickAdd(title, section.status)}
             onOpenTask={onOpenTask} />
         );
       })}
     </div>
+  );
+}
+
+// ─── Bulk Action Bar ──────────────────────────────────────────────────────────
+// Floating pill shown at the bottom when one or more tasks are selected.
+function BulkActionBar({
+  count, team, onMove, onAssign, onDelete, onClear,
+}: {
+  count: number; team: TeamMemberWithAgent[];
+  onMove: (status: TaskStatus) => void;
+  onAssign: (name: string) => void;
+  onDelete: () => void;
+  onClear: () => void;
+}) {
+  const [showMove,       setShowMove]       = React.useState(false);
+  const [showAssign,     setShowAssign]      = React.useState(false);
+  const [confirmDelete,  setConfirmDelete]   = React.useState(false);
+
+  function closeAll() { setShowMove(false); setShowAssign(false); setConfirmDelete(false); }
+
+  return createPortal(
+    <div className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 pointer-events-none">
+      <div className="flex items-center gap-2 rounded-2xl bg-zinc-900 px-4 py-2.5 shadow-2xl ring-1 ring-white/10 pointer-events-auto">
+        <span className="mr-1 text-sm font-semibold text-white">{count} selected</span>
+
+        {/* Move to */}
+        <div className="relative">
+          <button
+            onClick={() => { setShowMove((v) => !v); setShowAssign(false); setConfirmDelete(false); }}
+            className="flex items-center gap-1.5 rounded-xl bg-white/10 px-3 py-1.5 text-xs font-medium text-white hover:bg-white/20 transition-colors"
+          >
+            Move to <ChevronDown className="h-3 w-3" />
+          </button>
+          {showMove && (
+            <div className="absolute bottom-full mb-2 left-0 z-10 min-w-[150px] overflow-hidden rounded-xl border border-zinc-100 bg-white shadow-xl dark:border-white/10 dark:bg-[#1C1830]">
+              {TABLE_SECTIONS.map((s) => (
+                <button key={s.status} onClick={() => { onMove(s.status); closeAll(); }}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-xs text-zinc-700 hover:bg-zinc-50 dark:text-zinc-300 dark:hover:bg-white/5">
+                  <span className={cn("h-1.5 w-1.5 rounded-full", s.accent)} />
+                  {s.label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Assign to */}
+        <div className="relative">
+          <button
+            onClick={() => { setShowAssign((v) => !v); setShowMove(false); setConfirmDelete(false); }}
+            className="flex items-center gap-1.5 rounded-xl bg-white/10 px-3 py-1.5 text-xs font-medium text-white hover:bg-white/20 transition-colors"
+          >
+            Assign to <ChevronDown className="h-3 w-3" />
+          </button>
+          {showAssign && (
+            <div className="absolute bottom-full mb-2 left-0 z-10 min-w-[180px] overflow-hidden rounded-xl border border-zinc-100 bg-white shadow-xl dark:border-white/10 dark:bg-[#1C1830]">
+              {team.map((m) => (
+                <button key={m.agent_id} onClick={() => { onAssign(m.name); closeAll(); }}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-xs text-zinc-700 hover:bg-zinc-50 dark:text-zinc-300 dark:hover:bg-white/5">
+                  <div className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-brand-600 text-[9px] font-bold text-white">
+                    {m.name[0]?.toUpperCase()}
+                  </div>
+                  {m.name}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Delete */}
+        {confirmDelete ? (
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-red-400">Delete {count}?</span>
+            <button onClick={() => { onDelete(); closeAll(); }}
+              className="rounded-xl bg-red-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-600 transition-colors">
+              Confirm
+            </button>
+            <button onClick={() => setConfirmDelete(false)} className="text-xs text-zinc-400 hover:text-white">Cancel</button>
+          </div>
+        ) : (
+          <button onClick={() => { closeAll(); setConfirmDelete(true); }}
+            className="rounded-xl bg-red-500/20 px-3 py-1.5 text-xs font-medium text-red-400 hover:bg-red-500/30 transition-colors">
+            Delete
+          </button>
+        )}
+
+        {/* Clear selection */}
+        <button onClick={onClear}
+          className="ml-1 grid h-7 w-7 place-items-center rounded-lg text-zinc-400 hover:bg-white/10 hover:text-white transition-colors" title="Clear selection">
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+    </div>,
+    document.body
   );
 }
 
@@ -1051,7 +1166,36 @@ function TaskBoardContent({
   const [createIn,      setCreateIn]      = React.useState<TaskStatus | null>(null);
   const [detailTask,    setDetailTask]    = React.useState<{ task: Task; index: number } | null>(null);
   const [reviewPending, setReviewPending] = React.useState<{ id: string; extraPatch: Partial<Task> } | null>(null);
+  const [selectedIds,   setSelectedIds]   = React.useState<Set<string>>(new Set());
   const recentlyDeleted = React.useRef(new Set<string>());
+
+  function toggleSelect(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
+  function clearSelection() { setSelectedIds(new Set()); }
+
+  async function handleBulkMove(status: TaskStatus) {
+    const ids = [...selectedIds];
+    await Promise.all(ids.map((id) => updateTask(projectId, id, { status } as Record<string, unknown>)));
+    setTasks((prev) => prev.map((t) => ids.includes(t.id) ? { ...t, status } : t));
+    clearSelection();
+  }
+  async function handleBulkAssign(name: string) {
+    const ids = [...selectedIds];
+    await Promise.all(ids.map((id) => updateTask(projectId, id, { assignee: name } as Record<string, unknown>)));
+    setTasks((prev) => prev.map((t) => ids.includes(t.id) ? { ...t, assignee: name } : t));
+    clearSelection();
+  }
+  async function handleBulkDelete() {
+    const ids = [...selectedIds];
+    await Promise.all(ids.map((id) => deleteTask(projectId, id)));
+    setTasks((prev) => prev.filter((t) => !ids.includes(t.id)));
+    clearSelection();
+  }
 
   const visibleTasks = tasks.filter((t) => !recentlyDeleted.current.has(t.id));
 
@@ -1104,6 +1248,7 @@ function TaskBoardContent({
       <div className={cn("flex min-w-0 flex-1 flex-col overflow-y-auto transition-all duration-250", detailTask ? "hidden md:flex" : "flex")}>
         <MainTableView
           tasks={visibleTasks} acting={acting} team={team}
+          selectedIds={selectedIds} onToggleSelect={toggleSelect}
           onUpdate={interceptUpdate} onDelete={removeTask}
           onAddTask={(status) => setCreateIn(status)}
           onQuickAdd={handleQuickAdd}
@@ -1136,6 +1281,17 @@ function TaskBoardContent({
             setReviewPending(null);
           }}
           onCancel={() => setReviewPending(null)}
+        />
+      )}
+
+      {selectedIds.size > 0 && (
+        <BulkActionBar
+          count={selectedIds.size}
+          team={team}
+          onMove={handleBulkMove}
+          onAssign={handleBulkAssign}
+          onDelete={handleBulkDelete}
+          onClear={clearSelection}
         />
       )}
     </div>
