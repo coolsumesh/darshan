@@ -1225,14 +1225,16 @@ export default function OrganisationsPage() {
     return true;
   });
 
-  const FILTER_TABS: { id: OrgFilter; label: string; count: number }[] = [
+  const allTabs: { id: OrgFilter; label: string; count: number }[] = [
     { id: "all",      label: "All",      count: orgs.length },
-    ...(ownOrgs.length > 0 ? [{ id: "own" as OrgFilter, label: "Own", count: ownOrgs.length }] : []),
+    { id: "own",      label: "Own",      count: ownOrgs.length },
     { id: "partner",  label: "Partner",  count: externalOrgs.filter(o => o.type === "partner").length },
     { id: "client",   label: "Client",   count: externalOrgs.filter(o => o.type === "client").length },
     { id: "vendor",   label: "Vendor",   count: externalOrgs.filter(o => o.type === "vendor").length },
     { id: "archived", label: "Archived", count: orgs.filter(o => (o as unknown as { status?: string }).status === "archived").length },
   ];
+  // Only show tabs that have at least one org (always show "All")
+  const FILTER_TABS = allTabs.filter(t => t.id === "all" || t.count > 0);
 
   return (
     <div className="flex min-h-0 flex-1 overflow-hidden">
@@ -1274,9 +1276,9 @@ export default function OrganisationsPage() {
             ))}
           </div>
 
-          {/* Filter tabs + search */}
+          {/* Filter tabs + search — only show tabs when there's something to filter */}
           <div className="flex items-center border-b border-zinc-200 dark:border-[#2D2A45]">
-            {FILTER_TABS.map(tab => (
+            {FILTER_TABS.length > 1 && FILTER_TABS.map(tab => (
               <button key={tab.id} onClick={() => setFilter(tab.id)}
                 className={cn(
                   "flex items-center gap-1.5 border-b-2 px-4 py-2.5 text-sm font-semibold transition-colors -mb-px",
