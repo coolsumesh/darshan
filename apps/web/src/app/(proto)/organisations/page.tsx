@@ -1242,22 +1242,21 @@ export default function OrganisationsPage() {
     return true;
   });
 
-  const allTabs: { id: OrgFilter; label: string; count: number }[] = [
-    { id: "all",         label: "All",         count: orgs.length },
-    // Ownership
-    { id: "own",         label: "Own",         count: ownOrgs.length },
-    // Role-based (orgs you belong to)
-    { id: "admin",       label: "Admin",       count: memberOrgs.filter(o => o.my_role === "admin").length },
-    { id: "contributor", label: "Contributor", count: memberOrgs.filter(o => o.my_role === "contributor").length },
-    { id: "viewer",      label: "Viewer",      count: memberOrgs.filter(o => o.my_role === "viewer").length },
-    // External org types
-    { id: "partner",     label: "Partner",     count: externalOrgs.filter(o => o.type === "partner").length },
-    { id: "client",      label: "Client",      count: externalOrgs.filter(o => o.type === "client").length },
-    { id: "vendor",      label: "Vendor",      count: externalOrgs.filter(o => o.type === "vendor").length },
-    { id: "archived",    label: "Archived",    count: orgs.filter(o => (o as unknown as { status?: string }).status === "archived").length },
+  const allTabs: { id: OrgFilter; label: string; count: number; alwaysShow: boolean }[] = [
+    { id: "all",         label: "All",         count: orgs.length,                                                    alwaysShow: true  },
+    // Ownership + roles — always visible so user sees the full picture
+    { id: "own",         label: "Own",         count: ownOrgs.length,                                                 alwaysShow: true  },
+    { id: "admin",       label: "Admin",       count: memberOrgs.filter(o => o.my_role === "admin").length,           alwaysShow: true  },
+    { id: "contributor", label: "Contributor", count: memberOrgs.filter(o => o.my_role === "contributor").length,     alwaysShow: true  },
+    { id: "viewer",      label: "Viewer",      count: memberOrgs.filter(o => o.my_role === "viewer").length,          alwaysShow: true  },
+    // External org types — only show when they have orgs
+    { id: "partner",     label: "Partner",     count: externalOrgs.filter(o => o.type === "partner").length,          alwaysShow: false },
+    { id: "client",      label: "Client",      count: externalOrgs.filter(o => o.type === "client").length,           alwaysShow: false },
+    { id: "vendor",      label: "Vendor",      count: externalOrgs.filter(o => o.type === "vendor").length,           alwaysShow: false },
+    { id: "archived",    label: "Archived",    count: orgs.filter(o => (o as unknown as { status?: string }).status === "archived").length, alwaysShow: false },
   ];
-  // Only show tabs with count > 0 (always show "All")
-  const FILTER_TABS = allTabs.filter(t => t.id === "all" || t.count > 0);
+  // Role tabs always show; type tabs only when they have orgs
+  const FILTER_TABS = allTabs.filter(t => t.alwaysShow || t.count > 0);
 
   return (
     <div className="flex min-h-0 flex-1 overflow-hidden">
