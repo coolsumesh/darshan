@@ -668,23 +668,25 @@ ACK_URL: ${ackUrl}
     );
     if (!orgs.length) return reply.status(404).send({ ok: false, error: "org not found" });
     const { rows } = await db.query(
-      `-- org owner (always first, from organisations table)
-       select u.id::text as id, 'owner'::text as role, o.created_at,
-              u.id as user_id, u.name, u.email, u.avatar_url
-       from organisations o
-       join users u on u.id = o.owner_user_id
-       where o.id = $1
-       union all
-       -- explicit members (exclude owner to avoid duplication)
-       select oum.id::text as id, oum.role, oum.created_at,
-              u.id as user_id, u.name, u.email, u.avatar_url
-       from org_user_members oum
-       join users u on u.id = oum.user_id
-       where oum.org_id = $1
-         and oum.user_id != (select owner_user_id from organisations where id = $1)
+      `select * from (
+         -- org owner (always shown, from organisations table)
+         select u.id::text as id, 'owner'::text as role, o.created_at,
+                u.id as user_id, u.name, u.email, u.avatar_url
+         from organisations o
+         join users u on u.id = o.owner_user_id
+         where o.id = $1
+         union all
+         -- explicit members (exclude owner to avoid duplication)
+         select oum.id::text as id, oum.role, oum.created_at,
+                u.id as user_id, u.name, u.email, u.avatar_url
+         from org_user_members oum
+         join users u on u.id = oum.user_id
+         where oum.org_id = $1
+           and oum.user_id != (select owner_user_id from organisations where id = $1)
+       ) t
        order by
-         case role when 'owner' then 0 when 'admin' then 1 when 'contributor' then 2 else 3 end,
-         lower(name) asc`,
+         case t.role when 'owner' then 0 when 'admin' then 1 when 'contributor' then 2 else 3 end,
+         lower(t.name) asc`,
       [orgs[0].id]
     );
     return { ok: true, users: rows };
