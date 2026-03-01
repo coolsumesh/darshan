@@ -47,6 +47,11 @@ const ORG_TYPE_META: Record<string, {
     badge: "bg-brand-100 text-brand-700 dark:bg-brand-500/10 dark:text-brand-300",
     accent: "border-brand-500", cardActive: "bg-brand-600 ring-brand-600 text-white",
   },
+  member:  {
+    label: "Member", desc: "You're a member",
+    badge: "bg-zinc-100 text-zinc-600 dark:bg-white/10 dark:text-zinc-400",
+    accent: "border-zinc-400", cardActive: "bg-zinc-600 ring-zinc-600 text-white",
+  },
   partner: {
     label: "Partner", desc: "Collaborate together",
     badge: "bg-sky-100 text-sky-700 dark:bg-sky-500/10 dark:text-sky-300",
@@ -63,6 +68,13 @@ const ORG_TYPE_META: Record<string, {
     accent: "border-amber-500", cardActive: "bg-amber-600 ring-amber-600 text-white",
   },
 };
+
+/** Returns the display type based on the user's relationship to the org.
+ *  If user is a member (not owner) of an 'own' org, show "member" instead of "own". */
+function effectiveType(org: ExtOrg): string {
+  if (org.type === "own" && org.my_role !== "owner") return "member";
+  return org.type;
+}
 
 const AVATAR_COLORS = ["#7C3AED","#2563EB","#0284C7","#059669","#D97706","#DC2626"];
 
@@ -872,13 +884,14 @@ function ExternalOrgCard({ org, onView, onArchive }: {
   onArchive?: () => void;
 }) {
   const router = useRouter();
-  const tm = ORG_TYPE_META[org.type] ?? ORG_TYPE_META.partner;
+  const eType = effectiveType(org);
+  const tm = ORG_TYPE_META[eType] ?? ORG_TYPE_META.partner;
   const orgStatus = (org as unknown as { status?: string }).status ?? "active";
   const isArchived = orgStatus === "archived";
   const accentColor =
-    org.type === "partner" ? "bg-sky-500" :
-    org.type === "client"  ? "bg-emerald-500" :
-    org.type === "vendor"  ? "bg-amber-500" : "bg-zinc-400";
+    eType === "partner" ? "bg-sky-500" :
+    eType === "client"  ? "bg-emerald-500" :
+    eType === "vendor"  ? "bg-amber-500" : "bg-zinc-400";
 
   const [menuOpen, setMenuOpen] = React.useState(false);
   const menuRef = React.useRef<HTMLDivElement>(null);
@@ -974,7 +987,7 @@ function ExternalOrgListRow({ org, onView, onArchive }: {
   org: ExtOrg; onView: () => void; onArchive?: () => void;
 }) {
   const router = useRouter();
-  const tm = ORG_TYPE_META[org.type] ?? ORG_TYPE_META.partner;
+  const tm = ORG_TYPE_META[effectiveType(org)] ?? ORG_TYPE_META.partner;
   const orgStatus = (org as unknown as { status?: string }).status ?? "active";
   const isArchived = orgStatus === "archived";
 
@@ -1070,8 +1083,9 @@ export default function OrganisationsPage() {
     }
   }
 
-  const ownOrgs      = orgs.filter(o => o.type === "own");
-  const externalOrgs = orgs.filter(o => o.type !== "own");
+  // "Own" = orgs where you are the actual owner, not just a member
+  const ownOrgs      = orgs.filter(o => o.type === "own" && (o.my_role === "owner" || !o.my_role));
+  const externalOrgs = orgs.filter(o => !(o.type === "own" && (o.my_role === "owner" || !o.my_role)));
   const totalAgents  = orgs.reduce((s, o) => s + (o.agent_count ?? 0), 0);
 
   const filteredExternal = externalOrgs.filter(o => {

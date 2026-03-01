@@ -205,6 +205,7 @@ export type Org = {
   agent_count?: number; project_count?: number;
   created_at?: string; updated_at?: string;
   avatar_color?: string; avatar_url?: string;
+  my_role?: "owner" | "admin" | "member";
 };
 
 export async function fetchOrgs(): Promise<Org[]> {

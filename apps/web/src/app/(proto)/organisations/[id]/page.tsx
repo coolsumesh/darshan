@@ -29,6 +29,7 @@ const ORG_TYPE_META: Record<string, {
   label: string; badge: string; accent: string;
 }> = {
   own:     { label: "Own workspace", badge: "bg-brand-100 text-brand-700 dark:bg-brand-500/10 dark:text-brand-300", accent: "border-brand-500" },
+  member:  { label: "Member",        badge: "bg-zinc-100 text-zinc-600 dark:bg-white/10 dark:text-zinc-400",        accent: "border-zinc-400"  },
   partner: { label: "Partner",       badge: "bg-sky-100 text-sky-700 dark:bg-sky-500/10 dark:text-sky-300",         accent: "border-sky-500"   },
   client:  { label: "Client",        badge: "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400", accent: "border-emerald-500" },
   vendor:  { label: "Vendor",        badge: "bg-amber-100 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400", accent: "border-amber-500"  },
@@ -873,7 +874,8 @@ export default function OrgSettingsPage() {
     );
   }
 
-  const tm = ORG_TYPE_META[org.type] ?? ORG_TYPE_META.partner;
+  const effectiveOrgType = (org.type === "own" && currentRole !== "owner") ? "member" : org.type;
+  const tm = ORG_TYPE_META[effectiveOrgType] ?? ORG_TYPE_META.partner;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">

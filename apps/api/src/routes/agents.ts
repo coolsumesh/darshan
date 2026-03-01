@@ -54,7 +54,16 @@ export async function registerAgents(server: FastifyInstance, db: pg.Pool) {
       `select o.*,
               count(distinct a.id)::int as agent_count,
               count(distinct p.id)::int as project_count,
-              count(distinct a.id) filter (where a.status = 'online')::int as online_count
+              count(distinct a.id) filter (where a.status = 'online')::int as online_count,
+              case
+                when $1::uuid is null           then 'member'
+                when o.owner_user_id = $1::uuid then 'owner'
+                else coalesce(
+                  (select oum.role from org_user_members oum
+                   where oum.org_id = o.id and oum.user_id = $1::uuid limit 1),
+                  'member'
+                )
+              end as my_role
        from organisations o
        left join agents   a on a.org_id = o.id
        left join projects p on p.org_id = o.id
