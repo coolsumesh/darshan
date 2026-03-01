@@ -381,12 +381,16 @@ function TaskDetailPanel({
   onClose: () => void; onUpdate: (id: string, patch: Partial<Task>) => void; onDelete: (id: string) => void;
 }) {
   const taskIdStr = `DSH-${String(taskNumber).padStart(3, "0")}`;
-  const [editingTitle, setEditingTitle] = React.useState(false);
-  const [title,        setTitle]        = React.useState(task.title);
-  const [editingDesc,  setEditingDesc]  = React.useState(false);
-  const [desc,         setDesc]         = React.useState(task.description ?? "");
-  const [openPop,      setOpenPop]      = React.useState<string | null>(null);
-  const [anchorEl,     setAnchorEl]     = React.useState<HTMLElement | null>(null);
+  const [editingTitle,    setEditingTitle]    = React.useState(false);
+  const [title,           setTitle]           = React.useState(task.title);
+  const [editingDesc,     setEditingDesc]     = React.useState(false);
+  const [desc,            setDesc]            = React.useState(task.description ?? "");
+  const [completionNote,  setCompletionNote]  = React.useState(task.completion_note ?? "");
+  const [openPop,         setOpenPop]         = React.useState<string | null>(null);
+  const [anchorEl,        setAnchorEl]        = React.useState<HTMLElement | null>(null);
+
+  // Keep local completion note in sync if task updates externally (e.g. WebSocket)
+  React.useEffect(() => { setCompletionNote(task.completion_note ?? ""); }, [task.completion_note]);
   function openPopover(name: string, el: HTMLElement) { setOpenPop(name); setAnchorEl(el); }
   function closePopover() { setOpenPop(null); setAnchorEl(null); }
 
@@ -511,8 +515,9 @@ function TaskDetailPanel({
               </span>
             </div>
             <textarea
-              value={task.completion_note ?? ""}
-              onChange={(e) => onUpdate(task.id, { completion_note: e.target.value })}
+              value={completionNote}
+              onChange={(e) => setCompletionNote(e.target.value)}
+              onBlur={() => { if (completionNote !== (task.completion_note ?? "")) onUpdate(task.id, { completion_note: completionNote }); }}
               rows={4}
               placeholder="Describe what was completed — deliverables, decisions, outcomes…"
               className={cn(
@@ -891,6 +896,48 @@ function MainTableView({
   );
 }
 
+// ─── Review Note Modal ────────────────────────────────────────────────────────
+// Shown when a task is moved to "Review" status — prompts for a completion summary.
+function ReviewNoteModal({ onConfirm, onCancel }: {
+  onConfirm: (note: string) => void;
+  onCancel: () => void;
+}) {
+  const [note, setNote] = React.useState("");
+  return createPortal(
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+      <div className="w-[480px] max-w-[90vw] rounded-2xl bg-white p-6 shadow-2xl dark:bg-[#1C1830]">
+        <div className="mb-1 flex items-center gap-2">
+          <span className="h-2 w-2 rounded-full bg-sky-400" />
+          <h3 className="font-display text-base font-semibold text-zinc-900 dark:text-white">Sending for Review</h3>
+        </div>
+        <p className="mb-4 text-sm text-zinc-500 dark:text-zinc-400">
+          What was completed? This will be visible to the reviewer in the task detail.
+        </p>
+        <textarea
+          autoFocus
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter" && e.metaKey) onConfirm(note); if (e.key === "Escape") onCancel(); }}
+          rows={4}
+          placeholder="Describe deliverables, decisions, outcomes…"
+          className="w-full resize-none rounded-xl bg-zinc-50 px-3 py-2.5 text-sm text-zinc-800 ring-1 ring-zinc-200 outline-none focus:ring-sky-400 dark:bg-white/5 dark:ring-white/10 dark:text-zinc-200 dark:placeholder:text-zinc-600"
+        />
+        <p className="mt-1.5 text-right text-xs text-zinc-400">⌘ Enter to confirm</p>
+        <div className="mt-4 flex justify-end gap-2">
+          <Button variant="secondary" size="sm" onClick={onCancel}>Cancel</Button>
+          <button
+            onClick={() => onConfirm(note)}
+            className="inline-flex h-9 items-center justify-center rounded-xl bg-sky-500 px-5 text-sm font-semibold text-white transition hover:bg-sky-600"
+          >
+            Send for Review
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
 // ─── Create Task Modal ────────────────────────────────────────────────────────
 function CreateTaskModal({
   defaultStatus, team, onSave, onClose,
@@ -1003,6 +1050,7 @@ function TaskBoardContent({
   const [dragOver,      setDragOver]      = React.useState<TaskStatus | null>(null);
   const [createIn,      setCreateIn]      = React.useState<TaskStatus | null>(null);
   const [detailTask,    setDetailTask]    = React.useState<{ task: Task; index: number } | null>(null);
+  const [reviewPending, setReviewPending] = React.useState<{ id: string; extraPatch: Partial<Task> } | null>(null);
   const recentlyDeleted = React.useRef(new Set<string>());
 
   const visibleTasks = tasks.filter((t) => !recentlyDeleted.current.has(t.id));
@@ -1019,6 +1067,15 @@ function TaskBoardContent({
     const updated = await updateTask(projectId, id, patch as Record<string, unknown>);
     setTasks((prev) => prev.map((t) => t.id === id ? { ...t, ...patch, ...(updated ?? {}) } : t));
     if (detailTask?.task.id === id) setDetailTask((d) => d ? { ...d, task: { ...d.task, ...patch } } : null);
+  }
+
+  // Intercept status→review to prompt for a completion note first.
+  function interceptUpdate(id: string, patch: Partial<Task>) {
+    if (patch.status === "review" && !patch.completion_note) {
+      setReviewPending({ id, extraPatch: patch });
+      return;
+    }
+    patchTask(id, patch);
   }
 
   async function removeTask(id: string) {
@@ -1047,7 +1104,7 @@ function TaskBoardContent({
       <div className={cn("flex min-w-0 flex-1 flex-col overflow-y-auto transition-all duration-250", detailTask ? "hidden md:flex" : "flex")}>
         <MainTableView
           tasks={visibleTasks} acting={acting} team={team}
-          onUpdate={patchTask} onDelete={removeTask}
+          onUpdate={interceptUpdate} onDelete={removeTask}
           onAddTask={(status) => setCreateIn(status)}
           onQuickAdd={handleQuickAdd}
           onOpenTask={(task, index) => setDetailTask({ task, index })}
@@ -1062,7 +1119,7 @@ function TaskBoardContent({
             team={team}
             taskNumber={detailTask.index + 1}
             onClose={() => setDetailTask(null)}
-            onUpdate={patchTask}
+            onUpdate={interceptUpdate}
             onDelete={removeTask}
           />
         </div>
@@ -1070,6 +1127,16 @@ function TaskBoardContent({
 
       {createIn && (
         <CreateTaskModal defaultStatus={createIn} team={team} onSave={handleCreate} onClose={() => setCreateIn(null)} />
+      )}
+
+      {reviewPending && (
+        <ReviewNoteModal
+          onConfirm={(note) => {
+            patchTask(reviewPending.id, { ...reviewPending.extraPatch, status: "review", completion_note: note });
+            setReviewPending(null);
+          }}
+          onCancel={() => setReviewPending(null)}
+        />
       )}
     </div>
   );
