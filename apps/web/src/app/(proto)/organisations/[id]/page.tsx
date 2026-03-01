@@ -551,9 +551,10 @@ function MembersTab({ orgId, canEdit }: { orgId: string; canEdit: boolean }) {
                   <div className="text-[11px] text-zinc-400">{u.email}</div>
                 </div>
                 <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-semibold capitalize", ROLE_BADGE[u.role])}>
+                  {u.role === "owner" && <Crown className="inline h-3 w-3 mr-0.5" />}
                   {u.role}
                 </span>
-                {canEdit && (
+                {canEdit && u.role !== "owner" && (
                   <button onClick={() => handleRemoveUser(u.user_id)}
                     className="grid h-7 w-7 shrink-0 place-items-center rounded-lg text-zinc-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-500/10 transition-colors"
                     title="Remove from org">
