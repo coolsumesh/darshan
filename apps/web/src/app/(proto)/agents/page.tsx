@@ -1209,10 +1209,9 @@ export default function AgentsPage() {
           {/* Stats */}
           <div className="flex gap-4">
             {[
-              { label: "Total",    value: agents.length, icon: Bot,     cls: "bg-brand-600"   },
-              { label: "Online",   value: totalOnline,   icon: Zap,     cls: "bg-emerald-500" },
-              { label: "AI Agent", value: aiCount,       icon: Bot,     cls: "bg-violet-500"  },
-              { label: "Human",    value: humanCount,    icon: Users,   cls: "bg-sky-500"     },
+              { label: "Total",   value: agents.length, icon: Bot,      cls: "bg-brand-600"   },
+              { label: "Online",  value: totalOnline,   icon: Zap,      cls: "bg-emerald-500" },
+              { label: "Orgs",    value: orgs.length,   icon: Building2, cls: "bg-zinc-700"   },
             ].map(({ label, value, icon: Icon, cls }) => (
               <div key={label} className="flex flex-1 items-center gap-3 rounded-2xl bg-white p-4 ring-1 ring-zinc-200 shadow-sm dark:bg-[#16132A] dark:ring-[#2D2A45]">
                 <div className={cn("grid h-9 w-9 shrink-0 place-items-center rounded-xl", cls)}>
