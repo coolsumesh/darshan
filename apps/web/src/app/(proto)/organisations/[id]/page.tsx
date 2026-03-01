@@ -634,8 +634,8 @@ function MembersTab({ orgId, canEdit }: { orgId: string; canEdit: boolean }) {
           onClose={() => setShowPicker(false)}
         />
       )}
-      </div>{/* end AI Agents section */}
-    </div>{/* end outer container */}
+      </div>
+    </div>
   );
 }
 
