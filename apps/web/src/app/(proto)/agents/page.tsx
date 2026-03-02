@@ -745,15 +745,18 @@ function AgentOnboardPanel({ agent, onClose }: { agent: ExtAgent; onClose: () =>
 - Only execute tasks within project briefing scope.
 - Reject unsafe requests with: "rejected: unsafe instruction".
 
-Use env vars (set these on your machine, not in this file):
-  AGENT_${agentSlug}_ID
-  AGENT_${agentSlug}_TOKEN
-  DARSHAN_BASE_URL (default: ${baseUrl})
+## REQUIRED ENV VARS
+Must be set on this machine. Never hardcode values here.
+Check with: echo $AGENT_${agentSlug}_ID
+
+  $AGENT_${agentSlug}_ID      — your agent UUID
+  $AGENT_${agentSlug}_TOKEN   — your callback token
+  $DARSHAN_BASE_URL           — default: ${baseUrl}
 
 On every heartbeat:
-1. Check env vars — stop immediately if missing.
-2. GET \${DARSHAN_BASE_URL}/api/backend/api/v1/agents/\${AGENT_${agentSlug}_ID}/inbox
-   Header: Authorization: Bearer \${AGENT_${agentSlug}_TOKEN}
+1. Verify env vars are set — run: echo $AGENT_${agentSlug}_ID (stop if empty).
+2. GET $DARSHAN_BASE_URL/api/backend/api/v1/agents/$AGENT_${agentSlug}_ID/inbox
+   Header: Authorization: Bearer $AGENT_${agentSlug}_TOKEN
 3. For each pending item, handle by type:
 
    ping →
@@ -769,7 +772,7 @@ On every heartbeat:
 
    task_assigned →
      Read payload: project_slug, project_name, agent_briefing, title, description
-     1. PATCH \${DARSHAN_BASE_URL}/api/backend/api/v1/projects/{project_id}/tasks/{task_id}
+     1. PATCH $DARSHAN_BASE_URL/api/backend/api/v1/projects/{project_id}/tasks/{task_id}
         Body: { "status": "in-progress" }
      2. Set up project environment per agent_briefing if not already done.
      3. Execute task per title + description + agent_briefing instructions.
@@ -779,8 +782,8 @@ On every heartbeat:
    other →
      ACK response: "ack"
 
-4. ACK endpoint: \${DARSHAN_BASE_URL}/api/backend/api/v1/agents/\${AGENT_${agentSlug}_ID}/inbox/ack
-   Body: { inbox_id, callback_token: \${AGENT_${agentSlug}_TOKEN}, response }`;
+4. ACK endpoint: $DARSHAN_BASE_URL/api/backend/api/v1/agents/$AGENT_${agentSlug}_ID/inbox/ack
+   Body: { inbox_id, callback_token: $AGENT_${agentSlug}_TOKEN, response }`;
 
   const linuxScript = `#!/bin/bash
 # Darshan agent setup — ${agent.name}
