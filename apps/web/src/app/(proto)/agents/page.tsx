@@ -223,34 +223,231 @@ function AgentCredentialsPanel({ agent }: { agent: ExtAgent }) {
     setCopied(key);
     setTimeout(() => setCopied(null), 2000);
   }
+rt * as React from "react";
+import { createPortal } from "react-dom";
+import {
+  Bot, Check, Plus, Search, X, Zap,
+  Activity, Trash2, Pencil, Key, Copy, Upload, Building2, Terminal, Download,
+} from "lucide-react";
+import { cn } from "@/lib/cn";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import {
+  fetchAgents, createAgent, pingAgent,
+  fetchAgentProjects, deleteAgent, updateAgent,
+  type AgentProject,
+} from "@/lib/api";
+import type { Agent } from "@/lib/agents";
 
-  const heartbeatBlock =
-`## Darshan Agent Inbox — ${agent.name}
-AGENT_ID:  ${agentId}
-TOKEN:     ${token}
-INBOX_URL: ${inboxUrl}
-ACK_URL:   ${ackUrl}
+// ─── Types ────────────────────────────────────────────────────────────────────
+type ExtAgent = Agent & {
+  org_id?: string; org_name?: string; org_slug?: string; org_type?: string;
+  agent_type?: string; model?: string; provider?: string;
+  capabilities?: string[]; ping_status?: string;
+  last_ping_at?: string; last_seen_at?: string; callback_token?: string;
+  last_ping_ms?: number;
+  open_task_count?: number;
+  platform?: string;
+};
+type StatusFilter = "all" | "online" | "offline";
 
-### Steps (run on every heartbeat):
-1. GET INBOX_URL with header: Authorization: Bearer ${token}
-   (use the TOKEN value above — replace literal "TOKEN" with the value if your config tool requires it)
-2. For each pending item, handle by type:
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+function relativeTime(dateStr?: string): string {
+  if (!dateStr) return "never";
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const m = Math.floor(diff / 60000);
+  if (m < 1)  return "just now";
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
+}
 
-**type = "ping"**
-- POST to ACK_URL: { inbox_id, callback_token: "${token}", response: "pong — ${agent.name} online" }
+const STATUS_META: Record<string, { dot: string; label: string; text: string }> = {
+  online:  { dot: "bg-emerald-400", label: "Online",  text: "text-emerald-600 dark:text-emerald-400" },
+  away:    { dot: "bg-amber-400",   label: "Away",    text: "text-amber-600"   },
+  offline: { dot: "bg-zinc-400",    label: "Offline", text: "text-zinc-400"    },
+};
 
-**type = "welcome"**
-- Read payload.heartbeat_config — this is the full HEARTBEAT.md block you need
-- Write it to your ~/.openclaw/workspace/HEARTBEAT.md (append the Darshan section)
-- POST to ACK_URL: { inbox_id, callback_token: "${token}", response: "setup complete — ${agent.name} ready" }
+const PING_META: Record<string, { dot: string; label: string; cls: string }> = {
+  ok:      { dot: "bg-emerald-400",            label: "OK",       cls: "text-emerald-600" },
+  pending: { dot: "bg-amber-400 animate-pulse", label: "Pinging…", cls: "text-amber-600" },
+  timeout: { dot: "bg-red-400",                 label: "Timeout",  cls: "text-red-600"   },
+  unknown: { dot: "bg-zinc-400",                label: "Unknown",  cls: "text-zinc-400"  },
+};
 
-**type = "task_assigned"**
-- PATCH task to in-progress: PATCH https://darshan.caringgems.in/api/backend/api/v1/projects/{project_id}/tasks/{task_id} with body { "status": "in-progress" }
-- Execute the task
-- POST to ACK_URL: { inbox_id, callback_token: "${token}", response: "picked up — working on: {title}" }
+function pingLabel(status: string, ms?: number) {
+  if (status === "ok") return ms != null ? `OK · ${ms}ms` : "OK";
+  return PING_META[status]?.label ?? "Unknown";
+}
 
-**Any other type**
-- POST to ACK_URL: { inbox_id, callback_token: "${token}", response: "ack" }`;
+const PROVIDERS     = ["anthropic", "openai", "google", "mistral", "other"];
+const CAPABILITIES  = ["code", "design", "ux", "review", "api", "infra", "deploy", "plan", "data", "writing"];
+const POPULAR_MODELS = ["claude-sonnet-4-6", "claude-opus-4-6", "gpt-4o", "gpt-4-turbo", "gemini-1.5-pro", "mistral-large"];
+
+// ─── Platform config ──────────────────────────────────────────────────────────
+const PLATFORMS: { value: string; label: string }[] = [
+  { value: "openclaw",       label: "OpenClaw"         },
+  { value: "claude_code",    label: "Claude Code"      },
+  { value: "cursor",         label: "Cursor"           },
+  { value: "github_copilot", label: "GitHub Copilot"   },
+  { value: "crewai",         label: "CrewAI"           },
+  { value: "langchain",      label: "LangChain"        },
+  { value: "autogen",        label: "AutoGen"          },
+  { value: "agno",           label: "Agno"             },
+  { value: "custom",         label: "Custom"           },
+];
+const PLATFORM_LABEL: Record<string, string> = Object.fromEntries(
+  PLATFORMS.map(p => [p.value, p.label])
+);
+function platformLabel(platform?: string): string {
+  return PLATFORM_LABEL[platform ?? "openclaw"] ?? platform ?? "OpenClaw";
+}
+const PLATFORM_BADGE = "bg-violet-100 text-violet-700 dark:bg-violet-500/10 dark:text-violet-300";
+
+// ─── Column config ─────────────────────────────────────────────────────────────
+const COLS = [
+  { label: "Name",         cls: "flex-1 min-w-0"  },
+  { label: "Platform",     cls: "w-24 shrink-0"   },
+  { label: "Model",        cls: "w-36 shrink-0"   },
+  { label: "Capabilities", cls: "w-48 shrink-0"   },
+  { label: "Ping",         cls: "w-24 shrink-0"   },
+  { label: "Last seen",    cls: "w-24 shrink-0"   },
+  { label: "Tasks",        cls: "w-14 shrink-0 text-center" },
+  { label: "",             cls: "w-16 shrink-0"   },
+];
+
+// ─── Agent Row ────────────────────────────────────────────────────────────────
+function AgentRow({ agent, onInspect, onPing, onDelete, pinging }: {
+  agent: ExtAgent;
+  onInspect: () => void;
+  onPing: () => void;
+  onDelete: () => void;
+  pinging: boolean;
+}) {
+  const sm = STATUS_META[agent.status] ?? STATUS_META.offline;
+  const pingKey = pinging ? "pending" : (agent.ping_status ?? "unknown");
+  const pm = PING_META[pingKey] ?? PING_META.unknown;
+  const caps = Array.isArray(agent.capabilities) ? agent.capabilities : [];
+
+  return (
+    <div
+      onClick={onInspect}
+      className="group flex cursor-pointer items-center gap-3 border-b border-zinc-100 px-4 py-2.5 hover:bg-zinc-50 dark:border-[#2D2A45] dark:hover:bg-white/5 transition-colors"
+    >
+      {/* Status dot */}
+      <span className={cn("h-2 w-2 shrink-0 rounded-full", sm.dot)} />
+
+      {/* Name + desc */}
+      <div className="flex-1 min-w-0 flex items-center gap-2">
+        <div className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-zinc-800 dark:bg-zinc-700 text-xs font-bold text-white">
+          {agent.name[0]?.toUpperCase()}
+        </div>
+        <div className="min-w-0">
+          <div className="truncate text-sm font-semibold text-zinc-900 dark:text-white">{agent.name}</div>
+          {agent.desc && (
+            <div className="truncate text-[11px] text-zinc-400">{agent.desc}</div>
+          )}
+        </div>
+      </div>
+
+      {/* Platform */}
+      <div className="w-24 shrink-0">
+        <span className={cn("rounded-full px-2 py-0.5 text-[10px] font-semibold", PLATFORM_BADGE)}>
+          {platformLabel(agent.platform)}
+        </span>
+      </div>
+
+      {/* Model */}
+      <div className="w-36 shrink-0">
+        {agent.model
+          ? <div className="flex flex-col gap-0.5">
+              <span className="rounded bg-zinc-100 px-1.5 py-0.5 text-[11px] font-mono text-zinc-500 dark:bg-white/10 dark:text-zinc-400">{agent.model}</span>
+              {agent.last_ping_at && <span className="text-[9px] text-zinc-400/60" title={`Last reported at ${new Date(agent.last_ping_at).toLocaleString()}`}>as of {relativeTime(agent.last_ping_at)}</span>}
+            </div>
+          : <span className="text-xs text-zinc-300 dark:text-zinc-600">—</span>
+        }
+      </div>
+
+      {/* Capabilities */}
+      <div className="w-48 shrink-0">
+        <div className="flex flex-wrap gap-1">
+          {caps.slice(0, 3).map(c => (
+            <span key={c} className="rounded bg-zinc-100 px-1.5 py-0.5 text-[10px] text-zinc-500 dark:bg-white/10 dark:text-zinc-400">{c}</span>
+          ))}
+          {caps.length > 3 && (
+            <span className="text-[10px] text-zinc-400">+{caps.length - 3}</span>
+          )}
+          {caps.length === 0 && <span className="text-xs text-zinc-300 dark:text-zinc-600">—</span>}
+        </div>
+        {caps.length > 0 && agent.last_ping_at && (
+          <span className="text-[9px] text-zinc-400/60">as of {relativeTime(agent.last_ping_at)}</span>
+        )}
+      </div>
+
+      {/* Ping */}
+      <div className="w-24 shrink-0 flex items-center gap-1">
+        <span className={cn("h-1.5 w-1.5 rounded-full shrink-0", pm.dot)} />
+        <span className={cn("text-[11px] font-medium truncate", pm.cls)}>
+          {pingLabel(pingKey, agent.last_ping_ms)}
+        </span>
+      </div>
+
+      {/* Last seen */}
+      <div className="w-24 shrink-0 text-[11px] text-zinc-400">
+        {relativeTime(agent.last_seen_at)}
+      </div>
+
+      {/* Open tasks */}
+      <div className="w-14 shrink-0 flex items-center justify-center">
+        {(agent.open_task_count ?? 0) > 0 ? (
+          <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-700 dark:bg-amber-500/15 dark:text-amber-400">
+            {agent.open_task_count}
+          </span>
+        ) : (
+          <span className="text-[11px] text-zinc-300 dark:text-zinc-600">—</span>
+        )}
+      </div>
+
+      {/* Row actions — show on hover */}
+      <div className="w-16 shrink-0 flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+        <button
+          onClick={e => { e.stopPropagation(); onPing(); }}
+          disabled={pinging}
+          title="Ping"
+          className="grid h-6 w-6 place-items-center rounded text-zinc-400 hover:bg-zinc-200 hover:text-zinc-700 dark:hover:bg-white/10 transition-colors">
+          <Zap className="h-3.5 w-3.5" />
+        </button>
+        <button
+          onClick={e => { e.stopPropagation(); onDelete(); }}
+          title="Delete"
+          className="grid h-6 w-6 place-items-center rounded text-zinc-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-500/10 transition-colors">
+          <Trash2 className="h-3.5 w-3.5" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+
+// ─── Agent Credentials Panel ─────────────────────────────────────────────────
+const BASE_URL = "https://darshan.caringgems.in/api/backend/api/v1";
+
+function AgentCredentialsPanel({ agent }: { agent: ExtAgent }) {
+  const agentId  = agent.id;
+  const token    = agent.callback_token ?? "";
+  const inboxUrl = `${BASE_URL}/agents/${agentId}/inbox`;
+  const ackUrl   = `${BASE_URL}/agents/${agentId}/inbox/ack`;
+  const [revealed, setRevealed] = React.useState(false);
+  const [copied,   setCopied]   = React.useState<string | null>(null);
+
+  function copy(text: string, key: string) {
+    navigator.clipboard.writeText(text);
+    setCopied(key);
+    setTimeout(() => setCopied(null), 2000);
+  }
+
+
 
   function CopyRow({ label, value, id }: { label: string; value: string; id: string }) {
     return (
@@ -301,31 +498,6 @@ ACK_URL:   ${ackUrl}
       <CopyRow label="Inbox URL" value={inboxUrl} id="inbox_url" />
       <CopyRow label="Ack URL"   value={ackUrl}   id="ack_url"   />
 
-      {/* Instructions */}
-      <div className="rounded-xl bg-violet-50 p-3 dark:bg-violet-500/10">
-        <p className="mb-2 text-xs font-semibold text-violet-700 dark:text-violet-300">📋 Setup instructions for your friend</p>
-        <ol className="list-decimal list-inside space-y-1 text-xs text-violet-600 dark:text-violet-400">
-          <li>Install OpenClaw on their machine</li>
-          <li>Open <code className="rounded bg-violet-100 px-1 dark:bg-violet-500/20">~/.openclaw/workspace/HEARTBEAT.md</code></li>
-          <li>Paste the config block below into it</li>
-          <li>OpenClaw will start polling Darshan on every heartbeat (~30 min)</li>
-        </ol>
-      </div>
-
-      {/* Ready-to-paste block */}
-      <div className="flex flex-col gap-1.5">
-        <div className="flex items-center justify-between">
-          <span className="text-[10px] font-semibold uppercase tracking-wide text-zinc-400">Paste into HEARTBEAT.md</span>
-          <button onClick={() => copy(heartbeatBlock, "heartbeat")}
-            className="flex items-center gap-1 text-[10px] font-semibold text-brand-600 hover:underline">
-            {copied === "heartbeat"
-              ? <><Check className="h-3 w-3 text-emerald-500" /> Copied!</>
-              : <><Copy className="h-3 w-3" /> Copy all</>}
-          </button>
-        </div>
-        <pre className="overflow-x-auto whitespace-pre-wrap break-all rounded-xl bg-zinc-900 p-3 text-[10px] leading-relaxed text-zinc-300 dark:bg-black/40">
-          {heartbeatBlock}
-        </pre>
       </div>
     </div>
   );
