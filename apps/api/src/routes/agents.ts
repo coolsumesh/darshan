@@ -78,9 +78,11 @@ POST ACK_URL: { inbox_id, callback_token: "${token}", response: "ack" }`;
     return { ok: true, agent_id: agent.id, callback_token: token };
   });
 
-  // ── List all agents (personal — owned by current user) ─────────────────────
-  server.get("/api/v1/agents", async (req) => {
-    const userId = getRequestUser(req)?.userId ?? null;
+  // ── List agents ─────────────────────────────────────────────────────────────
+  // ?all=true → returns all agents (for team pickers); default → personal only
+  server.get<{ Querystring: { all?: string } }>("/api/v1/agents", async (req) => {
+    const userId  = getRequestUser(req)?.userId ?? null;
+    const showAll = req.query.all === "true" && userId !== null;
     const { rows } = await db.query(`
       select a.*,
              case when a.last_ping_at > now() - interval '1 hour' then 'online' else 'offline' end as status,
@@ -89,9 +91,9 @@ POST ACK_URL: { inbox_id, callback_token: "${token}", response: "ack" }`;
                 and t.status in ('proposed','approved','in-progress','review')
              ) as open_task_count
       from agents a
-      where ($1::uuid is null or a.owner_user_id = $1::uuid)
+      where ($1::boolean or $2::uuid is null or a.owner_user_id = $2::uuid)
       order by lower(a.name) asc
-    `, [userId]);
+    `, [showAll, userId]);
     return { ok: true, agents: rows };
   });
 

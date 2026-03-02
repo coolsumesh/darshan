@@ -209,16 +209,17 @@ export async function fetchAgents(): Promise<Agent[]> {
 
 // All agents across the platform — for project team pickers
 export async function fetchAgentsDirectory(): Promise<Agent[]> {
-  const data = await apiFetch<{ ok: boolean; agents: Agent[] }>("/api/v1/agents/directory");
+  const data = await apiFetch<{ ok: boolean; agents: Agent[] }>("/api/v1/agents?all=true");
   if (data?.ok && data.agents?.length) {
     return data.agents.map((a) => ({
       id: a.id, name: a.name,
-      desc: (a as unknown as { description?: string }).description ?? "",
+      desc: (a as unknown as { description?: string }).desc ?? (a as unknown as { description?: string }).description ?? "",
       status: a.status,
-      lastProfileUpdateAt: "",
+      lastProfileUpdateAt: (a as unknown as { updated_at?: string }).updated_at ?? "",
       agent_type: (a as unknown as { agent_type?: string }).agent_type,
       model:      (a as unknown as { model?: string }).model,
       platform:   (a as unknown as { platform?: string }).platform,
+      callback_token: (a as unknown as { callback_token?: string }).callback_token,
     }));
   }
   return [];
