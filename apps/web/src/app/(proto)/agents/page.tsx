@@ -1034,8 +1034,8 @@ export default function AgentsPage() {
           ) : (
             <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white dark:border-[#2D2A45] dark:bg-[#16132A]">
               {/* Column headers */}
-              <div className="flex items-center border-b border-zinc-100 bg-zinc-50 px-4 py-2 dark:border-[#2D2A45] dark:bg-[#0F0D1E]">
-                <div className="w-2 shrink-0 mr-3" />
+              <div className="flex items-center gap-3 border-b border-zinc-100 bg-zinc-50 px-4 py-2 dark:border-[#2D2A45] dark:bg-[#0F0D1E]">
+                <div className="w-2 shrink-0" />
                 {COLS.map(c => (
                   <div key={c.label} className={cn("text-[11px] font-semibold uppercase tracking-wide text-zinc-400", c.cls)}>
                     {c.label}
