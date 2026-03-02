@@ -943,7 +943,11 @@ Write-Host "  Path: C:\\Users\\<you>\\.openclaw\\workspace\\HEARTBEAT.md"
                   ) : (
                     <>
                       <span className="h-3 w-3 rounded-full bg-zinc-300 ring-4 ring-zinc-300/20 shrink-0" />
-                      <span className="text-sm text-zinc-500">Waiting for first ping… OpenClaw polls every ~30 min after you add the HEARTBEAT.md block.</span>
+                      <div className="flex flex-col gap-1.5">
+                        <span className="text-sm text-zinc-500">Waiting for first ping…</span>
+                        <span className="text-xs text-zinc-400">OpenClaw polls every ~30 min automatically. To ping now, ask the agent to run the heartbeat manually via any connected channel (Telegram, WhatsApp, etc.):</span>
+                        <code className="rounded-lg bg-zinc-100 dark:bg-white/5 px-2 py-1 text-xs font-mono text-zinc-600 dark:text-zinc-300">openclaw heartbeat run</code>
+                      </div>
                     </>
                   )}
                 </div>
