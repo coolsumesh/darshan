@@ -95,6 +95,19 @@ POST ACK_URL: { inbox_id, callback_token: "${token}", response: "ack" }`;
     return { ok: true, agents: rows };
   });
 
+  // ── Agent directory (all agents — for team pickers) ────────────────────────
+  server.get("/api/v1/agents/directory", async (req, reply) => {
+    const user = getRequestUser(req);
+    if (!user) return reply.status(401).send({ ok: false, error: "not authenticated" });
+    const { rows } = await db.query(`
+      select a.id, a.name, a.description, a.agent_type, a.model, a.platform, a.avatar_color,
+             case when a.last_ping_at > now() - interval '1 hour' then 'online' else 'offline' end as status
+      from agents a
+      order by lower(a.name) asc
+    `);
+    return { ok: true, agents: rows };
+  });
+
   // ── Get single agent ────────────────────────────────────────────────────────
   server.get<{ Params: { id: string } }>("/api/v1/agents/:id", async (req, reply) => {
     const { rows } = await db.query(

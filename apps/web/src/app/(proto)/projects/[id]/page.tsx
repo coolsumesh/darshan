@@ -18,7 +18,7 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/cn";
 import { PROJECTS, type Task, type TaskStatus, type Priority } from "@/lib/projects";
 import {
-  fetchProject, fetchTasks, fetchTeam, fetchAgents,
+  fetchProject, fetchTasks, fetchTeam, fetchAgents, fetchAgentsDirectory,
   createTask, updateTask, deleteTask,
   addTeamMember, removeTeamMember,
   fetchArchitecture, fetchTechSpec, updateProject,
@@ -2047,7 +2047,7 @@ function TeamTab({ projectId, canAdmin }: { projectId: string; canAdmin: boolean
 
   React.useEffect(() => {
     fetchTeam(projectId).then(setTeam);
-    fetchAgents().then((ag) => setAllAgents(ag));
+    fetchAgentsDirectory().then((ag) => setAllAgents(ag));
   }, [projectId]);
 
   const addedIds = new Set(team.map((m) => m.agentId));

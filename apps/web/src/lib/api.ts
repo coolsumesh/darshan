@@ -207,6 +207,23 @@ export async function fetchAgents(): Promise<Agent[]> {
   return [];
 }
 
+// All agents across the platform — for project team pickers
+export async function fetchAgentsDirectory(): Promise<Agent[]> {
+  const data = await apiFetch<{ ok: boolean; agents: Agent[] }>("/api/v1/agents/directory");
+  if (data?.ok && data.agents?.length) {
+    return data.agents.map((a) => ({
+      id: a.id, name: a.name,
+      desc: (a as unknown as { description?: string }).description ?? "",
+      status: a.status,
+      lastProfileUpdateAt: "",
+      agent_type: (a as unknown as { agent_type?: string }).agent_type,
+      model:      (a as unknown as { model?: string }).model,
+      platform:   (a as unknown as { platform?: string }).platform,
+    }));
+  }
+  return [];
+}
+
 export type Org = {
   id: string; name: string; slug: string; description?: string;
   status: string;
