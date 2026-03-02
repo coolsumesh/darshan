@@ -52,13 +52,13 @@ jobs:
             pm2 delete darshan-api 2>/dev/null || true
             pm2 start dist/index.js --name darshan-api --cwd /home/ubuntu/projects/darshan/apps/api
             sleep 3
-            pm2 ls
 
             # Web
             cd ../web
             pnpm install --frozen-lockfile
             pnpm build
-            pm2 restart darshan-web
+            pm2 delete darshan-web 2>/dev/null || true
+            pm2 start node_modules/next/dist/bin/next --name darshan-web --cwd /home/ubuntu/projects/darshan/apps/web -- start
 
             pm2 save
             echo "Deploy complete"
