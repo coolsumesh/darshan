@@ -2,20 +2,61 @@ name: Deploy to Production
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
 
 jobs:
   deploy:
-    name: Deploy to darshan.caringgems.in
     runs-on: ubuntu-latest
+
     steps:
-      - name: Deploy via SSH
-        uses: appleboy/ssh-action@v1.0.3
+      - uses: actions/checkout@v4
+
+      - name: Deploy API + Web
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          DATABASE_URL:          ${{ secrets.DATABASE_URL }}
+          DARSHAN_API_KEY:       ${{ secrets.DARSHAN_API_KEY }}
+          JWT_SECRET:            ${{ secrets.JWT_SECRET }}
+          GOOGLE_CLIENT_ID:      ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET:  ${{ secrets.GOOGLE_CLIENT_SECRET }}
         with:
-          host: ${{ secrets.DEPLOY_HOST }}
-          username: ${{ secrets.DEPLOY_USER }}
-          key: ${{ secrets.DEPLOY_SSH_KEY }}
-          port: 22
+          host: darshan.caringgems.in
+          username: ubuntu
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          envs: DATABASE_URL,DARSHAN_API_KEY,JWT_SECRET,GOOGLE_CLIENT_ID,GOOGLE_CLIENT_SECRET
           script: |
-            bash /home/ubuntu/deploy-darshan.sh 2>&1
+            set -e
+
+            # ── Recreate .env from GitHub Secrets ──────────────────────────
+            cat > /home/ubuntu/projects/darshan/apps/api/.env << ENVEOF
+            DATABASE_URL=${DATABASE_URL}
+            NODE_ENV=production
+            PORT=4000
+            HOST=0.0.0.0
+            APP_BASE_URL=https://darshan.caringgems.in
+            DARSHAN_API_KEY=${DARSHAN_API_KEY}
+            JWT_SECRET=${JWT_SECRET}
+            GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+            GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+            GOOGLE_REDIRECT_URI=https://darshan.caringgems.in/api/backend/api/v1/auth/google/callback
+            ENVEOF
+
+            # ── Pull latest code ───────────────────────────────────────────
+            source ~/.nvm/nvm.sh
+            cd /home/ubuntu/projects/darshan
+            git pull origin main
+
+            # ── Build + restart API ────────────────────────────────────────
+            cd apps/api
+            pnpm install --frozen-lockfile
+            pnpm build
+            pm2 restart darshan-api --update-env
+
+            # ── Build + restart Web ────────────────────────────────────────
+            cd ../web
+            pnpm install --frozen-lockfile
+            pnpm build
+            pm2 restart darshan-web --update-env
+
+            pm2 save
+            echo "✅ Deploy complete"
