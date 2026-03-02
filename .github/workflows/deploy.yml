@@ -11,54 +11,54 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Deploy API + Web
+      - name: Write .env to server
         uses: appleboy/ssh-action@v1.2.0
-        env:
-          DATABASE_URL:          ${{ secrets.DATABASE_URL }}
-          DARSHAN_API_KEY:       ${{ secrets.DARSHAN_API_KEY }}
-          JWT_SECRET:            ${{ secrets.JWT_SECRET }}
-          GOOGLE_CLIENT_ID:      ${{ secrets.GOOGLE_CLIENT_ID }}
-          GOOGLE_CLIENT_SECRET:  ${{ secrets.GOOGLE_CLIENT_SECRET }}
         with:
           host: darshan.caringgems.in
           username: ubuntu
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          envs: DATABASE_URL,DARSHAN_API_KEY,JWT_SECRET,GOOGLE_CLIENT_ID,GOOGLE_CLIENT_SECRET
           script: |
-            set -e
-
-            # ── Recreate .env from GitHub Secrets ──────────────────────────
-            cat > /home/ubuntu/projects/darshan/apps/api/.env << ENVEOF
-            DATABASE_URL=${DATABASE_URL}
+            cat > /home/ubuntu/projects/darshan/apps/api/.env << 'EOF'
+            DATABASE_URL=${{ secrets.DATABASE_URL }}
             NODE_ENV=production
             PORT=4000
             HOST=0.0.0.0
             APP_BASE_URL=https://darshan.caringgems.in
-            DARSHAN_API_KEY=${DARSHAN_API_KEY}
-            JWT_SECRET=${JWT_SECRET}
-            GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
-            GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+            DARSHAN_API_KEY=${{ secrets.DARSHAN_API_KEY }}
+            JWT_SECRET=${{ secrets.JWT_SECRET }}
+            GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }}
+            GOOGLE_CLIENT_SECRET=${{ secrets.GOOGLE_CLIENT_SECRET }}
             GOOGLE_REDIRECT_URI=https://darshan.caringgems.in/api/backend/api/v1/auth/google/callback
-            ENVEOF
+            EOF
 
-            # ── Pull latest code ───────────────────────────────────────────
+      - name: Deploy API + Web
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: darshan.caringgems.in
+          username: ubuntu
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          command_timeout: 10m
+          script: |
+            set -e
             source ~/.nvm/nvm.sh
             cd /home/ubuntu/projects/darshan
+
             git pull origin main
 
-            # ── Build + restart API ────────────────────────────────────────
+            # API
             cd apps/api
             pnpm install --frozen-lockfile
             pnpm build
-            # Delete stale process (wrong cwd/env) and start fresh from correct dir
             pm2 delete darshan-api 2>/dev/null || true
             pm2 start dist/index.js --name darshan-api --cwd /home/ubuntu/projects/darshan/apps/api
-            
-            # ── Build + restart Web ────────────────────────────────────────
+            sleep 3
+            pm2 ls
+
+            # Web
             cd ../web
             pnpm install --frozen-lockfile
             pnpm build
             pm2 restart darshan-web
 
             pm2 save
-            echo "✅ Deploy complete"
+            echo "Deploy complete"
