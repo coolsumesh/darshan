@@ -50,13 +50,15 @@ jobs:
             cd apps/api
             pnpm install --frozen-lockfile
             pnpm build
-            pm2 restart darshan-api --update-env
-
+            # Delete stale process (wrong cwd/env) and start fresh from correct dir
+            pm2 delete darshan-api 2>/dev/null || true
+            pm2 start dist/index.js --name darshan-api --cwd /home/ubuntu/projects/darshan/apps/api
+            
             # ── Build + restart Web ────────────────────────────────────────
             cd ../web
             pnpm install --frozen-lockfile
             pnpm build
-            pm2 restart darshan-web --update-env
+            pm2 restart darshan-web
 
             pm2 save
             echo "✅ Deploy complete"
