@@ -1,8 +1,8 @@
 // API client — calls the Darshan backend at /api/v1
 // Falls back to mock data if the API is unreachable (dev/offline mode).
 
-import { PROJECTS, TASKS, TEAM_MEMBERS, type Project, type Task, type TeamMember } from "./projects";
-import { AGENTS, type Agent } from "./agents";
+import { type Project, type Task, type TeamMember } from "./projects";
+import { type Agent } from "./agents";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "/api/backend";
 
@@ -55,8 +55,7 @@ export async function authMe(): Promise<AuthUser | null> {
 export async function fetchProjects(): Promise<Project[]> {
   const data = await apiFetch<{ ok: boolean; projects: Project[] }>("/api/v1/projects");
   if (data?.ok) return data.projects ?? [];
-  // fallback (API unreachable)
-  return PROJECTS;
+  return [];
 }
 
 export async function createProject(payload: {
@@ -72,7 +71,7 @@ export async function createProject(payload: {
 export async function fetchProject(id: string): Promise<Project | undefined> {
   const data = await apiFetch<{ ok: boolean; project: Project }>(`/api/v1/projects/${id}`);
   if (data?.ok && data.project) return data.project;
-  return PROJECTS.find((p) => p.id === id);
+  return undefined;
 }
 
 export async function updateProject(id: string, patch: Partial<{
@@ -159,9 +158,7 @@ export async function fetchTeam(projectId: string): Promise<TeamMemberWithAgent[
       },
     }));
   }
-  // fallback
-  const members = TEAM_MEMBERS[projectId] ?? [];
-  return members.map((m) => ({ ...m, agent: AGENTS.find((a) => a.id === m.agentId) }));
+  return [];
 }
 
 export async function addTeamMember(projectId: string, agentId: string, role: string): Promise<boolean> {
@@ -207,7 +204,7 @@ export async function fetchAgents(): Promise<Agent[]> {
       open_task_count: (a as unknown as { open_task_count?: number }).open_task_count ?? 0,
     }));
   }
-  return AGENTS;
+  return [];
 }
 
 export type Org = {
