@@ -714,9 +714,10 @@ function AgentOnboardPanel({ agent, onClose }: { agent: ExtAgent; onClose: () =>
 
   const envVars: Record<OsTab, string> = {
     linux: [
-      `export DARSHAN_BASE_URL="${baseUrl}"`,
-      `export AGENT_${agentSlug}_ID="${agentId}"`,
-      `export AGENT_${agentSlug}_TOKEN="${token}"`,
+      `echo 'export DARSHAN_BASE_URL="${baseUrl}"' >> ~/.bashrc`,
+      `echo 'export AGENT_${agentSlug}_ID="${agentId}"' >> ~/.bashrc`,
+      `echo 'export AGENT_${agentSlug}_TOKEN="${token}"' >> ~/.bashrc`,
+      `source ~/.bashrc`,
     ].join("\n"),
     windows_ps: [
       `[Environment]::SetEnvironmentVariable("DARSHAN_BASE_URL","${baseUrl}","User")`,
@@ -731,9 +732,9 @@ function AgentOnboardPanel({ agent, onClose }: { agent: ExtAgent; onClose: () =>
   };
 
   const profileFile: Record<OsTab, string> = {
-    linux:       "~/.bashrc  (or ~/.zshrc)",
-    windows_ps:  "run in PowerShell — persists to User scope",
-    windows_cmd: "run in CMD — persists to User scope",
+    linux:       "persists to ~/.bashrc — survives reboots",
+    windows_ps:  "persists to User scope — survives reboots",
+    windows_cmd: "persists to User scope — survives reboots",
   };
 
   const heartbeatBlock = `## Darshan Inbox — ${agent.name}
@@ -784,18 +785,21 @@ On every heartbeat:
   const linuxScript = `#!/bin/bash
 # Darshan agent setup — ${agent.name}
 # Run once on the machine where this agent lives.
+# Writes env vars permanently to ~/.bashrc (survives reboots).
 
 echo "Setting up ${agent.name} (${agentSlug})..."
 
-# 1. Persist env vars
-${envVars.linux}
+# 1. Write persistent env vars to ~/.bashrc
+echo 'export DARSHAN_BASE_URL="${baseUrl}"' >> ~/.bashrc
+echo 'export AGENT_${agentSlug}_ID="${agentId}"' >> ~/.bashrc
+echo 'export AGENT_${agentSlug}_TOKEN="${token}"' >> ~/.bashrc
 
-# Reload shell profile
-source ~/.bashrc 2>/dev/null || source ~/.zshrc 2>/dev/null || true
+# Reload so they're available in this session too
+source ~/.bashrc
 
-# 2. Add HEARTBEAT.md block (run this manually or paste the block from the Onboard panel)
 echo ""
-echo "✅ Env vars set. Now paste the HEARTBEAT.md block into your OpenClaw workspace."
+echo "✅ Env vars written to ~/.bashrc — permanent."
+echo "Now paste the HEARTBEAT.md block into your OpenClaw workspace:"
 echo "   Path: ~/.openclaw/workspace/HEARTBEAT.md"
 `;
 
