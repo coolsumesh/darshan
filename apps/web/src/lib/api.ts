@@ -102,7 +102,7 @@ export async function fetchTechSpec(projectId: string): Promise<string | null> {
 export async function fetchTasks(projectId: string): Promise<Task[]> {
   const data = await apiFetch<{ ok: boolean; tasks: Task[] }>(`/api/v1/projects/${projectId}/tasks`);
   if (data?.ok && data.tasks) return data.tasks;
-  return TASKS.filter((t) => t.projectId === projectId);
+  return [];
 }
 
 export async function createTask(projectId: string, payload: Partial<Task>): Promise<Task | null> {
