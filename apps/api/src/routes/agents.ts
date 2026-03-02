@@ -83,6 +83,7 @@ POST ACK_URL: { inbox_id, callback_token: "${token}", response: "ack" }`;
     const userId = getRequestUser(req)?.userId ?? null;
     const { rows } = await db.query(`
       select a.*,
+             case when a.last_ping_at > now() - interval '1 hour' then 'online' else 'offline' end as status,
              (select count(*)::int from tasks t
               where lower(t.assignee) = lower(a.name)
                 and t.status in ('proposed','approved','in-progress','review')
@@ -117,7 +118,7 @@ POST ACK_URL: { inbox_id, callback_token: "${token}", response: "ack" }`;
       `select o.*,
               count(distinct a.id)::int as agent_count,
               count(distinct p.id)::int as project_count,
-              count(distinct a.id) filter (where a.status = 'online')::int as online_count,
+              count(distinct a.id) filter (where a.last_ping_at > now() - interval '1 hour')::int as online_count,
               case
                 when $1::uuid is null           then 'member'
                 when o.owner_user_id = $1::uuid then 'owner'
@@ -165,7 +166,7 @@ POST ACK_URL: { inbox_id, callback_token: "${token}", response: "ack" }`;
       `select o.*,
               count(distinct a.id)::int  as agent_count,
               count(distinct p.id)::int  as project_count,
-              count(distinct a.id) filter (where a.status = 'online')::int as online_count,
+              count(distinct a.id) filter (where a.last_ping_at > now() - interval '1 hour')::int as online_count,
               case
                 when $2::uuid is null            then 'member'
                 when o.owner_user_id = $2::uuid  then 'owner'
