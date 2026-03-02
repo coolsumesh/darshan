@@ -213,7 +213,7 @@ export async function fetchAgentsDirectory(): Promise<Agent[]> {
   if (data?.ok && data.agents?.length) {
     return data.agents.map((a) => ({
       id: a.id, name: a.name,
-      desc: (a as unknown as { description?: string }).desc ?? (a as unknown as { description?: string }).description ?? "",
+      desc: (a as unknown as { desc?: string; description?: string }).desc ?? (a as unknown as { description?: string }).description ?? "",
       status: a.status,
       lastProfileUpdateAt: (a as unknown as { updated_at?: string }).updated_at ?? "",
       agent_type: (a as unknown as { agent_type?: string }).agent_type,
