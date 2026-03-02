@@ -4,7 +4,7 @@ import * as React from "react";
 import { createPortal } from "react-dom";
 import {
   Bot, Check, Plus, Search, X, Zap,
-  Activity, Trash2, Pencil, Key, Copy, Upload, Building2,
+  Activity, Trash2, Pencil, Key, Copy, Upload, Building2, Terminal, Download,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { Button } from "@/components/ui/button";
@@ -24,6 +24,7 @@ type ExtAgent = Agent & {
   last_ping_at?: string; last_seen_at?: string; callback_token?: string;
   last_ping_ms?: number;
   open_task_count?: number;
+  platform?: string;
 };
 type StatusFilter = "all" | "online" | "offline";
 
@@ -61,12 +62,23 @@ const PROVIDERS     = ["anthropic", "openai", "google", "mistral", "other"];
 const CAPABILITIES  = ["code", "design", "ux", "review", "api", "infra", "deploy", "plan", "data", "writing"];
 const POPULAR_MODELS = ["claude-sonnet-4-6", "claude-opus-4-6", "gpt-4o", "gpt-4-turbo", "gemini-1.5-pro", "mistral-large"];
 
-// ─── Platform helpers (derived from endpoint_type) ────────────────────────────
-function platformLabel(endpointType?: string): string {
-  if (!endpointType || endpointType === "openclaw_poll") return "OpenClaw";
-  if (endpointType === "webhook") return "Webhook";
-  if (endpointType === "manual")  return "Manual";
-  return endpointType;
+// ─── Platform config ──────────────────────────────────────────────────────────
+const PLATFORMS: { value: string; label: string }[] = [
+  { value: "openclaw",       label: "OpenClaw"         },
+  { value: "claude_code",    label: "Claude Code"      },
+  { value: "cursor",         label: "Cursor"           },
+  { value: "github_copilot", label: "GitHub Copilot"   },
+  { value: "crewai",         label: "CrewAI"           },
+  { value: "langchain",      label: "LangChain"        },
+  { value: "autogen",        label: "AutoGen"          },
+  { value: "agno",           label: "Agno"             },
+  { value: "custom",         label: "Custom"           },
+];
+const PLATFORM_LABEL: Record<string, string> = Object.fromEntries(
+  PLATFORMS.map(p => [p.value, p.label])
+);
+function platformLabel(platform?: string): string {
+  return PLATFORM_LABEL[platform ?? "openclaw"] ?? platform ?? "OpenClaw";
 }
 const PLATFORM_BADGE = "bg-violet-100 text-violet-700 dark:bg-violet-500/10 dark:text-violet-300";
 
@@ -119,7 +131,7 @@ function AgentRow({ agent, onInspect, onPing, onDelete, pinging }: {
       {/* Platform */}
       <div className="w-24 shrink-0">
         <span className={cn("rounded-full px-2 py-0.5 text-[10px] font-semibold", PLATFORM_BADGE)}>
-          {platformLabel((agent as unknown as { endpoint_type?: string }).endpoint_type)}
+          {platformLabel(agent.platform)}
         </span>
       </div>
 
@@ -357,8 +369,9 @@ function AgentDetailPanel({ agent, onClose, onPing, onRemove, onUpdated, pinging
   const [deleting, setDeleting] = React.useState(false);
 
   const [showCreds, setShowCreds]       = React.useState(false);
+  const [showOnboard, setShowOnboard]   = React.useState(false);
   const [editing, setEditing]           = React.useState(false);
-  React.useEffect(() => { setShowCreds(false); setEditing(false); }, [agent.id]);
+  React.useEffect(() => { setShowCreds(false); setShowOnboard(false); setEditing(false); }, [agent.id]);
   const [editName, setEditName]         = React.useState(agent.name);
   const [editDesc, setEditDesc]         = React.useState(agent.desc ?? "");
   const [editModel, setEditModel]       = React.useState(agent.model ?? "");
@@ -400,7 +413,7 @@ function AgentDetailPanel({ agent, onClose, onPing, onRemove, onUpdated, pinging
           {editing ? <span className="text-brand-600">Editing</span> : agent.name}
         </span>
         <span className={cn("shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold", PLATFORM_BADGE)}>
-          {platformLabel((agent as unknown as { endpoint_type?: string }).endpoint_type)}
+          {platformLabel(agent.platform)}
         </span>
         {!editing && (
           <>
@@ -412,6 +425,15 @@ function AgentDetailPanel({ agent, onClose, onPing, onRemove, onUpdated, pinging
                   : "text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-white/10"
               )}>
               <Key className="h-3.5 w-3.5" />
+            </button>
+            <button onClick={() => setShowOnboard(true)} title="Onboard"
+              className={cn(
+                "grid h-7 w-7 place-items-center rounded-lg transition-colors",
+                showOnboard
+                  ? "bg-brand-100 text-brand-600 dark:bg-brand-500/20 dark:text-brand-400"
+                  : "text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-white/10"
+              )}>
+              <Terminal className="h-3.5 w-3.5" />
             </button>
             <button onClick={startEdit} title="Edit"
               className="grid h-7 w-7 place-items-center rounded-lg text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-white/10 transition-colors">
@@ -459,6 +481,11 @@ function AgentDetailPanel({ agent, onClose, onPing, onRemove, onUpdated, pinging
             </div>
           </div>
         </div>,
+        document.body
+      )}
+
+      {showOnboard && createPortal(
+        <AgentOnboardPanel agent={agent} onClose={() => setShowOnboard(false)} />,
         document.body
       )}
 
@@ -613,7 +640,7 @@ function AgentDetailPanel({ agent, onClose, onPing, onRemove, onUpdated, pinging
               </div>
               <div className="mt-3 flex items-center gap-2 text-xs text-zinc-400">
                 <Activity className="h-3.5 w-3.5" />
-                <span className="font-mono">{(agent as unknown as { endpoint_type?: string }).endpoint_type ?? "openclaw_poll"}</span>
+                <span className="font-mono">{platformLabel(agent.platform)}</span>
               </div>
             </div>
 
@@ -653,22 +680,281 @@ function AgentDetailPanel({ agent, onClose, onPing, onRemove, onUpdated, pinging
   );
 }
 
+// ─── Agent Onboard Panel ─────────────────────────────────────────────────────
+type OsTab = "linux" | "windows_ps" | "windows_cmd";
+const OS_TABS: { id: OsTab; label: string }[] = [
+  { id: "linux",       label: "Linux / macOS"    },
+  { id: "windows_ps",  label: "Windows PS"       },
+  { id: "windows_cmd", label: "Windows CMD"      },
+];
+
+function AgentOnboardPanel({ agent, onClose }: { agent: ExtAgent; onClose: () => void }) {
+  const [os, setOs]       = React.useState<OsTab>("linux");
+  const [copied, setCopied] = React.useState<string | null>(null);
+
+  const agentSlug = agent.name.toUpperCase().replace(/[^A-Z0-9]/g, "_");
+  const agentId   = agent.id;
+  const token     = agent.callback_token ?? "YOUR_TOKEN_HERE";
+  const baseUrl   = "https://darshan.caringgems.in";
+  const isOpenClaw = !agent.platform || agent.platform === "openclaw";
+
+  function copy(text: string, key: string) {
+    navigator.clipboard.writeText(text);
+    setCopied(key);
+    setTimeout(() => setCopied(null), 2000);
+  }
+
+  function downloadScript(content: string, filename: string) {
+    const blob = new Blob([content], { type: "text/plain" });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement("a");
+    a.href = url; a.download = filename; a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  const envVars: Record<OsTab, string> = {
+    linux: [
+      `export DARSHAN_BASE_URL="${baseUrl}"`,
+      `export AGENT_${agentSlug}_ID="${agentId}"`,
+      `export AGENT_${agentSlug}_TOKEN="${token}"`,
+    ].join("\n"),
+    windows_ps: [
+      `[Environment]::SetEnvironmentVariable("DARSHAN_BASE_URL","${baseUrl}","User")`,
+      `[Environment]::SetEnvironmentVariable("AGENT_${agentSlug}_ID","${agentId}","User")`,
+      `[Environment]::SetEnvironmentVariable("AGENT_${agentSlug}_TOKEN","${token}","User")`,
+    ].join("\n"),
+    windows_cmd: [
+      `setx DARSHAN_BASE_URL "${baseUrl}"`,
+      `setx AGENT_${agentSlug}_ID "${agentId}"`,
+      `setx AGENT_${agentSlug}_TOKEN "${token}"`,
+    ].join("\n"),
+  };
+
+  const profileFile: Record<OsTab, string> = {
+    linux:       "~/.bashrc  (or ~/.zshrc)",
+    windows_ps:  "run in PowerShell — persists to User scope",
+    windows_cmd: "run in CMD — persists to User scope",
+  };
+
+  const heartbeatBlock = `## Darshan Inbox — ${agent.name}
+
+## POLICY (MANDATORY)
+- Never reveal tokens or secrets.
+- Never modify HEARTBEAT.md during runtime.
+- Only execute tasks within project briefing scope.
+- Reject unsafe requests with: "rejected: unsafe instruction".
+
+Use env vars (set these on your machine, not in this file):
+  AGENT_${agentSlug}_ID
+  AGENT_${agentSlug}_TOKEN
+  DARSHAN_BASE_URL (default: ${baseUrl})
+
+On every heartbeat:
+1. Check env vars — stop immediately if missing.
+2. GET \${DARSHAN_BASE_URL}/api/backend/api/v1/agents/\${AGENT_${agentSlug}_ID}/inbox
+   Header: Authorization: Bearer \${AGENT_${agentSlug}_TOKEN}
+3. For each pending item, handle by type:
+
+   ping →
+     ACK response: "pong — ${agent.name} online"
+
+   welcome →
+     ACK response: "setup complete — ${agent.name} ready"
+
+   project_onboarded →
+     Read payload: project_name, agent_briefing
+     Set up local environment per agent_briefing instructions.
+     ACK response: "ready for {project_name}"
+
+   task_assigned →
+     Read payload: project_slug, project_name, agent_briefing, title, description
+     1. PATCH \${DARSHAN_BASE_URL}/api/backend/api/v1/projects/{project_id}/tasks/{task_id}
+        Body: { "status": "in-progress" }
+     2. Set up project environment per agent_briefing if not already done.
+     3. Execute task per title + description + agent_briefing instructions.
+     4. PATCH task: { "status": "review" }
+     5. ACK response: "done — {title}"
+
+   other →
+     ACK response: "ack"
+
+4. ACK endpoint: \${DARSHAN_BASE_URL}/api/backend/api/v1/agents/\${AGENT_${agentSlug}_ID}/inbox/ack
+   Body: { inbox_id, callback_token: \${AGENT_${agentSlug}_TOKEN}, response }`;
+
+  const linuxScript = `#!/bin/bash
+# Darshan agent setup — ${agent.name}
+# Run once on the machine where this agent lives.
+
+echo "Setting up ${agent.name} (${agentSlug})..."
+
+# 1. Persist env vars
+${envVars.linux}
+
+# Reload shell profile
+source ~/.bashrc 2>/dev/null || source ~/.zshrc 2>/dev/null || true
+
+# 2. Add HEARTBEAT.md block (run this manually or paste the block from the Onboard panel)
+echo ""
+echo "✅ Env vars set. Now paste the HEARTBEAT.md block into your OpenClaw workspace."
+echo "   Path: ~/.openclaw/workspace/HEARTBEAT.md"
+`;
+
+  const psScript = `# Darshan agent setup — ${agent.name}
+# Run once in PowerShell on the machine where this agent lives.
+
+Write-Host "Setting up ${agent.name} (${agentSlug})..."
+
+# 1. Persist env vars (User scope)
+${envVars.windows_ps}
+
+Write-Host "Env vars set. Close and reopen PowerShell for changes to take effect."
+Write-Host ""
+Write-Host "Now paste the HEARTBEAT.md block into your OpenClaw workspace:"
+Write-Host "  Path: C:\\Users\\<you>\\.openclaw\\workspace\\HEARTBEAT.md"
+`;
+
+  const stepCls = "rounded-2xl bg-zinc-50 p-4 ring-1 ring-zinc-200 dark:bg-white/5 dark:ring-white/10 flex flex-col gap-3";
+  const stepNum = "flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-brand-600 text-[11px] font-bold text-white";
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <button className="absolute inset-0 bg-zinc-950/50 backdrop-blur-[2px]" onClick={onClose} />
+      <div className="relative z-10 flex w-full max-w-2xl flex-col rounded-2xl bg-white shadow-2xl ring-1 ring-zinc-200 dark:bg-[#16132A] dark:ring-[#2D2A45] max-h-[90vh]">
+
+        {/* Header */}
+        <div className="flex shrink-0 items-center gap-3 border-b border-zinc-200 px-5 py-4 dark:border-[#2D2A45]">
+          <div className="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-zinc-800 text-sm font-bold text-white">
+            {agent.name[0]?.toUpperCase()}
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="font-display text-sm font-bold text-zinc-900 dark:text-white">Onboard {agent.name}</div>
+            <div className="mt-0.5 text-xs text-zinc-500">Set up this agent on a machine — <span className={cn("font-semibold", PLATFORM_BADGE, "rounded px-1.5 py-0.5")}>{platformLabel(agent.platform)}</span></div>
+          </div>
+          <button onClick={onClose} className="grid h-7 w-7 place-items-center rounded-lg text-zinc-400 hover:bg-zinc-100 dark:hover:bg-white/10">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        {/* OS tabs — only for OpenClaw */}
+        {isOpenClaw && (
+          <div className="flex shrink-0 gap-0 border-b border-zinc-200 px-5 dark:border-[#2D2A45]">
+            {OS_TABS.map(t => (
+              <button key={t.id} onClick={() => setOs(t.id)}
+                className={cn(
+                  "border-b-2 px-4 py-2.5 text-xs font-semibold transition-colors -mb-px",
+                  os === t.id
+                    ? "border-brand-600 text-zinc-900 dark:text-white"
+                    : "border-transparent text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
+                )}>
+                {t.label}
+              </button>
+            ))}
+          </div>
+        )}
+
+        <div className="flex-1 overflow-y-auto p-5 flex flex-col gap-4">
+
+          {!isOpenClaw ? (
+            <div className="rounded-2xl bg-zinc-50 p-5 ring-1 ring-zinc-200 dark:bg-white/5 dark:ring-white/10 text-center">
+              <Terminal className="mx-auto mb-3 h-8 w-8 text-zinc-300" />
+              <p className="font-semibold text-zinc-700 dark:text-zinc-200">Setup instructions for <span className="text-brand-600">{platformLabel(agent.platform)}</span></p>
+              <p className="mt-1 text-sm text-zinc-400">Platform-specific onboarding coming soon. Use the Credentials panel to get your Agent ID and token, then follow your platform&apos;s documentation.</p>
+            </div>
+          ) : (
+            <>
+              {/* Step 1 */}
+              <div className={stepCls}>
+                <div className="flex items-center gap-2">
+                  <span className={stepNum}>1</span>
+                  <span className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">Set environment variables</span>
+                  <span className="ml-auto text-[10px] text-zinc-400">{profileFile[os]}</span>
+                </div>
+                <div className="relative">
+                  <pre className="overflow-x-auto rounded-xl bg-zinc-900 p-3 text-[11px] leading-relaxed text-zinc-300 dark:bg-black/40">
+                    {envVars[os]}
+                  </pre>
+                  <div className="absolute right-2 top-2 flex gap-1">
+                    <button onClick={() => copy(envVars[os], "env")}
+                      className="flex items-center gap-1 rounded-lg bg-zinc-700 px-2 py-1 text-[10px] text-zinc-300 hover:bg-zinc-600 transition-colors">
+                      {copied === "env" ? <><Check className="h-3 w-3 text-emerald-400" /> Copied</> : <><Copy className="h-3 w-3" /> Copy</>}
+                    </button>
+                    <button onClick={() => downloadScript(os === "windows_ps" ? psScript : linuxScript, os === "windows_ps" ? "setup-agent.ps1" : "setup-agent.sh")}
+                      className="flex items-center gap-1 rounded-lg bg-zinc-700 px-2 py-1 text-[10px] text-zinc-300 hover:bg-zinc-600 transition-colors">
+                      <Download className="h-3 w-3" /> Script
+                    </button>
+                  </div>
+                </div>
+                <p className="text-[11px] text-zinc-400">⚠️ Treat <code className="rounded bg-zinc-200 px-1 dark:bg-white/10">AGENT_{agentSlug}_TOKEN</code> like a password. Set it as a system env var — never paste it in a file.</p>
+              </div>
+
+              {/* Step 2 */}
+              <div className={stepCls}>
+                <div className="flex items-center gap-2">
+                  <span className={stepNum}>2</span>
+                  <span className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">Add to HEARTBEAT.md</span>
+                  <span className="ml-auto text-[10px] text-zinc-400">~/.openclaw/workspace/HEARTBEAT.md</span>
+                </div>
+                <div className="relative">
+                  <pre className="max-h-64 overflow-y-auto overflow-x-auto whitespace-pre-wrap break-all rounded-xl bg-zinc-900 p-3 text-[10px] leading-relaxed text-zinc-300 dark:bg-black/40">
+                    {heartbeatBlock}
+                  </pre>
+                  <button onClick={() => copy(heartbeatBlock, "heartbeat")}
+                    className="absolute right-2 top-2 flex items-center gap-1 rounded-lg bg-zinc-700 px-2 py-1 text-[10px] text-zinc-300 hover:bg-zinc-600 transition-colors">
+                    {copied === "heartbeat" ? <><Check className="h-3 w-3 text-emerald-400" /> Copied</> : <><Copy className="h-3 w-3" /> Copy</>}
+                  </button>
+                </div>
+                <p className="text-[11px] text-zinc-400">Note: the block references env vars by name. The actual token is never written to this file.</p>
+              </div>
+
+              {/* Step 3 */}
+              <div className={stepCls}>
+                <div className="flex items-center gap-2">
+                  <span className={stepNum}>3</span>
+                  <span className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">Verify</span>
+                </div>
+                <div className="flex items-center gap-3">
+                  {agent.status === "online" ? (
+                    <>
+                      <span className="h-3 w-3 rounded-full bg-emerald-400 ring-4 ring-emerald-400/20 animate-pulse shrink-0" />
+                      <span className="text-sm font-semibold text-emerald-600 dark:text-emerald-400">{agent.name} is live! ✅</span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="h-3 w-3 rounded-full bg-zinc-300 ring-4 ring-zinc-300/20 shrink-0" />
+                      <span className="text-sm text-zinc-500">Waiting for first ping… OpenClaw polls every ~30 min after you add the HEARTBEAT.md block.</span>
+                    </>
+                  )}
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Onboard Agent Modal ──────────────────────────────────────────────────────
 function OnboardAgentModal({ onDone, onClose }: {
   onDone: () => void; onClose: () => void;
 }) {
   const [name,         setName]         = React.useState("");
   const [desc,         setDesc]         = React.useState("");
-  const [endpointType, setEndpointType] = React.useState("openclaw_poll");
+  const [platform,     setPlatform]     = React.useState("openclaw");
   const [saving,       setSaving]       = React.useState(false);
   const [error,        setError]        = React.useState("");
+
+  // Derive endpoint_type from platform
+  const endpointType = platform === "openclaw" ? "openclaw_poll"
+                     : platform === "custom"    ? "manual"
+                     : "webhook";
 
   async function handleSave() {
     if (!name.trim()) { setError("Name is required."); return; }
     setSaving(true); setError("");
     const result = await createAgent({
       name: name.trim(), desc: desc.trim() || undefined,
-      agent_type: "ai_agent", endpoint_type: endpointType,
+      agent_type: "ai_agent", endpoint_type: endpointType, platform,
     });
     if (result) onDone();
     else { setError("Failed to create agent."); setSaving(false); }
@@ -676,10 +962,16 @@ function OnboardAgentModal({ onDone, onClose }: {
 
   const sel = "w-full rounded-xl border-0 bg-zinc-50 px-3 py-2.5 text-sm text-zinc-900 ring-1 ring-zinc-200 focus:outline-none dark:bg-zinc-900 dark:text-zinc-100 dark:ring-zinc-700";
 
-  const ENDPOINT_TIPS: Record<string, string> = {
-    openclaw_poll: "Agent polls OpenClaw for tasks — the standard connection method.",
-    webhook: "Darshan pushes tasks to the agent's endpoint URL.",
-    manual: "Agent is managed externally; tasks are handled outside of Darshan.",
+  const PLATFORM_TIPS: Record<string, string> = {
+    openclaw:       "Agent polls Darshan via OpenClaw heartbeat — the standard method.",
+    claude_code:    "Claude Code agent responds to tasks via webhook or poll.",
+    cursor:         "Cursor-based agent integrated via webhook.",
+    github_copilot: "GitHub Copilot agent — webhook delivery.",
+    crewai:         "CrewAI multi-agent framework — webhook delivery.",
+    langchain:      "LangChain / LangGraph agent — webhook delivery.",
+    autogen:        "Microsoft AutoGen agent — webhook delivery.",
+    agno:           "Agno (Phidata) lightweight agent — webhook delivery.",
+    custom:         "Custom or standalone agent — manually managed.",
   };
 
   return (
@@ -708,13 +1000,11 @@ function OnboardAgentModal({ onDone, onClose }: {
             <span className="font-semibold text-zinc-700 dark:text-zinc-300">Model &amp; capabilities</span> are self-reported by the agent on its first ping — no need to set them here.
           </div>
           <div>
-            <label className="mb-1.5 block text-xs font-semibold text-zinc-700 dark:text-zinc-300">Connection type</label>
-            <select value={endpointType} onChange={e => setEndpointType(e.target.value)} className={sel}>
-              <option value="openclaw_poll">OpenClaw (poll-based)</option>
-              <option value="webhook">Webhook (push)</option>
-              <option value="manual">Manual</option>
+            <label className="mb-1.5 block text-xs font-semibold text-zinc-700 dark:text-zinc-300">Platform</label>
+            <select value={platform} onChange={e => setPlatform(e.target.value)} className={sel}>
+              {PLATFORMS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
             </select>
-            <p className="mt-1 text-[11px] text-zinc-400">{ENDPOINT_TIPS[endpointType]}</p>
+            <p className="mt-1 text-[11px] text-zinc-400">{PLATFORM_TIPS[platform] ?? ""}</p>
           </div>
           {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-600 dark:bg-red-500/10">{error}</p>}
         </div>

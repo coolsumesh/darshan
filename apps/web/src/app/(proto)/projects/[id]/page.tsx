@@ -7,7 +7,7 @@ const Markdown = dynamic(() => import("react-markdown"), { ssr: false });
 import Link from "next/link";
 import {
   ArrowLeft, BookOpen, Calendar, ChevronDown, ExternalLink,
-  FileCode2, Filter, GripVertical, LayoutList, Zap,
+  FileCode2, Filter, GripVertical, LayoutList, Zap, Terminal,
   MoreHorizontal, Plus, Search, SortAsc, UserPlus, Users, X, Trash2, Check,
   Mail, Crown, UserCircle, Copy, Link as LinkIcon,
 } from "lucide-react";
@@ -21,7 +21,7 @@ import {
   fetchProject, fetchTasks, fetchTeam, fetchAgents,
   createTask, updateTask, deleteTask,
   addTeamMember, removeTeamMember,
-  fetchArchitecture, fetchTechSpec,
+  fetchArchitecture, fetchTechSpec, updateProject,
   pingAgent,
   fetchUserMembers, addUserMember, removeUserMember,
   fetchProjectInvites, createProjectInvite, revokeProjectInvite,
@@ -35,7 +35,7 @@ import {
 import { type Agent } from "@/lib/agents";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-type Tab = "table" | "team" | "architecture" | "tech-spec";
+type Tab = "table" | "team" | "architecture" | "tech-spec" | "agent-briefing";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const STATUS_META: Record<TaskStatus, { label: string; bg: string; text: string; dot: string }> = {
@@ -1456,6 +1456,80 @@ function TechSpecTab({ projectId }: { projectId: string }) {
   return <Card><CardHeader><CardTitle>Technical Specification</CardTitle></CardHeader><CardContent><MarkdownContent content={content} /></CardContent></Card>;
 }
 
+// ─── Agent Briefing Tab ───────────────────────────────────────────────────────
+function AgentBriefingTab({ projectId }: { projectId: string }) {
+  const [briefing, setBriefing] = React.useState<string>("");
+  const [loading,  setLoading]  = React.useState(true);
+  const [editing,  setEditing]  = React.useState(false);
+  const [draft,    setDraft]    = React.useState("");
+  const [saving,   setSaving]   = React.useState(false);
+
+  React.useEffect(() => {
+    fetchProject(projectId).then(p => {
+      const b = (p as unknown as { agent_briefing?: string }).agent_briefing ?? "";
+      setBriefing(b);
+      setLoading(false);
+    });
+  }, [projectId]);
+
+  async function handleSave() {
+    setSaving(true);
+    await updateProject(projectId, { agent_briefing: draft });
+    setBriefing(draft);
+    setSaving(false);
+    setEditing(false);
+  }
+
+  if (loading) return <div className="py-10 text-center text-sm text-zinc-500">Loading…</div>;
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between">
+        <div>
+          <CardTitle>Agent Briefing</CardTitle>
+          <p className="mt-1 text-sm text-zinc-500">
+            Tells agents assigned to this project what it is, what tools are needed, and how to execute tasks. Sent automatically when an agent joins the project.
+          </p>
+        </div>
+        {!editing && (
+          <Button variant="secondary" size="sm" onClick={() => { setDraft(briefing); setEditing(true); }}>
+            {briefing ? "Edit" : "Add Briefing"}
+          </Button>
+        )}
+      </CardHeader>
+      <CardContent>
+        {editing ? (
+          <div className="flex flex-col gap-3">
+            <textarea
+              autoFocus
+              rows={16}
+              value={draft}
+              onChange={e => setDraft(e.target.value)}
+              placeholder={`## What this project is\nA brief description of the project and its goals.\n\n## Tools needed\n- Git + Node.js\n- Set env var: PROJECT_DARSHAN_REPO_URL\n\n## How to execute tasks\n1. Clone the repo if not present\n2. Make the change per task description\n3. Commit and push`}
+              className="w-full rounded-xl border-0 bg-zinc-50 px-4 py-3 font-mono text-sm text-zinc-800 ring-1 ring-zinc-200 focus:outline-none focus:ring-2 focus:ring-brand-400/40 dark:bg-zinc-900 dark:text-zinc-200 dark:ring-zinc-700 resize-none"
+            />
+            <div className="flex justify-end gap-2">
+              <Button variant="secondary" size="sm" onClick={() => setEditing(false)}>Cancel</Button>
+              <Button variant="primary" size="sm" onClick={handleSave} disabled={saving}>
+                {saving ? "Saving…" : "Save"}
+              </Button>
+            </div>
+          </div>
+        ) : briefing ? (
+          <MarkdownContent content={briefing} />
+        ) : (
+          <div className="py-8 text-center">
+            <p className="text-sm text-zinc-400">No briefing yet. Add one so agents know how to work on this project.</p>
+            <Button variant="secondary" size="sm" className="mt-3" onClick={() => { setDraft(""); setEditing(true); }}>
+              Add Briefing
+            </Button>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 // ─── User Members Section (human collaborators) ───────────────────────────────
 const USER_ROLES = ["member", "admin"] as const;
 
@@ -2202,10 +2276,11 @@ function ProjectHeader({ project }: { project: { id: string; name: string; descr
 
 // ─── Tab Bar ──────────────────────────────────────────────────────────────────
 const TABS: { id: Tab; label: string; icon: React.ElementType }[] = [
-  { id: "table",        label: "Task List",    icon: LayoutList },
-  { id: "team",         label: "Team",         icon: Users      },
-  { id: "architecture", label: "Architecture", icon: BookOpen   },
-  { id: "tech-spec",    label: "Tech Spec",    icon: FileCode2  },
+  { id: "table",          label: "Task List",      icon: LayoutList },
+  { id: "team",           label: "Team",           icon: Users      },
+  { id: "architecture",   label: "Architecture",   icon: BookOpen   },
+  { id: "tech-spec",      label: "Tech Spec",      icon: FileCode2  },
+  { id: "agent-briefing", label: "Agent Briefing", icon: Terminal   },
 ];
 
 // ─── Toolbar ──────────────────────────────────────────────────────────────────
@@ -2302,9 +2377,10 @@ export default function ProjectDetailPage(props: { params: Promise<{ id: string 
             newTaskSignal={newTaskSignal}
           />
         )}
-        {activeTab === "team"          && <TeamTab         projectId={project.id} canAdmin={(project as unknown as { my_role?: string }).my_role !== "member"} />}
-        {activeTab === "architecture"  && <ArchitectureTab projectId={project.slug ?? project.id} />}
-        {activeTab === "tech-spec"     && <TechSpecTab     projectId={project.slug ?? project.id} />}
+        {activeTab === "team"            && <TeamTab           projectId={project.id} canAdmin={(project as unknown as { my_role?: string }).my_role !== "member"} />}
+        {activeTab === "architecture"   && <ArchitectureTab  projectId={project.slug ?? project.id} />}
+        {activeTab === "tech-spec"      && <TechSpecTab      projectId={project.slug ?? project.id} />}
+        {activeTab === "agent-briefing" && <AgentBriefingTab projectId={project.id} />}
       </div>
     </div>
   );

@@ -15,25 +15,26 @@ export async function registerAgents(server: FastifyInstance, db: pg.Pool) {
   server.post<{
     Body: {
       name: string; desc?: string; model?: string; provider?: string;
-      agent_type?: string; capabilities?: string[]; endpoint_type?: string;
+      agent_type?: string; capabilities?: string[]; endpoint_type?: string; platform?: string;
     };
   }>("/api/v1/agents", async (req, reply) => {
     const user = getRequestUser(req);
     if (!user) return reply.status(401).send({ ok: false, error: "not authenticated" });
 
     const { name, desc, model, provider, agent_type = "ai_agent",
-            capabilities = [], endpoint_type = "openclaw_poll" } = req.body ?? {};
+            capabilities = [], endpoint_type = "openclaw_poll",
+            platform = "openclaw" } = req.body ?? {};
     if (!name?.trim()) return reply.status(400).send({ ok: false, error: "name required" });
 
     const token = randomBytes(32).toString("hex");
     const { rows } = await db.query(
       `insert into agents
          (name, description, status, owner_user_id, agent_type, model, provider,
-          capabilities, endpoint_type, endpoint_config, callback_token, ping_status)
-       values ($1,$2,'offline',$3,$4,$5,$6,$7,$8,$9,$10,'unknown') returning *`,
+          capabilities, endpoint_type, endpoint_config, callback_token, ping_status, platform)
+       values ($1,$2,'offline',$3,$4,$5,$6,$7,$8,$9,$10,'unknown',$11) returning *`,
       [name.trim(), desc ?? null, user.userId, agent_type,
        model ?? null, provider ?? null, JSON.stringify(capabilities),
-       endpoint_type, JSON.stringify({}), token]
+       endpoint_type, JSON.stringify({}), token, platform]
     );
     const agent = rows[0];
 
@@ -431,14 +432,14 @@ ACK_URL: ${ackUrl}
   // ── Update agent ────────────────────────────────────────────────────────────
   server.patch<{ Params: { id: string }; Body: {
     name?: string; desc?: string; agent_type?: string;
-    model?: string; provider?: string; capabilities?: string[]; endpoint_type?: string;
+    model?: string; provider?: string; capabilities?: string[]; endpoint_type?: string; platform?: string;
   } }>("/api/v1/agents/:id", async (req, reply) => {
     const { rows } = await db.query(
       `select id from agents where id::text = $1`, [req.params.id]
     );
     if (!rows.length) return reply.status(404).send({ ok: false, error: "agent not found" });
 
-    const { name, desc, agent_type, model, provider, capabilities, endpoint_type } = req.body ?? {};
+    const { name, desc, agent_type, model, provider, capabilities, endpoint_type, platform } = req.body ?? {};
     const fields: string[] = [];
     const vals: unknown[]  = [];
     let i = 1;
@@ -449,6 +450,7 @@ ACK_URL: ${ackUrl}
     if (provider     !== undefined) { fields.push(`provider = $${i++}`);      vals.push(provider); }
     if (capabilities !== undefined) { fields.push(`capabilities = $${i++}`);  vals.push(JSON.stringify(capabilities)); }
     if (endpoint_type!== undefined) { fields.push(`endpoint_type = $${i++}`); vals.push(endpoint_type); }
+    if (platform     !== undefined) { fields.push(`platform = $${i++}`);      vals.push(platform); }
     if (!fields.length) return reply.status(400).send({ ok: false, error: "nothing to update" });
 
     vals.push(rows[0].id);

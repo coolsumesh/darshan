@@ -75,6 +75,17 @@ export async function fetchProject(id: string): Promise<Project | undefined> {
   return PROJECTS.find((p) => p.id === id);
 }
 
+export async function updateProject(id: string, patch: Partial<{
+  name: string; description: string; status: string; progress: number; agent_briefing: string;
+}>): Promise<boolean> {
+  const data = await apiFetch<{ ok: boolean }>(`/api/v1/projects/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  return data?.ok ?? false;
+}
+
 // ── Docs (Architecture + Tech Spec) ──────────────────────────────────────────
 
 export async function fetchArchitecture(projectId: string): Promise<string | null> {
@@ -229,7 +240,7 @@ export async function createOrg(payload: { name: string; slug: string; descripti
 
 export async function createAgent(payload: {
   name: string; desc?: string; agent_type?: string;
-  model?: string; provider?: string; capabilities?: string[]; endpoint_type?: string;
+  model?: string; provider?: string; capabilities?: string[]; endpoint_type?: string; platform?: string;
 }): Promise<{ agent_id: string; callback_token: string } | null> {
   const data = await apiFetch<{ ok: boolean; agent_id: string; callback_token: string }>("/api/v1/agents", {
     method: "POST",
@@ -263,7 +274,7 @@ export async function fetchAgentProjects(agentId: string): Promise<AgentProject[
 
 export async function updateAgent(agentId: string, payload: Partial<{
   name: string; desc: string; agent_type: string;
-  model: string; provider: string; capabilities: string[]; endpoint_type: string;
+  model: string; provider: string; capabilities: string[]; endpoint_type: string; platform: string;
 }>): Promise<boolean> {
   const data = await apiFetch<{ ok: boolean }>(`/api/v1/agents/${agentId}`, {
     method: "PATCH",

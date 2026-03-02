@@ -145,7 +145,7 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
       const access = await checkAccess(req.params.id, req, "admin");
       if ("deny" in access) return reply.status(access.deny).send({ ok: false, error: access.deny === 404 ? "project not found" : "forbidden" });
 
-      const allowed = ["name", "description", "status", "progress"];
+      const allowed = ["name", "description", "status", "progress", "agent_briefing"];
       const sets: string[] = [];
       const vals: unknown[] = [];
       for (const key of allowed) {
@@ -253,19 +253,30 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
       [agentName]
     );
     if (!agents[0]) return;
+
+    // Fetch project slug + briefing so agent has full context
+    const { rows: projects } = await db.query(
+      `select slug, name, agent_briefing from projects where id = $1 limit 1`,
+      [task.project_id]
+    );
+    const project = projects[0] ?? {};
+
     await db.query(
       `insert into agent_inbox (agent_id, type, payload) values ($1, 'task_assigned', $2)`,
       [
         agents[0].id,
         JSON.stringify({
-          task_id:     task.id,
-          project_id:  task.project_id,
-          title:       task.title,
-          description: task.description,
-          priority:    task.priority,
-          status:      task.status,
-          due_date:    task.due_date ?? null,
-          assigned_to: agentName,
+          task_id:         task.id,
+          project_id:      task.project_id,
+          project_slug:    project.slug    ?? null,
+          project_name:    project.name    ?? null,
+          agent_briefing:  project.agent_briefing ?? null,
+          title:           task.title,
+          description:     task.description,
+          priority:        task.priority,
+          status:          task.status,
+          due_date:        task.due_date ?? null,
+          assigned_to:     agentName,
         }),
       ]
     );
@@ -465,6 +476,30 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
          returning *`,
         [access.projectId, agent_id, role]
       );
+
+      // Send project_onboarded inbox item so agent learns about this project
+      const { rows: projects } = await db.query(
+        `select id, slug, name, description, agent_briefing from projects where id = $1`,
+        [access.projectId]
+      );
+      if (projects[0]) {
+        const p = projects[0];
+        await db.query(
+          `insert into agent_inbox (agent_id, type, payload) values ($1, 'project_onboarded', $2)`,
+          [
+            agent_id,
+            JSON.stringify({
+              project_id:     p.id,
+              project_slug:   p.slug,
+              project_name:   p.name,
+              description:    p.description,
+              agent_briefing: p.agent_briefing,
+              role,
+            }),
+          ]
+        );
+      }
+
       return reply.status(201).send({ ok: true, member: rows[0] });
     }
   );
