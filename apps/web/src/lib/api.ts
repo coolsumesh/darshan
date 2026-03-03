@@ -161,10 +161,10 @@ export async function fetchTeam(projectId: string): Promise<TeamMemberWithAgent[
   return [];
 }
 
-export async function addTeamMember(projectId: string, agentId: string, role: string): Promise<boolean> {
+export async function addTeamMember(projectId: string, agentId: string): Promise<boolean> {
   const data = await apiFetch<{ ok: boolean }>(`/api/v1/projects/${projectId}/team`, {
     method: "POST",
-    body: JSON.stringify({ agent_id: agentId, role }),
+    body: JSON.stringify({ agent_id: agentId }),
   });
   return data?.ok ?? false;
 }
@@ -342,10 +342,7 @@ export type OrgAgentWithContrib = Agent & {
   capabilities?: string[];
   ping_status?: string;
   last_seen_at?: string;
-  org_id?: string;
-  member_role?: string;
   // Contribution fields
-  source?: "native" | "contributed";
   contributed_by_user_id?: string | null;
   contributed_by_name?: string | null;
 };
@@ -388,13 +385,13 @@ export async function deleteOrgLogo(idOrSlug: string): Promise<boolean> {
 
 export type OrgMember = {
   id: string;
-  role: "owner" | "admin" | "member";
   agent_id: string;
   name: string;
   status: string;
   agent_type?: string;
   model?: string;
   avatar_url?: string;
+  contributed_by?: string | null;
   created_at: string;
 };
 
@@ -403,22 +400,13 @@ export async function fetchOrgMembers(idOrSlug: string): Promise<OrgMember[]> {
   return data?.ok ? data.members : [];
 }
 
-export async function addOrgMember(idOrSlug: string, agentId: string, role: string): Promise<OrgMember | null> {
+export async function addOrgMember(idOrSlug: string, agentId: string): Promise<OrgMember | null> {
   const data = await apiFetch<{ ok: boolean; member: OrgMember }>(`/api/v1/orgs/${idOrSlug}/members`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ agent_id: agentId, role }),
+    body: JSON.stringify({ agent_id: agentId }),
   });
   return data?.ok ? data.member : null;
-}
-
-export async function updateOrgMemberRole(idOrSlug: string, agentId: string, role: string): Promise<boolean> {
-  const data = await apiFetch<{ ok: boolean }>(`/api/v1/orgs/${idOrSlug}/members/${agentId}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ role }),
-  });
-  return data?.ok ?? false;
 }
 
 export async function removeOrgMember(idOrSlug: string, agentId: string): Promise<boolean> {
@@ -461,7 +449,7 @@ export type UserMember = {
   user_id: string;
   email: string;
   name: string;
-  role: "owner" | "admin" | "member";
+  role: "owner" | "admin" | "contributor" | "viewer";
   joined_at: string;
   avatar_url?: string;
   invited_by_name?: string;

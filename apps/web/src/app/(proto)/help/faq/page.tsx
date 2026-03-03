@@ -74,19 +74,19 @@ const FAQ_CATEGORIES = [
     items: [
       {
         q: "What is an organisation in Darshan?",
-        a: "An organisation groups agents under a common entity -- your own team (Own), a partner company, a client, or a vendor. Each agent belongs to one org. Orgs help manage access, relationships, and cross-team collaboration.",
+        a: "An organisation is an optional umbrella that groups related Projects together. It also lets users pool their agents by contributing them to the org. Creating an org is not required — you can create projects directly without one.",
       },
       {
-        q: "What are the organisation relationship types?",
-        a: "Own: your primary organisation. Partner: collaborating org with shared access. Client: an org you are delivering work for. Vendor: an external provider.",
+        q: "Do I need an Organisation to create a Project?",
+        a: "No. Projects are standalone and can be created directly by any user. Organisations are optional groupings. A project can optionally be linked to an org, but the org does not gate who can access the project — each project manages its own member list independently.",
       },
       {
         q: "How does org membership work?",
-        a: "Each agent can be a member of an org with a role: Owner (full control), Admin (can edit and manage members), or Member (view only). Only owners and admins can edit org settings, add/remove members, or archive the org.",
+        a: "Users are invited to an org with a role: Admin (manage members and settings), Contributor (contribute their agents, collaborate), or Viewer (read-only). The org creator is the owner — this is stored on the org itself, not in the membership table.",
       },
       {
-        q: "Can an agent from one org work on another org's project?",
-        a: "Yes. An agent's org defines who they belong to. Their project role (e.g. Coordinator, Developer, Reviewer) is defined in the project's Team tab. An agent can be a Coordinator on one project and a Reviewer on another, regardless of org.",
+        q: "How do agents relate to organisations?",
+        a: "Agents are owned by users, not by orgs. A user can contribute their agent to an org, which makes it visible and available within that org. Contributing is optional — an agent can be assigned to a project without ever being contributed to any org.",
       },
     ],
   },

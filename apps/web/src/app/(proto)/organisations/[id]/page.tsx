@@ -14,7 +14,7 @@ import { Input } from "@/components/ui/input";
 import {
   fetchOrg, updateOrg, deleteOrg, uploadOrgLogo, deleteOrgLogo,
   fetchOrgAgents, fetchOrgProjects, fetchOrgMembers, addOrgMember,
-  updateOrgMemberRole, removeOrgMember, fetchAgents,
+  removeOrgMember, fetchAgents,
   fetchOrgUserMembers, removeOrgUserMember,
   inviteOrgUser, fetchPendingOrgInvites, revokeOrgInvite,
   contributeAgentToOrg, withdrawAgentFromOrg, authMe,
@@ -201,12 +201,11 @@ function AvatarEditor({ name, avatarUrl, color, onChange, onUpload, onRemove, si
 function AgentPickerModal({ title, excludeIds, onPick, onClose }: {
   title: string;
   excludeIds: string[];
-  onPick: (agent: Agent, role?: string) => void;
+  onPick: (agent: Agent) => void;
   onClose: () => void;
 }) {
   const [agents, setAgents] = React.useState<Agent[]>([]);
   const [query, setQuery] = React.useState("");
-  const [selectedRole, setSelectedRole] = React.useState("member");
 
   React.useEffect(() => {
     fetchAgents().then(all => setAgents(all.filter(a => !excludeIds.includes(a.id))));
@@ -225,23 +224,17 @@ function AgentPickerModal({ title, excludeIds, onPick, onClose }: {
             <X className="h-4 w-4" />
           </button>
         </div>
-        <div className="p-4 border-b border-zinc-100 dark:border-[#2D2A45] flex gap-2">
+        <div className="p-4 border-b border-zinc-100 dark:border-[#2D2A45]">
           <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search agents…"
             autoFocus
-            className="flex-1 rounded-xl bg-zinc-50 px-3 py-2 text-sm ring-1 ring-zinc-200 focus:outline-none focus:ring-brand-400/40 dark:bg-zinc-900 dark:ring-zinc-700 dark:text-zinc-100" />
-          <select value={selectedRole} onChange={e => setSelectedRole(e.target.value)}
-            className="rounded-xl bg-zinc-50 px-3 py-2 text-sm ring-1 ring-zinc-200 focus:outline-none dark:bg-zinc-900 dark:ring-zinc-700 dark:text-zinc-100">
-            <option value="member">Member</option>
-            <option value="admin">Admin</option>
-            <option value="owner">Owner</option>
-          </select>
+            className="w-full rounded-xl bg-zinc-50 px-3 py-2 text-sm ring-1 ring-zinc-200 focus:outline-none focus:ring-brand-400/40 dark:bg-zinc-900 dark:ring-zinc-700 dark:text-zinc-100" />
         </div>
         <div className="flex-1 overflow-y-auto p-2">
           {filtered.length === 0 && (
             <p className="py-8 text-center text-sm text-zinc-400">No agents available</p>
           )}
           {filtered.map(a => (
-            <button key={a.id} onClick={() => onPick(a, selectedRole)}
+            <button key={a.id} onClick={() => onPick(a)}
               className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left hover:bg-zinc-100 dark:hover:bg-white/10 transition-colors">
               <AgentAvatar name={a.name} size={36} />
               <div className="min-w-0 flex-1">
@@ -481,18 +474,13 @@ function MembersTab({ orgId, canEdit }: { orgId: string; canEdit: boolean }) {
     setUsers(prev => prev.filter(u => u.user_id !== userId));
   }
 
-  async function handleRoleChange(agentId: string, role: string) {
-    await updateOrgMemberRole(orgId, agentId, role);
-    setMembers(prev => prev.map(m => m.agent_id === agentId ? { ...m, role: role as OrgMember["role"] } : m));
-  }
-
   async function handleRemove(agentId: string) {
     await removeOrgMember(orgId, agentId);
     setMembers(prev => prev.filter(m => m.agent_id !== agentId));
   }
 
-  async function handleAdd(agent: Agent, role?: string) {
-    const member = await addOrgMember(orgId, agent.id, role ?? "member");
+  async function handleAdd(agent: Agent) {
+    const member = await addOrgMember(orgId, agent.id);
     if (member) {
       setMembers(prev => [...prev, { ...member, name: agent.name, status: agent.status }]);
     }
@@ -700,21 +688,9 @@ function MembersTab({ orgId, canEdit }: { orgId: string; canEdit: boolean }) {
                 </div>
               </div>
               <div className="flex items-center gap-2 shrink-0">
-                {canEdit ? (
-                  <select
-                    value={m.role}
-                    onChange={e => handleRoleChange(m.agent_id, e.target.value)}
-                    className="rounded-lg bg-zinc-100 px-2 py-1 text-xs font-semibold text-zinc-700 focus:outline-none dark:bg-white/10 dark:text-zinc-300 cursor-pointer">
-                    <option value="owner">Owner</option>
-                    <option value="admin">Admin</option>
-                    <option value="member">Member</option>
-                  </select>
-                ) : (
-                  <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-semibold capitalize", ROLE_BADGE[m.role])}>
-                    {m.role === "owner" && <Crown className="inline h-3 w-3 mr-0.5" />}
-                    {m.role}
-                  </span>
-                )}
+                <span className="rounded-full bg-violet-100 px-2 py-0.5 text-[11px] font-semibold text-violet-700 dark:bg-violet-500/10 dark:text-violet-300">
+                  Contributed
+                </span>
                 {canEdit && (
                   <button onClick={() => handleRemove(m.agent_id)}
                     className="grid h-6 w-6 place-items-center rounded-lg text-zinc-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-500/10 transition-colors">

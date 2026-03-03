@@ -4,8 +4,8 @@ import { broadcast } from "../broadcast.js";
 import { getRequestUser } from "./auth.js";
 
 // ── Role hierarchy ─────────────────────────────────────────────────────────────
-type ProjectRole = "owner" | "admin" | "member";
-const ROLE_RANK: Record<ProjectRole, number> = { owner: 3, admin: 2, member: 1 };
+type ProjectRole = "owner" | "admin" | "contributor" | "viewer";
+const ROLE_RANK: Record<ProjectRole, number> = { owner: 4, admin: 3, contributor: 2, viewer: 1 };
 
 export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
 
@@ -17,7 +17,7 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
   async function checkAccess(
     idOrSlug: string,
     req: unknown,
-    minRole: ProjectRole = "member"
+    minRole: ProjectRole = "viewer"
   ): Promise<{ projectId: string; role: ProjectRole } | { deny: 404 | 403 }> {
     const { rows } = await db.query(
       `select id, owner_user_id, org_id from projects where id::text = $1 or lower(slug) = lower($1)`,
@@ -76,7 +76,7 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
                   where oum.org_id = p.org_id and oum.user_id = $1::uuid
                   limit 1
                 )
-                else                           'member'
+                else                           'viewer'
               end as my_role
        from projects p
        left join project_agents pt on pt.project_id = p.id
@@ -467,14 +467,15 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
       const access = await checkAccess(req.params.id, req, "admin");
       if ("deny" in access) return reply.status(access.deny).send({ ok: false, error: access.deny === 404 ? "project not found" : "forbidden" });
 
-      const { agent_id, role = "Member" } = req.body;
+      const { agent_id } = req.body;
       if (!agent_id) return reply.status(400).send({ ok: false, error: "agent_id required" });
+      const userId = getRequestUser(req)?.userId ?? null;
       const { rows } = await db.query(
-        `insert into project_agents (project_id, agent_id, role)
+        `insert into project_agents (project_id, agent_id, added_by)
          values ($1, $2, $3)
-         on conflict (project_id, agent_id) do update set role = excluded.role
+         on conflict (project_id, agent_id) do nothing
          returning *`,
-        [access.projectId, agent_id, role]
+        [access.projectId, agent_id, userId]
       );
 
       // Send project_onboarded inbox item so agent learns about this project
@@ -546,7 +547,7 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
       const access = await checkAccess(req.params.id, req, "admin");
       if ("deny" in access) return reply.status(access.deny).send({ ok: false, error: access.deny === 404 ? "project not found" : "forbidden" });
 
-      const { email, role = "member" } = req.body;
+      const { email, role = "contributor" } = req.body;
       if (!email) return reply.status(400).send({ ok: false, error: "email required" });
 
       const { rows: users } = await db.query(
@@ -590,7 +591,7 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
       const access = await checkAccess(req.params.id, req, "admin");
       if ("deny" in access) return reply.status(access.deny).send({ ok: false, error: access.deny === 404 ? "project not found" : "forbidden" });
 
-      const { email, role = "member" } = req.body ?? {};
+      const { email, role = "contributor" } = req.body ?? {};
       const invitedBy = getRequestUser(req)?.userId ?? null;
 
       const { rows } = await db.query(

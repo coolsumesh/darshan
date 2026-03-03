@@ -4,10 +4,10 @@ import Link from "next/link";
 
 const CHECKLIST = [
   {
-    step: "Create an organisation",
-    detail: "Go to Organisations and create your first org. Give it a name and slug (e.g. myteam). This is the namespace all your agents and projects live under.",
-    href: "/organisations",
-    cta: "Go to Organisations",
+    step: "Create a project (or an organisation)",
+    detail: "Projects are standalone — go to Projects and create one directly. Organisations are optional groupings; create one if you want to umbrella multiple projects or pool agents as a team.",
+    href: "/projects",
+    cta: "Go to Projects",
   },
   {
     step: "Onboard your first agent",

@@ -113,12 +113,12 @@ POST ACK_URL: { inbox_id, callback_token: "${token}", response: "ack" }`;
   // ── Get single agent ────────────────────────────────────────────────────────
   server.get<{ Params: { id: string } }>("/api/v1/agents/:id", async (req, reply) => {
     const { rows } = await db.query(
-      `select a.*, o.name as org_name, o.slug as org_slug,
+      `select a.*,
               (select count(*)::int from tasks t
                where lower(t.assignee) = lower(a.name)
                  and t.status in ('proposed','approved','in-progress','review')
               ) as open_task_count
-       from agents a left join organisations o on o.id = a.org_id
+       from agents a
        where a.id::text = $1`,
       [req.params.id]
     );
@@ -131,9 +131,9 @@ POST ACK_URL: { inbox_id, callback_token: "${token}", response: "ack" }`;
     const userId = getRequestUser(req)?.userId ?? null;
     const { rows: orgs } = await db.query(
       `select o.*,
-              count(distinct a.id)::int as agent_count,
+              count(distinct oa.agent_id)::int as agent_count,
               count(distinct p.id)::int as project_count,
-              count(distinct a.id) filter (where a.last_ping_at > now() - interval '1 hour')::int as online_count,
+              count(distinct oa.agent_id) filter (where a_ping.last_ping_at > now() - interval '1 hour')::int as online_count,
               case
                 when $1::uuid is null           then 'member'
                 when o.owner_user_id = $1::uuid then 'owner'
@@ -144,8 +144,9 @@ POST ACK_URL: { inbox_id, callback_token: "${token}", response: "ack" }`;
                 )
               end as my_role
        from organisations o
-       left join agents   a on a.org_id = o.id
-       left join projects p on p.org_id = o.id
+       left join org_agents oa     on oa.org_id = o.id and oa.status = 'active'
+       left join agents     a_ping on a_ping.id = oa.agent_id
+       left join projects   p      on p.org_id = o.id
        where ($1::uuid is null
           or o.owner_user_id = $1::uuid
           or exists (select 1 from org_users oum where oum.org_id = o.id and oum.user_id = $1::uuid))
@@ -179,9 +180,9 @@ POST ACK_URL: { inbox_id, callback_token: "${token}", response: "ack" }`;
     const userId = getRequestUser(req)?.userId ?? null;
     const { rows } = await db.query(
       `select o.*,
-              count(distinct a.id)::int  as agent_count,
-              count(distinct p.id)::int  as project_count,
-              count(distinct a.id) filter (where a.last_ping_at > now() - interval '1 hour')::int as online_count,
+              count(distinct oa.agent_id)::int  as agent_count,
+              count(distinct p.id)::int          as project_count,
+              count(distinct oa.agent_id) filter (where a_ping.last_ping_at > now() - interval '1 hour')::int as online_count,
               case
                 when $2::uuid is null            then 'member'
                 when o.owner_user_id = $2::uuid  then 'owner'
@@ -193,8 +194,9 @@ POST ACK_URL: { inbox_id, callback_token: "${token}", response: "ack" }`;
                 )
               end as my_role
        from organisations o
-       left join agents   a on a.org_id = o.id
-       left join projects p on p.org_id = o.id
+       left join org_agents oa     on oa.org_id = o.id and oa.status = 'active'
+       left join agents     a_ping on a_ping.id = oa.agent_id
+       left join projects   p      on p.org_id = o.id
        where o.id::text = $1 or o.slug = $1
        group by o.id`,
       [req.params.id, userId]
@@ -228,13 +230,13 @@ POST ACK_URL: { inbox_id, callback_token: "${token}", response: "ack" }`;
   // ── Delete org (only if 0 agents) ──────────────────────────────────────────
   server.delete<{ Params: { id: string } }>("/api/v1/orgs/:id", async (req, reply) => {
     const { rows } = await db.query(
-      `select o.id, count(a.id)::int as agent_count
-       from organisations o left join agents a on a.org_id = o.id
+      `select o.id, count(oa.agent_id)::int as agent_count
+       from organisations o left join org_agents oa on oa.org_id = o.id and oa.status = 'active'
        where o.id::text = $1 or o.slug = $1 group by o.id`,
       [req.params.id]
     );
     if (!rows.length) return reply.status(404).send({ ok: false, error: "org not found" });
-    if (rows[0].agent_count > 0) return reply.status(409).send({ ok: false, error: "Cannot delete org with agents assigned. Remove agents first." });
+    if (rows[0].agent_count > 0) return reply.status(409).send({ ok: false, error: "Cannot delete org with contributed agents. Withdraw all agents first." });
     await db.query(`delete from organisations where id = $1`, [rows[0].id]);
     return { ok: true };
   });
@@ -249,8 +251,7 @@ POST ACK_URL: { inbox_id, callback_token: "${token}", response: "ack" }`;
       `select distinct p.id, p.name, p.slug, p.status, p.progress
        from projects p
        join project_agents pt on pt.project_id = p.id
-       join agents a        on a.id = pt.agent_id
-       where a.org_id = $1
+       join org_agents oa     on oa.agent_id = pt.agent_id and oa.org_id = $1 and oa.status = 'active'
        order by p.name asc`,
       [orgs[0].id]
     );
@@ -267,7 +268,6 @@ POST ACK_URL: { inbox_id, callback_token: "${token}", response: "ack" }`;
     const { rows } = await db.query(
       `select a.id, a.name, a.status, a.agent_type, a.model, a.provider,
               a.capabilities, a.ping_status, a.last_seen_at,
-              oa.role as member_role,
               oa.contributed_by as contributed_by_user_id,
               u.name as contributed_by_name
        from org_agents oa
@@ -313,8 +313,8 @@ POST ACK_URL: { inbox_id, callback_token: "${token}", response: "ack" }`;
 
       // Upsert — re-activate if previously withdrawn
       const { rows } = await db.query(`
-        insert into org_agents (org_id, agent_id, role, contributed_by, status)
-        values ($1, $2, 'member', $3, 'active')
+        insert into org_agents (org_id, agent_id, contributed_by, status)
+        values ($1, $2, $3, 'active')
         on conflict (org_id, agent_id) do update set status = 'active', contributed_by = $3
         returning *
       `, [orgId, agentId, user.userId]);
@@ -380,16 +380,16 @@ POST ACK_URL: { inbox_id, callback_token: "${token}", response: "ack" }`;
     const userId = getRequestUser(req)?.userId ?? null;
     const token = randomBytes(32).toString("hex");
     const { rows } = await db.query(
-      `insert into agents (name, description, status, org_id, owner_user_id, agent_type, model, provider, capabilities, endpoint_type, endpoint_config, callback_token, ping_status)
-       values ($1,$2,'offline',$3,$4,$5,$6,$7,$8,$9,$10,$11,'unknown') returning *`,
-      [name, desc ?? null, req.params.id, userId, agent_type, model ?? null, provider ?? null,
+      `insert into agents (name, description, status, owner_user_id, agent_type, model, provider, capabilities, endpoint_type, endpoint_config, callback_token, ping_status)
+       values ($1,$2,'offline',$3,$4,$5,$6,$7,$8,$9,$10,'unknown') returning *`,
+      [name, desc ?? null, userId, agent_type, model ?? null, provider ?? null,
        JSON.stringify(capabilities), endpoint_type, JSON.stringify(endpoint_config), token]
     );
 
-    // Also link agent to the org via org_agents
+    // Also contribute agent to the org
     await db.query(
-      `insert into org_agents (org_id, agent_id, role, contributed_by, status)
-       values ($1, $2, 'member', $3, 'active')
+      `insert into org_agents (org_id, agent_id, contributed_by, status)
+       values ($1, $2, $3, 'active')
        on conflict (org_id, agent_id) do nothing`,
       [req.params.id, rows[0].id, userId]
     );
@@ -659,14 +659,12 @@ ACK_URL: ${ackUrl}
     );
     if (!orgs.length) return reply.status(404).send({ ok: false, error: "org not found" });
     const { rows } = await db.query(
-      `select om.id, om.role, om.created_at,
-              a.id as agent_id, a.name, a.status, a.agent_type, a.model, a.org_id
+      `select om.id, om.contributed_by, om.status, om.created_at,
+              a.id as agent_id, a.name, a.status as agent_status, a.agent_type, a.model
        from org_agents om
        join agents a on a.id = om.agent_id
-       where om.org_id = $1
-       order by
-         case om.role when 'owner' then 0 when 'admin' then 1 else 2 end,
-         lower(a.name) asc`,
+       where om.org_id = $1 and om.status = 'active'
+       order by lower(a.name) asc`,
       [orgs[0].id]
     );
     return { ok: true, members: rows };
@@ -677,18 +675,19 @@ ACK_URL: ${ackUrl}
     Params: { id: string };
     Body: { agent_id: string; role?: string };
   }>("/api/v1/orgs/:id/members", async (req, reply) => {
-    const { agent_id, role = "member" } = req.body;
+    const { agent_id } = req.body;
+    const userId = getRequestUser(req)?.userId ?? null;
     const { rows: orgs } = await db.query(
       `select id from organisations where id::text = $1 or slug = $1`, [req.params.id]
     );
     if (!orgs.length) return reply.status(404).send({ ok: false, error: "org not found" });
     try {
       const { rows } = await db.query(
-        `insert into org_agents (org_id, agent_id, role)
-         values ($1, $2, $3)
-         on conflict (org_id, agent_id) do update set role = excluded.role
+        `insert into org_agents (org_id, agent_id, contributed_by, status)
+         values ($1, $2, $3, 'active')
+         on conflict (org_id, agent_id) do update set status = 'active', contributed_by = $3
          returning *`,
-        [orgs[0].id, agent_id, role]
+        [orgs[0].id, agent_id, userId]
       );
       return { ok: true, member: rows[0] };
     } catch {
@@ -696,24 +695,7 @@ ACK_URL: ${ackUrl}
     }
   });
 
-  // ── Update member role ──────────────────────────────────────────────────────
-  server.patch<{
-    Params: { id: string; agentId: string };
-    Body: { role: string };
-  }>("/api/v1/orgs/:id/members/:agentId", async (req, reply) => {
-    const { rows: orgs } = await db.query(
-      `select id from organisations where id::text = $1 or slug = $1`, [req.params.id]
-    );
-    if (!orgs.length) return reply.status(404).send({ ok: false, error: "org not found" });
-    const { rows } = await db.query(
-      `update org_agents set role = $3
-       where org_id = $1 and agent_id::text = $2
-       returning *`,
-      [orgs[0].id, req.params.agentId, req.body.role]
-    );
-    if (!rows.length) return reply.status(404).send({ ok: false, error: "member not found" });
-    return { ok: true, member: rows[0] };
-  });
+  // ── Update member (no-op — org_agents has no role; use withdraw/contribute instead) ─
 
   // ── Remove member ───────────────────────────────────────────────────────────
   server.delete<{ Params: { id: string; agentId: string } }>("/api/v1/orgs/:id/members/:agentId", async (req, reply) => {
@@ -738,15 +720,16 @@ ACK_URL: ${ackUrl}
     if (!orgs.length) return reply.status(404).send({ ok: false, error: "org not found" });
     const { rows } = await db.query(
       `select * from (
-         -- org owner: gets all org-owned ai agents nested
+         -- org owner: gets their contributed agents
          select u.id::text as id, 'owner'::text as role, o.created_at,
                 u.id as user_id, u.name, u.email, u.avatar_url,
                 (select json_agg(json_build_object(
                    'id', a.id, 'name', a.name, 'status', a.status,
                    'model', a.model, 'ping_status', a.ping_status
                  ) order by lower(a.name))
-                 from agents a
-                 where a.org_id = o.id and a.agent_type = 'ai_agent') as agents
+                 from org_agents oa
+                 join agents a on a.id = oa.agent_id
+                 where oa.org_id = o.id and oa.contributed_by = u.id and oa.status = 'active') as agents
          from organisations o
          join users u on u.id = o.owner_user_id
          where o.id = $1
@@ -1013,10 +996,10 @@ ACK_URL: ${ackUrl}
     // Create agent
     const token = randomBytes(32).toString("hex");
     const { rows } = await db.query(
-      `insert into agents (name, description, status, org_id, agent_type, model, provider,
+      `insert into agents (name, description, status, agent_type, model, provider,
                            capabilities, endpoint_type, endpoint_config, callback_token, ping_status)
-       values ($1,$2,'offline',$3,$4,$5,$6,$7,$8,$9,$10,'unknown') returning *`,
-      [name.trim(), desc ?? null, inv.org_id, agent_type, model ?? null, provider,
+       values ($1,$2,'offline',$3,$4,$5,$6,$7,$8,$9,'unknown') returning *`,
+      [name.trim(), desc ?? null, agent_type, model ?? null, provider,
        JSON.stringify(capabilities), endpoint_type, JSON.stringify({}), token]
     );
     const agent = rows[0];

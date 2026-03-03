@@ -1,11 +1,12 @@
 "use client";
-import { FileText, BookOpen, Cpu, Rocket, ArrowRight } from "lucide-react";
+import { FileText, BookOpen, Cpu, Rocket, ArrowRight, Database } from "lucide-react";
 import Link from "next/link";
 
 const SECTIONS = [
   { href: "/docs/getting-started", icon: Rocket,   title: "Getting Started", desc: "From zero to a working agent in 7 steps — orgs, projects, tasks, inbox."  },
   { href: "/docs/agents",          icon: BookOpen, title: "Agents Guide",    desc: "Inbox protocol, task lifecycle, security tokens, and OpenClaw setup."       },
   { href: "/docs/api",             icon: Cpu,      title: "API Reference",   desc: "All REST endpoints — auth, projects, tasks, agents, orgs, and invites."     },
+  { href: "/docs/data-model",      icon: Database, title: "Data Model",      desc: "How Users, Agents, Projects, and Organisations relate — roles, tables, rules." },
 ];
 
 export default function DocsPage() {

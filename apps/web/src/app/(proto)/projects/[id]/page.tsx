@@ -1531,7 +1531,7 @@ function AgentBriefingTab({ projectId }: { projectId: string }) {
 }
 
 // ─── User Members Section (human collaborators) ───────────────────────────────
-const USER_ROLES = ["member", "admin"] as const;
+const USER_ROLES = ["contributor", "admin", "viewer"] as const;
 
 function UserMembersSection({ projectId, canAdmin }: { projectId: string; canAdmin: boolean }) {
   const [members,        setMembers]        = React.useState<UserMember[]>([]);
@@ -1539,12 +1539,12 @@ function UserMembersSection({ projectId, canAdmin }: { projectId: string; canAdm
   const [showAdd,        setShowAdd]        = React.useState(false);
   const [showInvite,     setShowInvite]     = React.useState(false);
   const [email,          setEmail]          = React.useState("");
-  const [role,           setRole]           = React.useState<"member" | "admin">("member");
+  const [role,           setRole]           = React.useState<"contributor" | "admin" | "viewer">("contributor");
   const [adding,         setAdding]         = React.useState(false);
   const [addError,       setAddError]       = React.useState<string | null>(null);
   const [removing,       setRemoving]       = React.useState<string | null>(null);
   const [inviteEmail,    setInviteEmail]    = React.useState("");
-  const [inviteRole,     setInviteRole]     = React.useState<"member" | "admin">("member");
+  const [inviteRole,     setInviteRole]     = React.useState<"contributor" | "admin" | "viewer">("contributor");
   const [generating,     setGenerating]     = React.useState(false);
   const [generatedInvite, setGeneratedInvite] = React.useState<ProjectInvite | null>(null);
   const [copied,         setCopied]         = React.useState(false);
@@ -1603,9 +1603,10 @@ function UserMembersSection({ projectId, canAdmin }: { projectId: string; canAdm
   }
 
   const ROLE_META: Record<string, { label: string; bg: string; text: string }> = {
-    owner:  { label: "Owner",  bg: "bg-amber-100",  text: "text-amber-700"  },
-    admin:  { label: "Admin",  bg: "bg-violet-100", text: "text-violet-700" },
-    member: { label: "Member", bg: "bg-zinc-100",   text: "text-zinc-600"   },
+    owner:       { label: "Owner",       bg: "bg-amber-100",   text: "text-amber-700"   },
+    admin:       { label: "Admin",       bg: "bg-violet-100",  text: "text-violet-700"  },
+    contributor: { label: "Contributor", bg: "bg-brand-100",   text: "text-brand-700"   },
+    viewer:      { label: "Viewer",      bg: "bg-zinc-100",    text: "text-zinc-600"    },
   };
 
   return (
@@ -1651,7 +1652,7 @@ function UserMembersSection({ projectId, canAdmin }: { projectId: string; canAdm
             </div>
             <select
               value={role}
-              onChange={(e) => setRole(e.target.value as "member" | "admin")}
+              onChange={(e) => setRole(e.target.value as "contributor" | "admin" | "viewer")}
               className="rounded-lg border-0 bg-white px-2 py-2 text-sm ring-1 ring-zinc-200 focus:outline-none focus:ring-2 focus:ring-brand-400/40 dark:bg-zinc-900 dark:ring-zinc-700 dark:text-zinc-100"
             >
               {USER_ROLES.map((r) => <option key={r} value={r}>{r.charAt(0).toUpperCase() + r.slice(1)}</option>)}
@@ -1688,7 +1689,7 @@ function UserMembersSection({ projectId, canAdmin }: { projectId: string; canAdm
                 </div>
                 <select
                   value={inviteRole}
-                  onChange={(e) => setInviteRole(e.target.value as "member" | "admin")}
+                  onChange={(e) => setInviteRole(e.target.value as "contributor" | "admin" | "viewer")}
                   className="rounded-lg border-0 bg-white px-2 py-2 text-sm ring-1 ring-zinc-200 focus:outline-none focus:ring-2 focus:ring-sky-400/40 dark:bg-zinc-900 dark:ring-zinc-700 dark:text-zinc-100"
                 >
                   {USER_ROLES.map((r) => <option key={r} value={r}>{r.charAt(0).toUpperCase() + r.slice(1)}</option>)}
@@ -1774,7 +1775,7 @@ function UserMembersSection({ projectId, canAdmin }: { projectId: string; canAdm
           </div>
         ) : (
           members.map((m, i) => {
-            const meta  = ROLE_META[m.role] ?? ROLE_META.member;
+            const meta  = ROLE_META[m.role] ?? ROLE_META.contributor;
             const isMe  = me?.id === m.user_id;
             return (
               <div key={m.user_id} className={cn(
@@ -2052,8 +2053,8 @@ function TeamTab({ projectId, canAdmin }: { projectId: string; canAdmin: boolean
 
   const addedIds = new Set(team.map((m) => m.agentId));
 
-  async function handleAdd(agentId: string, role = "Member"): Promise<boolean> {
-    const ok = await addTeamMember(projectId, agentId, role);
+  async function handleAdd(agentId: string): Promise<boolean> {
+    const ok = await addTeamMember(projectId, agentId);
     if (ok) fetchTeam(projectId).then(setTeam);
     return ok;
   }
