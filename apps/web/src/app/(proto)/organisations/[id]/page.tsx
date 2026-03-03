@@ -743,9 +743,7 @@ function AgentsTab({ orgId, canEdit, currentRole }: { orgId: string; canEdit: bo
     authMe().then(u => setMeId(u?.id ?? null));
   }, [orgId]);
 
-  const nativeAgents     = agents.filter(a => !a.source || a.source === "native");
-  const contributedAgents = agents.filter(a => a.source === "contributed");
-  const existingIds      = agents.map(a => a.id);
+  const existingIds = agents.map(a => a.id);
 
   async function handleContribute(agent: Agent) {
     const ok = await contributeAgentToOrg(orgId, agent.id);
@@ -764,69 +762,11 @@ function AgentsTab({ orgId, canEdit, currentRole }: { orgId: string; canEdit: bo
   return (
     <div className="flex flex-col gap-6">
 
-      {/* ── Org-owned agents ── */}
-      <div className="flex flex-col gap-3">
-        <div className="flex items-center justify-between">
-          <p className="text-xs font-semibold uppercase tracking-wide text-zinc-400">
-            Org Agents ({nativeAgents.length})
-          </p>
-          {canEdit && (
-            <Link href="/agents"
-              className="flex items-center gap-1.5 rounded-xl bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-700 transition-colors">
-              <Plus className="h-3.5 w-3.5" /> Add Agent
-            </Link>
-          )}
-        </div>
-
-        {nativeAgents.length === 0 ? (
-          <div className="flex flex-col items-center py-8">
-            <Bot className="mb-3 h-8 w-8 text-zinc-300" />
-            <p className="text-sm font-medium text-zinc-500">No org agents yet</p>
-            {canEdit && (
-              <Link href="/agents" className="mt-3 text-sm text-brand-600 hover:underline">+ Onboard agent</Link>
-            )}
-          </div>
-        ) : (
-          <div className="flex flex-col gap-2">
-            {nativeAgents.map(a => {
-              const isOnline = a.status === "online";
-              return (
-                <div key={a.id} className="flex items-center gap-3 rounded-xl bg-zinc-50 px-4 py-3 dark:bg-white/5">
-                  <div className="relative">
-                    <AgentAvatar name={a.name} size={36} />
-                    <span className={cn("absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full ring-1 ring-white dark:ring-[#16132A]",
-                      isOnline ? "bg-emerald-400" : "bg-zinc-400")} />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="text-sm font-semibold text-zinc-900 dark:text-white">{a.name}</div>
-                    <div className="text-[11px] text-zinc-400">
-                      {a.agent_type?.replace("ai_", "") ?? "agent"}
-                      {a.model && ` · ${a.model}`}
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <span className={cn("text-[11px] font-semibold", isOnline ? "text-emerald-600" : "text-zinc-400")}>
-                      {isOnline ? "🟢 Online" : "⬤ Offline"}
-                    </span>
-                    <Link href="/agents"
-                      className="grid h-6 w-6 place-items-center rounded-lg text-zinc-400 hover:text-brand-600 transition-colors">
-                      <ExternalLink className="h-3.5 w-3.5" />
-                    </Link>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-
-      <div className="h-px bg-zinc-100 dark:bg-white/5" />
-
       {/* ── Contributed agents ── */}
       <div className="flex flex-col gap-3">
         <div className="flex items-center justify-between">
           <p className="text-xs font-semibold uppercase tracking-wide text-zinc-400">
-            Contributed Agents ({contributedAgents.length})
+            Agents ({agents.length})
           </p>
           {canContribute && (
             <button onClick={() => setShowContributePicker(true)}
@@ -840,7 +780,7 @@ function AgentsTab({ orgId, canEdit, currentRole }: { orgId: string; canEdit: bo
           Members can lend their own agents to this org for project work, without transferring ownership.
         </p>
 
-        {contributedAgents.length === 0 ? (
+        {agents.length === 0 ? (
           <div className="flex flex-col items-center py-8">
             <Share2 className="mb-3 h-7 w-7 text-zinc-300" />
             <p className="text-sm font-medium text-zinc-500">No contributed agents yet</p>
@@ -852,7 +792,7 @@ function AgentsTab({ orgId, canEdit, currentRole }: { orgId: string; canEdit: bo
           </div>
         ) : (
           <div className="flex flex-col gap-2">
-            {contributedAgents.map(a => {
+            {agents.map(a => {
               const isOnline = a.status === "online";
               const isMyContrib = a.contributed_by_user_id === meId;
               const canWithdraw = isMyContrib || canEdit;
