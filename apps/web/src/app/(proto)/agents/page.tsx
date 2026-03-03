@@ -573,18 +573,7 @@ function AgentDetailPanel({ agent, onClose, onPing, onRemove, onUpdated, pinging
               </div>
             )}
 
-            {agent.org_name && (
-              <div>
-                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-400">Organisation</p>
-                <div className="flex items-center gap-2 rounded-xl bg-zinc-50 px-3 py-2 dark:bg-white/5">
-                  <Building2 className="h-4 w-4 text-zinc-400 shrink-0" />
-                  <span className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">{agent.org_name}</span>
-                  <span className="ml-auto rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-semibold text-sky-700 dark:bg-sky-500/10 dark:text-sky-300 capitalize">
-                    {agent.org_type}
-                  </span>
-                </div>
-              </div>
-            )}
+
 
             {/* Capabilities */}
             <div>

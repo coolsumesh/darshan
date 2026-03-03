@@ -10,7 +10,7 @@ export type Project = {
   lastActivity: string; // ISO date
   teamSize: number;
   progress: number; // 0-100
-  my_role?: "owner" | "member" | null; // set by API for scoped users
+  my_role?: "owner" | "admin" | "contributor" | "viewer" | null; // set by API for scoped users
 };
 
 export type Priority = "urgent" | "high" | "medium" | "low";

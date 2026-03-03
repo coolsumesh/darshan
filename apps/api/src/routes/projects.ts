@@ -444,14 +444,12 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
       const access = await checkAccess(req.params.id, req, "viewer");
       if ("deny" in access) return reply.status(access.deny).send({ ok: false, error: access.deny === 404 ? "project not found" : "forbidden" });
       const { rows } = await db.query(
-        `select pt.id, pt.role, pt.joined_at,
+        `select pt.id, pt.joined_at,
                 a.id as agent_id, a.name, a.status, a.description,
                 a.agent_type, a.model, a.provider, a.capabilities,
-                a.ping_status, a.last_ping_ms, a.last_seen_at,
-                o.name as org_name, o.slug as org_slug
+                a.ping_status, a.last_ping_ms, a.last_seen_at
          from project_agents pt
          join agents a on a.id = pt.agent_id
-         left join organisations o on o.id = a.org_id
          where pt.project_id = $1
          order by pt.joined_at asc`,
         [access.projectId]

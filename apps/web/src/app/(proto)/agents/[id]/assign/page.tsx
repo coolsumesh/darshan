@@ -9,9 +9,10 @@ import {
   contributeAgentToOrg, withdrawAgentFromOrg,
   fetchProjects, fetchAgentProjects,
   addTeamMember, removeTeamMember,
-  type Org, type Project, type AgentProject,
+  type Org, type AgentProject,
 } from "@/lib/api";
 import type { Agent } from "@/lib/agents";
+import type { Project } from "@/lib/projects";
 
 // ─── Status dot ───────────────────────────────────────────────────────────────
 function statusDot(status?: string) {

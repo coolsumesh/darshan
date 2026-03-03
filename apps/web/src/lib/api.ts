@@ -137,7 +137,7 @@ export async function fetchTeam(projectId: string): Promise<TeamMemberWithAgent[
   if (data?.ok && data.team) {
     return data.team.map((m) => ({
       agentId: (m as unknown as { agent_id: string }).agent_id ?? m.agentId,
-      role: m.role,
+      role: "",
       joinedAt: (m as unknown as { joined_at: string }).joined_at ?? m.joinedAt,
       agent: {
         id:                   (m as unknown as { agent_id: string }).agent_id ?? m.id,
@@ -153,8 +153,6 @@ export async function fetchTeam(projectId: string): Promise<TeamMemberWithAgent[
         ping_status:   (m as unknown as { ping_status?: string }).ping_status,
         last_ping_ms:  (m as unknown as { last_ping_ms?: number }).last_ping_ms,
         last_seen_at:  (m as unknown as { last_seen_at?: string }).last_seen_at,
-        org_name:      (m as unknown as { org_name?: string }).org_name,
-        org_slug:      (m as unknown as { org_slug?: string }).org_slug,
       },
     }));
   }
