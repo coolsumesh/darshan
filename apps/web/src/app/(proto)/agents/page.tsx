@@ -12,7 +12,8 @@ import { Input } from "@/components/ui/input";
 import {
   fetchAgents, createAgent, pingAgent,
   fetchAgentProjects, deleteAgent, updateAgent,
-  type AgentProject,
+  fetchOrgs, fetchOrgAgents, contributeAgentToOrg, withdrawAgentFromOrg,
+  type AgentProject, type Org,
 } from "@/lib/api";
 import type { Agent } from "@/lib/agents";
 
@@ -367,6 +368,10 @@ function AgentDetailPanel({ agent, onClose, onPing, onRemove, onUpdated, pinging
   const [projects, setProjects] = React.useState<AgentProject[]>([]);
   const [confirmDelete, setConfirmDelete] = React.useState(false);
   const [deleting, setDeleting] = React.useState(false);
+  const [orgs, setOrgs] = React.useState<Org[]>([]);
+  const [contributedOrgIds, setContributedOrgIds] = React.useState<Set<string>>(new Set());
+  const [orgsLoading, setOrgsLoading] = React.useState(false);
+  const [togglingOrgId, setTogglingOrgId] = React.useState<string | null>(null);
 
   const [showCreds, setShowCreds]       = React.useState(false);
   const [showOnboard, setShowOnboard]   = React.useState(false);
@@ -396,6 +401,43 @@ function AgentDetailPanel({ agent, onClose, onPing, onRemove, onUpdated, pinging
   function toggleCap(c: string) { setEditCaps(p => p.includes(c) ? p.filter(x => x !== c) : [...p, c]); }
 
   React.useEffect(() => { fetchAgentProjects(agent.id).then(setProjects); }, [agent.id]);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    async function loadOrgs() {
+      setOrgsLoading(true);
+      try {
+        const allOrgs = await fetchOrgs();
+        if (cancelled) return;
+        setOrgs(allOrgs);
+        const contributed = new Set<string>();
+        await Promise.all(allOrgs.map(async org => {
+          const agents = await fetchOrgAgents(org.id);
+          if (!cancelled && agents.some(a => a.id === agent.id)) contributed.add(org.id);
+        }));
+        if (!cancelled) setContributedOrgIds(contributed);
+      } finally {
+        if (!cancelled) setOrgsLoading(false);
+      }
+    }
+    loadOrgs();
+    return () => { cancelled = true; };
+  }, [agent.id]);
+
+  async function toggleOrgContrib(orgId: string) {
+    setTogglingOrgId(orgId);
+    try {
+      if (contributedOrgIds.has(orgId)) {
+        await withdrawAgentFromOrg(orgId, agent.id);
+        setContributedOrgIds(prev => { const s = new Set(prev); s.delete(orgId); return s; });
+      } else {
+        await contributeAgentToOrg(orgId, agent.id);
+        setContributedOrgIds(prev => new Set([...prev, orgId]));
+      }
+    } finally {
+      setTogglingOrgId(null);
+    }
+  }
 
   const sel = "w-full rounded-xl border-0 bg-zinc-50 px-3 py-2 text-sm text-zinc-900 ring-1 ring-zinc-200 focus:outline-none focus:ring-2 focus:ring-brand-400/40 dark:bg-zinc-900 dark:text-zinc-100 dark:ring-zinc-700";
 
@@ -672,6 +714,41 @@ function AgentDetailPanel({ agent, onClose, onPing, onRemove, onUpdated, pinging
                 <p className="text-sm text-zinc-400">Not assigned to any projects</p>
               )}
             </div>
+
+            {/* Org contributions */}
+            {orgs.length > 0 && (
+              <div>
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-400">
+                  Organisations {orgsLoading && <span className="text-zinc-300">…</span>}
+                </p>
+                <div className="flex flex-col gap-1.5">
+                  {orgs.map(org => {
+                    const contributed = contributedOrgIds.has(org.id);
+                    const toggling = togglingOrgId === org.id;
+                    return (
+                      <div key={org.id} className="flex items-center gap-3 rounded-xl bg-zinc-50 px-3 py-2 dark:bg-white/5">
+                        <Building2 className="h-4 w-4 shrink-0 text-zinc-400" />
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-sm font-semibold text-zinc-800 dark:text-zinc-200">{org.name}</div>
+                          <div className="text-[11px] text-zinc-400 capitalize">{org.my_role ?? "member"}</div>
+                        </div>
+                        <button
+                          onClick={() => toggleOrgContrib(org.id)}
+                          disabled={toggling}
+                          className={cn(
+                            "shrink-0 rounded-lg px-2.5 py-1 text-[11px] font-semibold ring-1 transition-colors disabled:opacity-60",
+                            contributed
+                              ? "bg-emerald-50 text-emerald-700 ring-emerald-200 hover:bg-red-50 hover:text-red-600 hover:ring-red-200 dark:bg-emerald-500/10 dark:text-emerald-400 dark:ring-emerald-500/30"
+                              : "bg-zinc-100 text-zinc-600 ring-zinc-200 hover:bg-brand-50 hover:text-brand-700 hover:ring-brand-200 dark:bg-white/10 dark:text-zinc-400 dark:ring-white/10"
+                          )}>
+                          {toggling ? "…" : contributed ? "Contributed ✓" : "Contribute"}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </>
         )}
         </div>
