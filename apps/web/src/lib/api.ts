@@ -207,6 +207,12 @@ export async function fetchAgents(): Promise<Agent[]> {
   return [];
 }
 
+// Single agent by id
+export async function fetchAgent(id: string): Promise<Agent | null> {
+  const data = await apiFetch<{ ok: boolean; agent: Agent }>(`/api/v1/agents/${id}`);
+  return data?.ok ? data.agent : null;
+}
+
 // All agents across the platform — for project team pickers
 export async function fetchAgentsDirectory(): Promise<Agent[]> {
   const data = await apiFetch<{ ok: boolean; agents: Agent[] }>("/api/v1/agents?all=true");
