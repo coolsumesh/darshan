@@ -11,15 +11,17 @@ ALTER TABLE agents DROP COLUMN IF EXISTS org_id;
 ALTER TABLE org_agents DROP COLUMN IF EXISTS role;
 
 -- 3. Fix org_users.role — remove 'owner' (ownership lives in organisations.owner_user_id)
-UPDATE org_users SET role = 'admin' WHERE role = 'owner';
+--    Drop constraint first so UPDATE can proceed freely
 ALTER TABLE org_users DROP CONSTRAINT IF EXISTS org_users_role_check;
+UPDATE org_users SET role = 'admin' WHERE role = 'owner';
 ALTER TABLE org_users ADD CONSTRAINT org_users_role_check
   CHECK (role IN ('admin', 'contributor', 'viewer'));
 
 -- 4. Fix project_users.role — align with org_users roles
+--    Drop constraint first so UPDATEs can proceed freely
+ALTER TABLE project_users DROP CONSTRAINT IF EXISTS project_users_role_check;
 UPDATE project_users SET role = 'admin'       WHERE role = 'owner';
 UPDATE project_users SET role = 'contributor' WHERE role = 'member';
-ALTER TABLE project_users DROP CONSTRAINT IF EXISTS project_users_role_check;
 ALTER TABLE project_users ADD CONSTRAINT project_users_role_check
   CHECK (role IN ('admin', 'contributor', 'viewer'));
 
