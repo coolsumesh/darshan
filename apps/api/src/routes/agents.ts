@@ -660,9 +660,11 @@ ACK_URL: ${ackUrl}
     if (!orgs.length) return reply.status(404).send({ ok: false, error: "org not found" });
     const { rows } = await db.query(
       `select om.id, om.contributed_by, om.status, om.created_at,
-              a.id as agent_id, a.name, a.status as agent_status, a.agent_type, a.model
+              a.id as agent_id, a.name, a.status as agent_status, a.agent_type, a.model,
+              u.name as contributed_by_name, u.avatar_url as contributed_by_avatar
        from org_agents om
        join agents a on a.id = om.agent_id
+       left join users u on u.id = om.contributed_by
        where om.org_id = $1 and om.status = 'active'
        order by lower(a.name) asc`,
       [orgs[0].id]

@@ -688,9 +688,14 @@ function MembersTab({ orgId, canEdit }: { orgId: string; canEdit: boolean }) {
                 </div>
               </div>
               <div className="flex items-center gap-2 shrink-0">
-                <span className="rounded-full bg-violet-100 px-2 py-0.5 text-[11px] font-semibold text-violet-700 dark:bg-violet-500/10 dark:text-violet-300">
-                  Contributed
-                </span>
+                <div className="flex flex-col items-end gap-0.5">
+                  <span className="rounded-full bg-violet-100 px-2 py-0.5 text-[11px] font-semibold text-violet-700 dark:bg-violet-500/10 dark:text-violet-300">
+                    Contributed
+                  </span>
+                  {m.contributed_by_name && (
+                    <span className="text-[10px] text-zinc-400">by {m.contributed_by_name}</span>
+                  )}
+                </div>
                 {canEdit && (
                   <button onClick={() => handleRemove(m.agent_id)}
                     className="grid h-6 w-6 place-items-center rounded-lg text-zinc-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-500/10 transition-colors">

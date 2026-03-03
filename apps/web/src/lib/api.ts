@@ -392,6 +392,8 @@ export type OrgMember = {
   model?: string;
   avatar_url?: string;
   contributed_by?: string | null;
+  contributed_by_name?: string | null;
+  contributed_by_avatar?: string | null;
   created_at: string;
 };
 
