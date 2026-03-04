@@ -776,40 +776,38 @@ Check with: echo $AGENT_${agentSlug}_ID
   $AGENT_${agentSlug}_TOKEN   — your callback token
   $DARSHAN_BASE_URL           — default: ${baseUrl}
 
-On every heartbeat:
+On every heartbeat (simple mode):
 1. Verify env vars are set — run: echo $AGENT_${agentSlug}_ID (stop if empty).
-2. GET $DARSHAN_BASE_URL/api/backend/api/v1/agents/$AGENT_${agentSlug}_ID/inbox
+
+2. GET inbox:
+   $DARSHAN_BASE_URL/api/backend/api/v1/agents/$AGENT_${agentSlug}_ID/inbox
    Header: Authorization: Bearer $AGENT_${agentSlug}_TOKEN
-3. GET $DARSHAN_BASE_URL/api/backend/api/v1/agents/$AGENT_${agentSlug}_ID/tasks?status=approved
+
+3. ACK each inbox item (event handling only):
+   - ping              -> "pong — ${agent.name} online"
+   - welcome           -> "setup complete — ${agent.name} ready"
+   - project_onboarded -> "ready for {project_name}"
+   - task_assigned     -> "picked up — {title}"
+   - other             -> "ack"
+
+4. GET in-progress tasks first:
+   $DARSHAN_BASE_URL/api/backend/api/v1/agents/$AGENT_${agentSlug}_ID/tasks?status=in-progress
    Header: Authorization: Bearer $AGENT_${agentSlug}_TOKEN
-4. For each pending item, handle by type:
 
-   ping →
-     ACK response: "pong — ${agent.name} online"
+5. If none in-progress, GET approved tasks:
+   $DARSHAN_BASE_URL/api/backend/api/v1/agents/$AGENT_${agentSlug}_ID/tasks?status=approved
+   Header: Authorization: Bearer $AGENT_${agentSlug}_TOKEN
 
-   welcome →
-     ACK response: "setup complete — ${agent.name} ready"
+6. Execute exactly one task:
+   - If status=approved: PATCH -> { "status": "in-progress" }
+   - Do the task work
+   - Finish with exactly one:
+     a) done   -> PATCH { "status": "done", "completion_note": "<what was completed>" }
+     b) review -> PATCH { "status": "review", "completion_note": "<what to verify>", "assignee": "<Project Owner or Agent Owner>" }
+     c) blocked-> PATCH { "status": "blocked", "completion_note": "<what is blocked>", "assignee": "<Project Owner or Agent Owner>" }
 
-   project_onboarded →
-     Read payload: project_name, agent_briefing
-     Set up local environment per agent_briefing instructions.
-     ACK response: "ready for {project_name}"
-
-   task_assigned →
-     Read payload: project_id, task_id, project_slug, project_name, agent_briefing, title, description
-     Step A (claim): PATCH task -> { "status": "in-progress" }
-     Step B (prepare): apply agent_briefing if not already configured.
-     Step C (execute): do the task work.
-     Step D (finish): choose exactly one outcome:
-       1) done    -> PATCH { "status": "done", "completion_note": "<what was completed>" }
-       2) review  -> PATCH { "status": "review", "completion_note": "<what to verify>", "assignee": "<Project Owner or Agent Owner>" }
-       3) blocked -> PATCH { "status": "blocked", "completion_note": "<what is blocked>", "assignee": "<Project Owner or Agent Owner>" }
-     Step E (ack): response "done — {title}" (or "blocked — {title}")
-
-   other →
-     ACK response: "ack"
-
-5. ACK endpoint: $DARSHAN_BASE_URL/api/backend/api/v1/agents/$AGENT_${agentSlug}_ID/inbox/ack
+7. ACK endpoint:
+   $DARSHAN_BASE_URL/api/backend/api/v1/agents/$AGENT_${agentSlug}_ID/inbox/ack
    Body: { inbox_id, callback_token: $AGENT_${agentSlug}_TOKEN, response }`;
 
   const linuxScript = `#!/bin/bash
