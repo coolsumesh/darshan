@@ -910,14 +910,17 @@ ACK_URL: ${ackUrl}
   });
 
   // ── Agent-scoped task feed (for heartbeat pickup loops) ───────────────────
-  server.get<{ Params: { id: string }; Querystring: { status?: string; project_id?: string; limit?: number } }>(
+  server.get<{ Params: { id: string }; Querystring: { token?: string; status?: string; project_id?: string; limit?: number } }>(
     "/api/v1/agents/:id/tasks",
     async (req, reply) => {
+      // Support agent callback-token auth (same pattern as inbox polling)
+      const token = (req.headers.authorization?.replace(/^Bearer\s+/i, "") || req.query.token) ?? "";
+
       const { rows: agents } = await db.query(
-        `select id, name from agents where id::text = $1 limit 1`,
-        [req.params.id]
+        `select id, name from agents where id::text = $1 and callback_token = $2 limit 1`,
+        [req.params.id, token]
       );
-      if (!agents[0]) return reply.status(404).send({ ok: false, error: "agent not found" });
+      if (!agents[0]) return reply.status(401).send({ ok: false, error: "invalid token" });
 
       const conditions = ["lower(t.assignee) = lower($1)"];
       const vals: unknown[] = [agents[0].name];
