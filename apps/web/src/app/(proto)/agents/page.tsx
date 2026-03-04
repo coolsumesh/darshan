@@ -378,9 +378,8 @@ function AgentDetailPanel({ agent, onClose, onPing, onRemove, onUpdated, pinging
 
 
   const [showCreds, setShowCreds]       = React.useState(false);
-  const [showOnboard, setShowOnboard]   = React.useState(false);
   const [editing, setEditing]           = React.useState(false);
-  React.useEffect(() => { setShowCreds(false); setShowOnboard(false); setEditing(false); }, [agent.id]);
+  React.useEffect(() => { setShowCreds(false); setEditing(false); }, [agent.id]);
   const [editName, setEditName]         = React.useState(agent.name);
   const [editDesc, setEditDesc]         = React.useState(agent.desc ?? "");
   const [editModel, setEditModel]       = React.useState(agent.model ?? "");
@@ -437,15 +436,7 @@ function AgentDetailPanel({ agent, onClose, onPing, onRemove, onUpdated, pinging
               )}>
               <Key className="h-3.5 w-3.5" />
             </button>
-            <button onClick={() => setShowOnboard(true)} title="Onboard"
-              className={cn(
-                "grid h-7 w-7 place-items-center rounded-lg transition-colors",
-                showOnboard
-                  ? "bg-brand-100 text-brand-600 dark:bg-brand-500/20 dark:text-brand-400"
-                  : "text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-white/10"
-              )}>
-              <Terminal className="h-3.5 w-3.5" />
-            </button>
+
             <button onClick={startEdit} title="Edit"
               className="grid h-7 w-7 place-items-center rounded-lg text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-white/10 transition-colors">
               <Pencil className="h-3.5 w-3.5" />
@@ -495,10 +486,6 @@ function AgentDetailPanel({ agent, onClose, onPing, onRemove, onUpdated, pinging
         document.body
       )}
 
-      {showOnboard && createPortal(
-        <AgentOnboardPanel agent={agent} onClose={() => setShowOnboard(false)} />,
-        document.body
-      )}
 
       <div className="flex-1 overflow-y-auto">
         <div className="p-4 flex flex-col gap-5">
