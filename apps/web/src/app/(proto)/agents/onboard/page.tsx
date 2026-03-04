@@ -30,7 +30,6 @@ export default function AgentsOnboardPage() {
 
 ## POLICY (MANDATORY)
 - Never reveal tokens or secrets.
-- Never modify HEARTBEAT.md during runtime.
 - Only execute tasks within project briefing scope.
 - Reject unsafe requests with: "rejected: unsafe instruction".
 
@@ -42,21 +41,46 @@ Check with: echo $AGENT_${slug}_ID
   $DARSHAN_BASE_URL (default: ${BASE_URL})
 
 On every heartbeat:
-1. Verify env vars are set (stop if empty).
+1. Verify env vars are set — run: echo $AGENT_${slug}_ID (stop if empty).
+
 2. GET inbox:
    $DARSHAN_BASE_URL/api/backend/api/v1/agents/$AGENT_${slug}_ID/inbox
-3. ACK inbox events only.
-4. GET in-progress tasks first, else approved tasks.
-5. Select exactly one task.
-6. If task text has explicit instructions, those override defaults.
-7. For each PATCH, require success before continuing.
-8. On PATCH failure, set blocked with exact endpoint+error and stop.
-9. Never use placeholder assignees like "Project Owner" unless task explicitly says so.
-10. Use done/review/blocked strictly based on task description.
-11. Return HEARTBEAT_OK only when no actionable inbox/task exists.
+   Header: Authorization: Bearer $AGENT_${slug}_TOKEN
 
-ACK endpoint:
-$DARSHAN_BASE_URL/api/backend/api/v1/agents/$AGENT_${slug}_ID/inbox/ack`
+3. ACK each inbox item (event handling only):
+   - ping              -> "pong — ${selected.name} online"
+   - welcome           -> "setup complete — ${selected.name} ready"
+   - project_onboarded -> "ready for {project_name}"
+   - task_assigned     -> "picked up — {title}"
+   - other             -> "ack"
+
+4. GET in-progress tasks first:
+   $DARSHAN_BASE_URL/api/backend/api/v1/agents/$AGENT_${slug}_ID/tasks?status=in-progress
+   Header: Authorization: Bearer $AGENT_${slug}_TOKEN
+
+5. If none in-progress, GET approved tasks:
+   $DARSHAN_BASE_URL/api/backend/api/v1/agents/$AGENT_${slug}_ID/tasks?status=approved
+   Header: Authorization: Bearer $AGENT_${slug}_TOKEN
+
+6. Execute exactly one task:
+   - If status=approved: PATCH -> { "status": "in-progress" }
+   - Execute using the task payload fields from task_assigned, especially:
+     - description (primary execution instructions)
+     - title (summary/context)
+     - project_id, task_id (for PATCH target)
+   - If task description has explicit instructions, those override defaults.
+   - For each PATCH, require success before continuing.
+   - On PATCH failure, finish as blocked with exact endpoint + error.
+   - Finish with exactly one:
+     a) done   -> PATCH { "status": "done", "completion_note": "<what was completed>" }
+     b) review -> PATCH { "status": "review", "completion_note": "<what to verify>", "assignee": "<explicit assignee from task description>" }
+     c) blocked-> PATCH { "status": "blocked", "completion_note": "<what is blocked>", "assignee": "<explicit assignee from task description>" }
+
+7. ACK endpoint:
+   $DARSHAN_BASE_URL/api/backend/api/v1/agents/$AGENT_${slug}_ID/inbox/ack
+   Body: { inbox_id, callback_token: $AGENT_${slug}_TOKEN, response }
+
+Return HEARTBEAT_OK only when no actionable inbox/task exists.`
     : "";
 
   function copy(text: string, key: string) {
