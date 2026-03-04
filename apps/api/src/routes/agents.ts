@@ -51,7 +51,9 @@ ACK_URL: ${ackUrl}
 
 ### Steps (run on every heartbeat):
 1. GET INBOX_URL with header: Authorization: Bearer ${token}
-2. For each pending item:
+2. GET https://darshan.caringgems.in/api/backend/api/v1/agents/${agent.id}/tasks?status=approved
+   with header: Authorization: Bearer ${token}
+3. For each pending item:
 
 **type = "ping"**
 POST ACK_URL: { inbox_id, callback_token: "${token}", response: "pong — ${name} online" }
@@ -410,7 +412,8 @@ ACK_URL: ${ackUrl}
 
 ### Steps (run on every heartbeat):
 1. GET INBOX_URL with header: Authorization: Bearer ${token}
-2. For each pending item, handle by type:
+2. GET https://darshan.caringgems.in/api/backend/api/v1/agents/${agent.id}/tasks?status=approved with header: Authorization: Bearer ${token}
+3. For each pending item, handle by type:
 
 **type = "ping"**
 - POST to ACK_URL: { inbox_id, callback_token: "${token}", response: "pong — ${name} online" }
@@ -896,7 +899,7 @@ ACK_URL: ${ackUrl}
 
     const { rows } = await db.query(
       `select p.id, p.name, p.slug, p.status,
-              pt.role, pt.joined_at
+              pt.joined_at
        from project_agents pt
        join projects p on p.id = pt.project_id
        where pt.agent_id = $1
@@ -905,6 +908,45 @@ ACK_URL: ${ackUrl}
     );
     return { ok: true, projects: rows };
   });
+
+  // ── Agent-scoped task feed (for heartbeat pickup loops) ───────────────────
+  server.get<{ Params: { id: string }; Querystring: { status?: string; project_id?: string; limit?: number } }>(
+    "/api/v1/agents/:id/tasks",
+    async (req, reply) => {
+      const { rows: agents } = await db.query(
+        `select id, name from agents where id::text = $1 limit 1`,
+        [req.params.id]
+      );
+      if (!agents[0]) return reply.status(404).send({ ok: false, error: "agent not found" });
+
+      const conditions = ["lower(t.assignee) = lower($1)"];
+      const vals: unknown[] = [agents[0].name];
+
+      if (req.query.status) {
+        vals.push(req.query.status);
+        conditions.push(`t.status = $${vals.length}`);
+      }
+      if (req.query.project_id) {
+        vals.push(req.query.project_id);
+        conditions.push(`t.project_id::text = $${vals.length}`);
+      }
+
+      vals.push(Math.min(Math.max(Number(req.query.limit ?? 50), 1), 200));
+
+      const { rows } = await db.query(
+        `select t.*
+         from tasks t
+         where ${conditions.join(" and ")}
+         order by
+           case t.priority when 'high' then 1 when 'medium' then 2 when 'low' then 3 else 4 end,
+           t.created_at asc
+         limit $${vals.length}`,
+        vals
+      );
+
+      return { ok: true, tasks: rows };
+    }
+  );
 
   // ── Create invite link for an org ──────────────────────────────────────────
   server.post<{

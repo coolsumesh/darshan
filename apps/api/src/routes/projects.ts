@@ -404,6 +404,7 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
       if (activityOps.length > 0) await Promise.all(activityOps);
 
       // ── Agent inbox notifications ───────────────────────────────────────────
+      let notifiedAssignee = false;
       if (newAssignee !== undefined) {
         if (oldAssignee) {
           await db.query(
@@ -414,8 +415,18 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
             [req.params.taskId, oldAssignee]
           );
         }
-        if (newAssignee) await notifyAgentInbox(newAssignee, rows[0]);
+        if (newAssignee) {
+          await notifyAgentInbox(newAssignee, rows[0]);
+          notifiedAssignee = true;
+        }
       }
+
+      // Re-notify when task is moved to approved and has an assignee.
+      // This makes task pickup resilient even when prior assignment events were missed.
+      if (newStatus === "approved" && !notifiedAssignee && rows[0].assignee) {
+        await notifyAgentInbox(rows[0].assignee as string, rows[0]);
+      }
+
       return { ok: true, task: rows[0] };
     }
   );
@@ -462,12 +473,24 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
   server.post<{ Params: { id: string }; Body: { agent_id: string; role?: string } }>(
     "/api/v1/projects/:id/team",
     async (req, reply) => {
-      const access = await checkAccess(req.params.id, req, "admin");
+      const userId = getRequestUser(req)?.userId ?? null;
+      if (!userId) return reply.status(401).send({ ok: false, error: "authentication required" });
+
+      const access = await checkAccess(req.params.id, req, "contributor");
       if ("deny" in access) return reply.status(access.deny).send({ ok: false, error: access.deny === 404 ? "project not found" : "forbidden" });
 
       const { agent_id } = req.body;
       if (!agent_id) return reply.status(400).send({ ok: false, error: "agent_id required" });
-      const userId = getRequestUser(req)?.userId ?? null;
+
+      const { rows: agents } = await db.query(
+        `select id, owner_user_id from agents where id::text = $1`,
+        [agent_id]
+      );
+      if (!agents[0]) return reply.status(404).send({ ok: false, error: "agent not found" });
+      if (agents[0].owner_user_id !== userId) {
+        return reply.status(403).send({ ok: false, error: "forbidden: you can only assign your own agents" });
+      }
+
       const { rows } = await db.query(
         `insert into project_agents (project_id, agent_id, added_by)
          values ($1, $2, $3)
@@ -506,8 +529,24 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
   server.delete<{ Params: { id: string; agentId: string } }>(
     "/api/v1/projects/:id/team/:agentId",
     async (req, reply) => {
-      const access = await checkAccess(req.params.id, req, "admin");
+      const userId = getRequestUser(req)?.userId ?? null;
+      if (!userId) return reply.status(401).send({ ok: false, error: "authentication required" });
+
+      const access = await checkAccess(req.params.id, req, "contributor");
       if ("deny" in access) return reply.status(access.deny).send({ ok: false, error: access.deny === 404 ? "project not found" : "forbidden" });
+
+      const { rows: agents } = await db.query(
+        `select owner_user_id from agents where id::text = $1`,
+        [req.params.agentId]
+      );
+      if (!agents[0]) return reply.status(404).send({ ok: false, error: "agent not found" });
+
+      const canAdminProject = access.role === "owner" || access.role === "admin";
+      const ownsAgent = agents[0].owner_user_id === userId;
+      if (!canAdminProject && !ownsAgent) {
+        return reply.status(403).send({ ok: false, error: "forbidden: you can only remove your own agents" });
+      }
+
       await db.query(
         `delete from project_agents where project_id = $1 and agent_id = $2`,
         [access.projectId, req.params.agentId]
