@@ -235,7 +235,8 @@ ACK_URL:   ${ackUrl}
 ### Steps (run on every heartbeat):
 1. GET INBOX_URL with header: Authorization: Bearer ${token}
    (use the TOKEN value above — replace literal "TOKEN" with the value if your config tool requires it)
-2. For each pending item, handle by type:
+2. GET ${BASE_URL}/agents/${agentId}/tasks?status=approved with header: Authorization: Bearer ${token}
+3. For each pending item, handle by type:
 
 **type = "ping"**
 - POST to ACK_URL: { inbox_id, callback_token: "${token}", response: "pong — ${agent.name} online" }
@@ -248,6 +249,9 @@ ACK_URL:   ${ackUrl}
 **type = "task_assigned"**
 - PATCH task to in-progress: PATCH https://darshan.caringgems.in/api/backend/api/v1/projects/{project_id}/tasks/{task_id} with body { "status": "in-progress" }
 - Execute the task
+- If no human action is needed: PATCH task -> { "status": "done", "completion_note": "..." }
+- If human validation is needed: PATCH task -> { "status": "review", "completion_note": "...", "assignee": "<Project Owner or Agent Owner>" }
+- If blocked on human action: PATCH task -> { "status": "blocked", "completion_note": "...", "assignee": "<Project Owner or Agent Owner>" }
 - POST to ACK_URL: { inbox_id, callback_token: "${token}", response: "picked up — working on: {title}" }
 
 **Any other type**
@@ -773,7 +777,9 @@ On every heartbeat:
 1. Verify env vars are set — run: echo $AGENT_${agentSlug}_ID (stop if empty).
 2. GET $DARSHAN_BASE_URL/api/backend/api/v1/agents/$AGENT_${agentSlug}_ID/inbox
    Header: Authorization: Bearer $AGENT_${agentSlug}_TOKEN
-3. For each pending item, handle by type:
+3. GET $DARSHAN_BASE_URL/api/backend/api/v1/agents/$AGENT_${agentSlug}_ID/tasks?status=approved
+   Header: Authorization: Bearer $AGENT_${agentSlug}_TOKEN
+4. For each pending item, handle by type:
 
    ping →
      ACK response: "pong — ${agent.name} online"
@@ -792,13 +798,15 @@ On every heartbeat:
         Body: { "status": "in-progress" }
      2. Set up project environment per agent_briefing if not already done.
      3. Execute task per title + description + agent_briefing instructions.
-     4. PATCH task: { "status": "review" }
-     5. ACK response: "done — {title}"
+     4. If no human action is needed: PATCH task -> { "status": "done", "completion_note": "..." }
+     5. If human validation is needed: PATCH task -> { "status": "review", "completion_note": "...", "assignee": "<Project Owner or Agent Owner>" }
+     6. If blocked on human action: PATCH task -> { "status": "blocked", "completion_note": "...", "assignee": "<Project Owner or Agent Owner>" }
+     7. ACK response: "done — {title}"
 
    other →
      ACK response: "ack"
 
-4. ACK endpoint: $DARSHAN_BASE_URL/api/backend/api/v1/agents/$AGENT_${agentSlug}_ID/inbox/ack
+5. ACK endpoint: $DARSHAN_BASE_URL/api/backend/api/v1/agents/$AGENT_${agentSlug}_ID/inbox/ack
    Body: { inbox_id, callback_token: $AGENT_${agentSlug}_TOKEN, response }`;
 
   const linuxScript = `#!/bin/bash
