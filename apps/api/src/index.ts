@@ -71,6 +71,8 @@ server.addHook("preHandler", async (req, reply) => {
   if (url.includes("/inbox")) return;
   // Allow agent callback-token task polling route (agent auth handled in route)
   if (/^\/api\/v1\/agents\/[^/]+\/tasks$/.test(url)) return;
+  // Allow task status patch route for agent callback-token flow (auth handled in route)
+  if (req.method === "PATCH" && /^\/api\/v1\/projects\/[^/]+\/tasks\/[^/]+$/.test(url)) return;
   // Allow public invite routes (view + accept — no auth needed)
   if (url.startsWith("/api/v1/invites/")) return;
 

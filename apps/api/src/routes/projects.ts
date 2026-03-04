@@ -26,8 +26,15 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
     if (!rows[0]) return { deny: 404 };
 
     const userId = getRequestUser(req)?.userId ?? null;
-    // No cookie = API-key request → full owner-level access
-    if (!userId) return { projectId: rows[0].id, role: "owner" };
+    const authHeader = (req as { headers?: Record<string, string | undefined> })?.headers?.authorization ?? "";
+    const bearer = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+    const INTERNAL_API_KEY = process.env.DARSHAN_API_KEY ?? "824cdfcdec0e35cf550002c2dfa3541932f58e2e2497cfaa3c844dc99f5b972f";
+
+    // Internal API key retains owner-level access for system flows.
+    if (bearer && bearer === INTERNAL_API_KEY) return { projectId: rows[0].id, role: "owner" };
+
+    // No authenticated user and no valid internal key -> forbidden.
+    if (!userId) return { deny: 403 };
 
     let role: ProjectRole;
     if (rows[0].owner_user_id === userId) {
@@ -349,8 +356,49 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
   server.patch<{ Params: { id: string; taskId: string }; Body: Record<string, unknown> }>(
     "/api/v1/projects/:id/tasks/:taskId",
     async (req, reply) => {
-      const access = await checkAccess(req.params.id, req, "viewer");
-      if ("deny" in access) return reply.status(access.deny).send({ ok: false, error: access.deny === 404 ? "project not found" : "forbidden" });
+      const authUser = getRequestUser(req);
+      const authHeader = req.headers.authorization ?? "";
+      const bearer = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+      const INTERNAL_API_KEY = process.env.DARSHAN_API_KEY ?? "824cdfcdec0e35cf550002c2dfa3541932f58e2e2497cfaa3c844dc99f5b972f";
+      const isInternal = bearer === INTERNAL_API_KEY;
+
+      let projectIdForUpdate: string;
+      let actorName: string;
+      let actorType: "human" | "system" | "agent" = "system";
+
+      if (authUser || isInternal) {
+        const access = await checkAccess(req.params.id, req, "viewer");
+        if ("deny" in access) return reply.status(access.deny).send({ ok: false, error: access.deny === 404 ? "project not found" : "forbidden" });
+        projectIdForUpdate = access.projectId;
+        actorName = authUser?.name ?? "System";
+        actorType = authUser ? "human" : "system";
+      } else {
+        // Agent callback-token path (heartbeat/runtime)
+        const { rows: taskRows } = await db.query(
+          `select t.project_id, t.status, t.assignee, a.name as agent_name
+           from tasks t
+           join projects p on p.id = t.project_id
+           join agents a on a.callback_token = $1
+           where t.id = $2
+             and (p.id::text = $3 or lower(p.slug) = lower($3))
+             and lower(coalesce(t.assignee, '')) = lower(a.name)
+           limit 1`,
+          [bearer, req.params.taskId, req.params.id]
+        );
+        if (!taskRows[0]) return reply.status(401).send({ ok: false, error: "not authenticated" });
+
+        // Agents can only update execution-related fields
+        const allowedAgentFields = new Set(["status", "completion_note", "assignee"]);
+        for (const key of Object.keys(req.body)) {
+          if (!allowedAgentFields.has(key)) {
+            return reply.status(403).send({ ok: false, error: "forbidden field for agent update" });
+          }
+        }
+
+        projectIdForUpdate = taskRows[0].project_id;
+        actorName = taskRows[0].agent_name ?? "Agent";
+        actorType = "agent";
+      }
 
       const allowed = ["title", "description", "status", "assignee", "proposer", "type", "estimated_sp", "priority", "due_date", "completion_note"];
       const sets: string[] = [];
@@ -365,7 +413,7 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
 
       const { rows: before } = await db.query(
         `select status, assignee from tasks where id = $1 and project_id = $2`,
-        [req.params.taskId, access.projectId]
+        [req.params.taskId, projectIdForUpdate]
       );
       if (!before[0]) return reply.status(404).send({ ok: false, error: "task not found" });
       const oldAssignee: string | null = before[0]?.assignee ?? null;
@@ -379,9 +427,6 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
       broadcast("task:updated", { task: rows[0] });
 
       // ── Write activity entries ──────────────────────────────────────────────
-      const authUser   = getRequestUser(req);
-      const actorName  = authUser?.name ?? "System";
-      const actorType  = authUser ? "human" : "system";
       const activityOps: Promise<unknown>[] = [];
 
       const newStatus   = req.body.status   as string | undefined;
@@ -391,14 +436,14 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
         activityOps.push(db.query(
           `insert into task_activity (task_id, project_id, actor_name, actor_type, action, from_value, to_value)
            values ($1, $2, $3, $4, 'status_changed', $5, $6)`,
-          [req.params.taskId, access.projectId, actorName, actorType, oldStatus, newStatus]
+          [req.params.taskId, projectIdForUpdate, actorName, actorType, oldStatus, newStatus]
         ));
       }
       if (newAssignee !== undefined && newAssignee !== oldAssignee) {
         activityOps.push(db.query(
           `insert into task_activity (task_id, project_id, actor_name, actor_type, action, from_value, to_value)
            values ($1, $2, $3, $4, 'assigned', $5, $6)`,
-          [req.params.taskId, access.projectId, actorName, actorType, oldAssignee, newAssignee || null]
+          [req.params.taskId, projectIdForUpdate, actorName, actorType, oldAssignee, newAssignee || null]
         ));
       }
       if (activityOps.length > 0) await Promise.all(activityOps);
