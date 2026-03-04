@@ -247,12 +247,15 @@ ACK_URL:   ${ackUrl}
 - POST to ACK_URL: { inbox_id, callback_token: "${token}", response: "setup complete — ${agent.name} ready" }
 
 **type = "task_assigned"**
-- PATCH task to in-progress: PATCH https://darshan.caringgems.in/api/backend/api/v1/projects/{project_id}/tasks/{task_id} with body { "status": "in-progress" }
-- Execute the task
-- If no human action is needed: PATCH task -> { "status": "done", "completion_note": "..." }
-- If human validation is needed: PATCH task -> { "status": "review", "completion_note": "...", "assignee": "<Project Owner or Agent Owner>" }
-- If blocked on human action: PATCH task -> { "status": "blocked", "completion_note": "...", "assignee": "<Project Owner or Agent Owner>" }
-- POST to ACK_URL: { inbox_id, callback_token: "${token}", response: "picked up — working on: {title}" }
+- Read payload: project_id, task_id, project_slug, project_name, agent_briefing, title, description
+- Step A (claim): PATCH task -> { "status": "in-progress" }
+- Step B (prepare): apply agent_briefing if not already configured
+- Step C (execute): do the task work
+- Step D (finish): choose exactly one outcome:
+  1) done   -> PATCH { "status": "done", "completion_note": "<what was completed>" }
+  2) review -> PATCH { "status": "review", "completion_note": "<what to verify>", "assignee": "<Project Owner or Agent Owner>" }
+  3) blocked-> PATCH { "status": "blocked", "completion_note": "<what is blocked>", "assignee": "<Project Owner or Agent Owner>" }
+- Step E (ack): POST to ACK_URL with response "done — {title}" (or "blocked — {title}")
 
 **Any other type**
 - POST to ACK_URL: { inbox_id, callback_token: "${token}", response: "ack" }`;
@@ -793,15 +796,15 @@ On every heartbeat:
      ACK response: "ready for {project_name}"
 
    task_assigned →
-     Read payload: project_slug, project_name, agent_briefing, title, description
-     1. PATCH $DARSHAN_BASE_URL/api/backend/api/v1/projects/{project_id}/tasks/{task_id}
-        Body: { "status": "in-progress" }
-     2. Set up project environment per agent_briefing if not already done.
-     3. Execute task per title + description + agent_briefing instructions.
-     4. If no human action is needed: PATCH task -> { "status": "done", "completion_note": "..." }
-     5. If human validation is needed: PATCH task -> { "status": "review", "completion_note": "...", "assignee": "<Project Owner or Agent Owner>" }
-     6. If blocked on human action: PATCH task -> { "status": "blocked", "completion_note": "...", "assignee": "<Project Owner or Agent Owner>" }
-     7. ACK response: "done — {title}"
+     Read payload: project_id, task_id, project_slug, project_name, agent_briefing, title, description
+     Step A (claim): PATCH task -> { "status": "in-progress" }
+     Step B (prepare): apply agent_briefing if not already configured.
+     Step C (execute): do the task work.
+     Step D (finish): choose exactly one outcome:
+       1) done    -> PATCH { "status": "done", "completion_note": "<what was completed>" }
+       2) review  -> PATCH { "status": "review", "completion_note": "<what to verify>", "assignee": "<Project Owner or Agent Owner>" }
+       3) blocked -> PATCH { "status": "blocked", "completion_note": "<what is blocked>", "assignee": "<Project Owner or Agent Owner>" }
+     Step E (ack): response "done — {title}" (or "blocked — {title}")
 
    other →
      ACK response: "ack"
