@@ -159,10 +159,10 @@ export async function fetchTeam(projectId: string): Promise<TeamMemberWithAgent[
   return [];
 }
 
-export async function addTeamMember(projectId: string, agentId: string): Promise<boolean> {
+export async function addTeamMember(projectId: string, agentId: string, role?: string): Promise<boolean> {
   const data = await apiFetch<{ ok: boolean }>(`/api/v1/projects/${projectId}/team`, {
     method: "POST",
-    body: JSON.stringify({ agent_id: agentId }),
+    body: JSON.stringify({ agent_id: agentId, role }),
   });
   return data?.ok ?? false;
 }
@@ -228,6 +228,11 @@ export async function fetchAgentsDirectory(): Promise<Agent[]> {
   }
   return [];
 }
+
+export type ProjectMembershipRole = "admin" | "contributor" | "viewer";
+export type ProjectAccessRole = "owner" | ProjectMembershipRole;
+export type OrgMembershipRole = "admin" | "contributor" | "viewer";
+export type OrgUserRole = "owner" | OrgMembershipRole;
 
 export type Org = {
   id: string; name: string; slug: string; description?: string;
@@ -455,7 +460,7 @@ export type UserMember = {
   user_id: string;
   email: string;
   name: string;
-  role: "owner" | "admin" | "contributor" | "viewer";
+  role: ProjectMembershipRole;
   joined_at: string;
   avatar_url?: string;
   invited_by_name?: string;
@@ -467,7 +472,7 @@ export async function fetchUserMembers(projectId: string): Promise<UserMember[]>
 }
 
 export async function addUserMember(
-  projectId: string, email: string, role: string
+  projectId: string, email: string, role: ProjectMembershipRole
 ): Promise<UserMember | null> {
   const data = await apiFetch<{ ok: boolean; member: UserMember }>(`/api/v1/projects/${projectId}/user-members`, {
     method: "POST",
@@ -488,7 +493,7 @@ export async function removeUserMember(projectId: string, userId: string): Promi
 export type ProjectInvite = {
   id: string;
   token: string;
-  role: "admin" | "member";
+  role: ProjectMembershipRole;
   project_id: string;
   project_name: string;
   project_slug: string;
@@ -505,7 +510,7 @@ export type ProjectInvite = {
 export type OrgInvite = {
   id: string;
   token: string;
-  role: OrgUserRole;
+  role: OrgMembershipRole;
   org_id: string;
   org_name: string;
   org_slug: string;
@@ -548,11 +553,11 @@ export async function declineProjectInvite(token: string): Promise<boolean> {
 
 /** Generate an invite link for a project (admin+) */
 export async function createProjectInvite(
-  projectId: string, email?: string, role?: string
+  projectId: string, email?: string, role?: ProjectMembershipRole
 ): Promise<ProjectInvite | null> {
   const data = await apiFetch<{ ok: boolean; invite: ProjectInvite }>(`/api/v1/projects/${projectId}/invites`, {
     method: "POST",
-    body: JSON.stringify({ email: email || undefined, role: role || "member" }),
+    body: JSON.stringify({ email: email || undefined, role: role || "contributor" }),
   });
   return data?.ok ? data.invite : null;
 }
@@ -571,8 +576,6 @@ export async function revokeProjectInvite(projectId: string, inviteId: string): 
 
 // ── Org User Members ──────────────────────────────────────────────────────────
 
-export type OrgUserRole = "owner" | "admin" | "contributor" | "viewer";
-
 export type OrgUserMemberAgent = {
   id: string; name: string; status: string; model?: string | null; ping_status?: string | null;
 };
@@ -583,7 +586,7 @@ export type OrgUserMember = {
   name: string;
   email: string;
   avatar_url?: string | null;
-  role: OrgUserRole;
+  role: OrgMembershipRole;
   created_at: string;
   agents?: OrgUserMemberAgent[] | null;
 };
@@ -612,7 +615,7 @@ export type PendingOrgInvite = {
   id: string;
   token: string;
   invitee_email: string;
-  role: OrgUserRole;
+  role: OrgMembershipRole;
   expires_at: string;
   created_at: string;
   invited_by_name?: string;
