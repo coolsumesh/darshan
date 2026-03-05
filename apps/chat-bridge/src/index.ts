@@ -7,7 +7,7 @@ const HOST = process.env.HOST ?? "0.0.0.0";
 const BRIDGE_TOKEN = process.env.OPENCLAW_CHAT_BRIDGE_TOKEN?.trim();
 const OPENCLAW_BASE_URL = (process.env.OPENCLAW_BASE_URL ?? "http://127.0.0.1:3000").replace(/\/$/, "");
 const OPENCLAW_API_KEY = process.env.OPENCLAW_API_KEY?.trim();
-const OPENCLAW_MODEL = process.env.OPENCLAW_MODEL?.trim() || "gpt-mini";
+const OPENCLAW_MODEL = process.env.OPENCLAW_MODEL?.trim() || "openclaw";
 
 const server = Fastify({ logger: true });
 
@@ -19,42 +19,31 @@ type BridgeRequest = {
   message: string;
 };
 
-type ResponsesApiOut = {
-  output_text?: string;
-  output?: Array<{ type?: string; content?: Array<{ type?: string; text?: string }> }>;
+type ChatCompletionsOut = {
+  choices?: Array<{ message?: { content?: string } }>;
 };
 
 function unauthorized(reply: import("fastify").FastifyReply, error = "unauthorized") {
   return reply.status(401).send({ ok: false, error });
 }
 
-function extractOutputText(data: ResponsesApiOut): string | null {
-  if (typeof data.output_text === "string" && data.output_text.trim()) {
-    return data.output_text.trim();
-  }
-  for (const o of data.output ?? []) {
-    for (const c of o.content ?? []) {
-      if (c?.type === "output_text" && typeof c.text === "string" && c.text.trim()) {
-        return c.text.trim();
-      }
-      if (typeof c?.text === "string" && c.text.trim()) {
-        return c.text.trim();
-      }
-    }
-  }
+function extractOutputText(data: ChatCompletionsOut): string | null {
+  const content = data.choices?.[0]?.message?.content;
+  if (typeof content === "string" && content.trim()) return content.trim();
   return null;
 }
 
 async function callOpenClaw(message: string, agentName: string): Promise<string | null> {
-  const res = await fetch(`${OPENCLAW_BASE_URL}/v1/responses`, {
+  const res = await fetch(`${OPENCLAW_BASE_URL}/v1/chat/completions`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       ...(OPENCLAW_API_KEY ? { Authorization: `Bearer ${OPENCLAW_API_KEY}` } : {}),
+      "x-openclaw-agent-id": "main",
     },
     body: JSON.stringify({
       model: OPENCLAW_MODEL,
-      input: [
+      messages: [
         {
           role: "system",
           content: `You are ${agentName}. Respond conversationally and concisely for Darshan chat.`,
@@ -69,10 +58,10 @@ async function callOpenClaw(message: string, agentName: string): Promise<string 
 
   if (!res.ok) {
     const txt = await res.text();
-    throw new Error(`openclaw responses api failed: ${res.status} ${txt}`);
+    throw new Error(`openclaw chat api failed: ${res.status} ${txt}`);
   }
 
-  const data = (await res.json()) as ResponsesApiOut;
+  const data = (await res.json()) as ChatCompletionsOut;
   return extractOutputText(data);
 }
 
