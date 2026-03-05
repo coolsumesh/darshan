@@ -81,8 +81,9 @@ export async function registerAgentChat(server: FastifyInstance, db: pg.Pool) {
             where pa.agent_id = a.id
               and (p.owner_user_id = $1 or pu.user_id is not null)
           ))
-         and a.last_ping_at > now() - interval '1 hour'
-       order by lower(a.name) asc`,
+       order by
+         case when a.last_ping_at > now() - interval '1 hour' then 0 else 1 end,
+         lower(a.name) asc`,
       [user.userId]
     );
 

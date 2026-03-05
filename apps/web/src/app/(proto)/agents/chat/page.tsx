@@ -95,9 +95,9 @@ export default function AgentChatPage() {
   return (
     <div className="grid grid-cols-12 gap-4">
       <div className="col-span-12 lg:col-span-3 rounded-2xl bg-white p-3 ring-1 ring-line dark:bg-slate-950 dark:ring-slate-800">
-        <div className="mb-2 text-sm font-semibold">Online Agents</div>
+        <div className="mb-2 text-sm font-semibold">Agents</div>
         <div className="space-y-2">
-          {agents.length === 0 && <div className="text-sm text-muted">No online agents</div>}
+          {agents.length === 0 && <div className="text-sm text-muted">No agents available</div>}
           {agents.map((a) => (
             <button
               key={a.id}
