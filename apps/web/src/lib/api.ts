@@ -137,8 +137,12 @@ export async function fetchTeam(projectId: string): Promise<TeamMemberWithAgent[
   if (data?.ok && data.team) {
     return data.team.map((m) => ({
       agentId: (m as unknown as { agent_id: string }).agent_id ?? m.agentId,
-      role: "",
+      role: (m as unknown as { agent_role?: string }).agent_role ?? "",
       joinedAt: (m as unknown as { joined_at: string }).joined_at ?? m.joinedAt,
+      agent_role: (m as unknown as { agent_role?: "coordinator" | "worker" | "reviewer" }).agent_role,
+      agent_level: (m as unknown as { agent_level?: number }).agent_level,
+      level_confidence: (m as unknown as { level_confidence?: "low" | "medium" | "high" }).level_confidence,
+      last_evaluated_at: (m as unknown as { last_evaluated_at?: string | null }).last_evaluated_at ?? null,
       agent: {
         id:                   (m as unknown as { agent_id: string }).agent_id ?? m.id,
         name:                 m.name,
@@ -681,4 +685,53 @@ export async function fetchTaskActivity(projectId: string, taskId: string): Prom
     `/api/v1/projects/${projectId}/tasks/${taskId}/activity`
   );
   return data?.ok ? data.activity : [];
+}
+
+// ── Agent chat (MVP) ─────────────────────────────────────────────────────────
+
+export type OnlineAgent = {
+  id: string;
+  name: string;
+  description?: string | null;
+  model?: string | null;
+  provider?: string | null;
+  agent_type?: string | null;
+  status: "online" | "offline";
+  last_ping_at?: string | null;
+  last_seen_at?: string | null;
+};
+
+export type ChatMessage = {
+  id: string;
+  thread_id: string;
+  author_type: "human" | "agent" | string;
+  author_user_id?: string | null;
+  author_agent_id?: string | null;
+  content: string;
+  seq?: string | number;
+  created_at: string;
+};
+
+export async function fetchOnlineAgents(): Promise<OnlineAgent[]> {
+  const data = await apiFetch<{ ok: boolean; agents: OnlineAgent[] }>("/api/v1/agents/online");
+  return data?.ok ? data.agents : [];
+}
+
+export async function openAgentChat(agentId: string): Promise<string | null> {
+  const data = await apiFetch<{ ok: boolean; thread_id: string }>(`/api/v1/agents/${agentId}/chat`);
+  return data?.ok ? data.thread_id : null;
+}
+
+export async function fetchAgentChatMessages(agentId: string, limit = 100): Promise<{ threadId: string | null; messages: ChatMessage[] }> {
+  const data = await apiFetch<{ ok: boolean; thread_id: string; messages: ChatMessage[] }>(`/api/v1/agents/${agentId}/chat/messages?limit=${limit}`);
+  if (!data?.ok) return { threadId: null, messages: [] };
+  return { threadId: data.thread_id, messages: data.messages ?? [] };
+}
+
+export async function sendAgentChatMessage(agentId: string, content: string): Promise<boolean> {
+  const data = await apiFetch<{ ok: boolean }>(`/api/v1/agents/${agentId}/chat/messages`, {
+    method: "POST",
+    body: JSON.stringify({ content }),
+  });
+  return data?.ok ?? false;
 }

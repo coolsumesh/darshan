@@ -49,6 +49,7 @@ const AGENTS_NAV = [
   { href: "/agents",          label: "Registry",  icon: Users          },
   { href: "/agents/onboard",  label: "Onboard",   icon: Terminal       },
   { href: "/agents/tasks",    label: "Tasks",     icon: ClipboardList  },
+  { href: "/agents/chat",     label: "Chat",      icon: MessageSquareText },
   { href: "/agents/activity", label: "Activity",  icon: Zap            },
   { href: "/agents/invites",  label: "Invites",   icon: Link2          },
 ] as const;
