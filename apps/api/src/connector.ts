@@ -22,6 +22,48 @@ function pickResponse(agentName: string): string {
   return CANNED_RESPONSES[key] ?? CANNED_RESPONSES["default"]!;
 }
 
+type BridgeResponse = {
+  ok?: boolean;
+  reply?: string;
+};
+
+async function getBridgeReply(params: {
+  agentId: string;
+  agentName: string;
+  threadId: string;
+  runId: string;
+  userMessage: string;
+}): Promise<string | null> {
+  const bridgeUrl = process.env.OPENCLAW_CHAT_BRIDGE_URL?.trim();
+  if (!bridgeUrl) return null;
+
+  try {
+    const res = await fetch(bridgeUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(process.env.OPENCLAW_CHAT_BRIDGE_TOKEN
+          ? { Authorization: `Bearer ${process.env.OPENCLAW_CHAT_BRIDGE_TOKEN}` }
+          : {}),
+      },
+      body: JSON.stringify({
+        agent_id: params.agentId,
+        agent_name: params.agentName,
+        thread_id: params.threadId,
+        run_id: params.runId,
+        message: params.userMessage,
+      }),
+    });
+
+    if (!res.ok) return null;
+    const data = (await res.json()) as BridgeResponse;
+    if (!data?.reply || typeof data.reply !== "string") return null;
+    return data.reply.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
 export async function processQueued(db: pg.Pool) {
   // Claim queued runs (limit to small batch to avoid thundering herd)
   const { rows: queued } = await db.query<{
@@ -67,13 +109,31 @@ export async function processQueued(db: pg.Pool) {
     // Simulate agent thinking
     await sleep(THINK_TIME_MS);
 
-    // Fetch agent name for canned response
+    // Fetch agent name + inbound user message
     const { rows: agentRows } = await db.query(
       `select name from agents where id = $1`,
       [run.target_agent_id]
     );
     const agentName = agentRows[0]?.name ?? "Agent";
-    const responseContent = `[${agentName}] ${pickResponse(agentName)}`;
+
+    let userMessage = "";
+    if (run.input_message_id) {
+      const { rows: inputRows } = await db.query<{ content: string }>(
+        `select content from messages where id = $1`,
+        [run.input_message_id]
+      );
+      userMessage = inputRows[0]?.content ?? "";
+    }
+
+    const bridgedReply = await getBridgeReply({
+      agentId: run.target_agent_id,
+      agentName,
+      threadId: run.thread_id,
+      runId: run.id,
+      userMessage,
+    });
+
+    const responseContent = `[${agentName}] ${bridgedReply ?? pickResponse(agentName)}`;
 
     // Persist agent response message
     const { rows: msgRows } = await db.query(
