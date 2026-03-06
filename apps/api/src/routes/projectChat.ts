@@ -17,10 +17,67 @@ function extractAgentMentions(content: string): string[] {
 
 type BridgeResponse = { ok?: boolean; reply?: string };
 
+async function ensureAgentThread(db: pg.Pool, userId: string, agentId: string): Promise<string> {
+  const existing = await db.query<{ thread_id: string }>(
+    `select thread_id from agent_chats where user_id = $1 and agent_id = $2`,
+    [userId, agentId]
+  );
+  if (existing.rows[0]?.thread_id) return existing.rows[0].thread_id;
+
+  const client = await db.connect();
+  try {
+    await client.query("begin");
+
+    const { rows: agentRows } = await client.query<{ name: string }>(
+      `select name from agents where id = $1`,
+      [agentId]
+    );
+    const agentName = agentRows[0]?.name ?? "Agent";
+
+    const { rows: threadRows } = await client.query<{ id: string }>(
+      `insert into threads (title, visibility, created_by_user_id)
+       values ($1, 'private', $2)
+       returning id`,
+      [`Chat: ${agentName}`, userId]
+    );
+
+    const threadId = threadRows[0]!.id;
+
+    await client.query(
+      `insert into thread_participants (thread_id, participant_type, user_id, can_read, can_write)
+       values ($1, 'human', $2, true, true)
+       on conflict do nothing`,
+      [threadId, userId]
+    );
+
+    await client.query(
+      `insert into thread_participants (thread_id, participant_type, agent_id, can_read, can_write)
+       values ($1, 'agent', $2, true, true)
+       on conflict do nothing`,
+      [threadId, agentId]
+    );
+
+    await client.query(
+      `insert into agent_chats (user_id, agent_id, thread_id)
+       values ($1, $2, $3)
+       on conflict (user_id, agent_id) do update set thread_id = excluded.thread_id, updated_at = now()`,
+      [userId, agentId, threadId]
+    );
+
+    await client.query("commit");
+    return threadId;
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 async function getBridgeReply(params: {
   agentId: string;
   agentName: string;
-  projectId: string;
+  threadId: string;
   runId: string;
   userMessage: string;
 }): Promise<string | null> {
@@ -39,7 +96,7 @@ async function getBridgeReply(params: {
       body: JSON.stringify({
         agent_id: params.agentId,
         agent_name: params.agentName,
-        thread_id: `project:${params.projectId}`,
+        thread_id: params.threadId,
         run_id: params.runId,
         message: params.userMessage,
       }),
@@ -197,7 +254,7 @@ export async function registerProjectChat(server: FastifyInstance, db: pg.Pool) 
 
       // Mention-triggered agent responses (noise control): agents only reply when explicitly tagged.
       // Example: "@Mithran @Sanjaya can you split today's blockers?"
-      if (authorType === "human") {
+      if (authorType === "human" && user?.userId) {
         const mentionKeys = extractAgentMentions(content);
         if (mentionKeys.length > 0) {
           void (async () => {
@@ -211,10 +268,11 @@ export async function registerProjectChat(server: FastifyInstance, db: pg.Pool) 
 
             const targets = projectAgents.filter((a) => mentionKeys.includes(a.name.toLowerCase()));
             for (const target of targets) {
+              const threadId = await ensureAgentThread(db, user.userId, target.id);
               const bridgedReply = await getBridgeReply({
                 agentId: target.id,
                 agentName: target.name,
-                projectId: access.projectId,
+                threadId,
                 runId: inserted.id,
                 userMessage: content,
               });
