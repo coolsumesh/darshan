@@ -133,7 +133,11 @@ export async function processQueued(db: pg.Pool) {
       userMessage,
     });
 
-    const responseContent = `[${agentName}] ${bridgedReply ?? pickResponse(agentName)}`;
+    const bridgeConfigured = Boolean(process.env.OPENCLAW_CHAT_BRIDGE_URL?.trim());
+    const responseText = bridgeConfigured
+      ? (bridgedReply ?? "Bridge unavailable. Retrying shortly.")
+      : pickResponse(agentName);
+    const responseContent = `[${agentName}] ${responseText}`;
 
     // Persist agent response message
     const { rows: msgRows } = await db.query(
