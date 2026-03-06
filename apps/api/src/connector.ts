@@ -133,7 +133,7 @@ export async function processQueued(db: pg.Pool) {
       userMessage,
     });
 
-    const bridgeConfigured = Boolean(process.env.OPENCLAW_CHAT_BRIDGE_URL?.trim());
+    const bridgeConfigured = true;
     const responseText = bridgeConfigured
       ? (bridgedReply ?? "Bridge unavailable. Retrying shortly.")
       : pickResponse(agentName);
