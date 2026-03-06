@@ -3,6 +3,7 @@
 
 import { type Project, type Task, type TeamMember } from "./projects";
 import { type Agent } from "./agents";
+import { type ProjectChatMessage } from "@darshan/shared";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "/api/backend";
 
@@ -685,6 +686,25 @@ export async function fetchTaskActivity(projectId: string, taskId: string): Prom
     `/api/v1/projects/${projectId}/tasks/${taskId}/activity`
   );
   return data?.ok ? data.activity : [];
+}
+
+// ── Project group chat (MVP) ─────────────────────────────────────────────────
+
+export type ProjectChatMessageItem = ProjectChatMessage;
+
+export async function fetchProjectChatMessages(projectId: string, limit = 100): Promise<ProjectChatMessageItem[]> {
+  const data = await apiFetch<{ ok: boolean; messages: ProjectChatMessageItem[] }>(
+    `/api/v1/projects/${projectId}/chat/messages?limit=${limit}`
+  );
+  return data?.ok ? data.messages : [];
+}
+
+export async function sendProjectChatMessage(projectId: string, content: string): Promise<ProjectChatMessageItem | null> {
+  const data = await apiFetch<{ ok: boolean; message: ProjectChatMessageItem }>(
+    `/api/v1/projects/${projectId}/chat/messages`,
+    { method: "POST", body: JSON.stringify({ content }) }
+  );
+  return data?.ok ? data.message : null;
 }
 
 // ── Agent chat (MVP) ─────────────────────────────────────────────────────────

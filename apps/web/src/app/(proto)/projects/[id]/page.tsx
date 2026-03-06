@@ -9,7 +9,7 @@ import {
   ArrowLeft, BookOpen, Calendar, ChevronDown, ExternalLink,
   FileCode2, Filter, GripVertical, LayoutList, Zap, Terminal,
   MoreHorizontal, Plus, Search, SortAsc, UserPlus, Users, X, Trash2, Check,
-  Mail, Crown, UserCircle, Copy, Link as LinkIcon,
+  Mail, Crown, UserCircle, Copy, Link as LinkIcon, MessageSquare,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -26,16 +26,19 @@ import {
   fetchUserMembers, addUserMember, removeUserMember,
   fetchProjectInvites, createProjectInvite, revokeProjectInvite,
   fetchTaskActivity,
+  fetchProjectChatMessages,
+  sendProjectChatMessage,
   authMe,
   type TeamMemberWithAgent,
   type UserMember,
   type ProjectInvite,
   type TaskActivity,
+  type ProjectChatMessageItem,
 } from "@/lib/api";
 import { type Agent } from "@/lib/agents";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-type Tab = "table" | "team" | "architecture" | "tech-spec" | "agent-briefing";
+type Tab = "table" | "team" | "architecture" | "tech-spec" | "agent-briefing" | "chat";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const STATUS_META: Record<TaskStatus, { label: string; bg: string; text: string; dot: string }> = {
@@ -1531,6 +1534,115 @@ function AgentBriefingTab({ projectId }: { projectId: string }) {
 }
 
 // ─── User Members Section (human collaborators) ───────────────────────────────
+function ProjectChatTab({ projectId }: { projectId: string }) {
+  const [messages, setMessages] = React.useState<ProjectChatMessageItem[]>([]);
+  const [loading, setLoading] = React.useState(true);
+  const [draft, setDraft] = React.useState("");
+  const [sending, setSending] = React.useState(false);
+  const listRef = React.useRef<HTMLDivElement | null>(null);
+
+  React.useEffect(() => {
+    let mounted = true;
+    fetchProjectChatMessages(projectId).then((rows) => {
+      if (!mounted) return;
+      setMessages(rows);
+      setLoading(false);
+    });
+    return () => {
+      mounted = false;
+    };
+  }, [projectId]);
+
+  React.useEffect(() => {
+    if (!listRef.current) return;
+    listRef.current.scrollTop = listRef.current.scrollHeight;
+  }, [messages]);
+
+  React.useEffect(() => {
+    if (typeof window === "undefined") return;
+    let ws: WebSocket | null = null;
+    let retryTimeout: ReturnType<typeof setTimeout>;
+    function connect() {
+      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+      ws = new WebSocket(`${protocol}//${window.location.host}/api/backend/ws`);
+      ws.onmessage = (e) => {
+        try {
+          const msg = JSON.parse(e.data) as { type: string; data?: { message?: ProjectChatMessageItem } };
+          if (msg.type !== "project_chat:message_created" || !msg.data?.message) return;
+          const next = msg.data.message;
+          if (next.project_id !== projectId) return;
+          setMessages((prev) => (prev.some((m) => m.id === next.id) ? prev : [...prev, next]));
+        } catch {
+          // Ignore invalid websocket messages
+        }
+      };
+      ws.onclose = () => {
+        retryTimeout = setTimeout(connect, 3000);
+      };
+    }
+    connect();
+    return () => {
+      clearTimeout(retryTimeout);
+      ws?.close();
+    };
+  }, [projectId]);
+
+  async function handleSend() {
+    const content = draft.trim();
+    if (!content || sending) return;
+    setSending(true);
+    const message = await sendProjectChatMessage(projectId, content);
+    if (message) {
+      setMessages((prev) => (prev.some((m) => m.id === message.id) ? prev : [...prev, message]));
+      setDraft("");
+    }
+    setSending(false);
+  }
+
+  return (
+    <Card className="h-full">
+      <CardHeader>
+        <CardTitle>Project Chat</CardTitle>
+      </CardHeader>
+      <CardContent className="flex h-[calc(100vh-20rem)] min-h-[320px] flex-col gap-3">
+        <div ref={listRef} className="flex-1 overflow-y-auto rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-[#2D2A45] dark:bg-[#0F0D1E]">
+          {loading && <p className="text-sm text-zinc-500">Loading chat...</p>}
+          {!loading && messages.length === 0 && <p className="text-sm text-zinc-500">No messages yet.</p>}
+          <div className="space-y-3">
+            {messages.map((m) => (
+              <div key={m.id} className="rounded-lg bg-white p-3 shadow-sm ring-1 ring-zinc-100 dark:bg-[#16132A] dark:ring-[#2D2A45]">
+                <div className="mb-1 flex items-center justify-between gap-3">
+                  <span className="text-xs font-semibold text-zinc-700 dark:text-zinc-200">{m.author_name ?? "System"}</span>
+                  <span className="text-[11px] text-zinc-400">{timeAgo(m.created_at)}</span>
+                </div>
+                <p className="whitespace-pre-wrap text-sm text-zinc-800 dark:text-zinc-100">{m.content}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="flex items-end gap-2">
+          <textarea
+            rows={2}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            placeholder="Write a message to the project..."
+            className="min-h-[44px] flex-1 resize-y rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm outline-none focus:border-brand-400 dark:border-[#2D2A45] dark:bg-[#16132A]"
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                void handleSend();
+              }
+            }}
+          />
+          <Button variant="primary" size="sm" onClick={() => void handleSend()} disabled={sending || !draft.trim()}>
+            {sending ? "Sending..." : "Send"}
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 const USER_ROLES = ["contributor", "admin", "viewer"] as const;
 
 function UserMembersSection({ projectId, canAdmin }: { projectId: string; canAdmin: boolean }) {
@@ -2279,6 +2391,7 @@ function ProjectHeader({ project }: { project: { id: string; name: string; descr
 const TABS: { id: Tab; label: string; icon: React.ElementType }[] = [
   { id: "table",          label: "Task List",      icon: LayoutList },
   { id: "team",           label: "Team",           icon: Users      },
+  { id: "chat",           label: "Chat",           icon: MessageSquare },
   { id: "architecture",   label: "Architecture",   icon: BookOpen   },
   { id: "tech-spec",      label: "Tech Spec",      icon: FileCode2  },
   { id: "agent-briefing", label: "Agent Briefing", icon: Terminal   },
@@ -2386,6 +2499,7 @@ export default function ProjectDetailPage(props: { params: Promise<{ id: string 
             canAdminUsers={myRole === "owner" || myRole === "admin"}
           />
         )}
+        {activeTab === "chat"           && <ProjectChatTab projectId={project.id} />}
         {activeTab === "architecture"   && <ArchitectureTab  projectId={project.slug ?? project.id} />}
         {activeTab === "tech-spec"      && <TechSpecTab      projectId={project.slug ?? project.id} />}
         {activeTab === "agent-briefing" && <AgentBriefingTab projectId={project.id} />}

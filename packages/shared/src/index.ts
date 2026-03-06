@@ -90,6 +90,20 @@ export type A2ARoute = {
   updated_at: string;
 };
 
+export type ProjectChatAuthorType = "human" | "agent" | "system";
+
+export type ProjectChatMessage = {
+  id: string;
+  project_id: string;
+  author_type: ProjectChatAuthorType;
+  author_user_id: string | null;
+  author_agent_id: string | null;
+  content: string;
+  created_at: string;
+  author_name?: string;
+  author_avatar_url?: string | null;
+};
+
 // ─── WebSocket event envelope ─────────────────────────────────────────────────
 
 export type WsEvent<T = unknown> = {
@@ -101,3 +115,4 @@ export type WsEvent<T = unknown> = {
 export type WsMessageCreated = WsEvent<{ message: Message }>;
 export type WsRunCreated    = WsEvent<{ run: Run }>;
 export type WsRunUpdated    = WsEvent<{ run: Run }>;
+export type WsProjectChatMessageCreated = WsEvent<{ message: ProjectChatMessage }>;

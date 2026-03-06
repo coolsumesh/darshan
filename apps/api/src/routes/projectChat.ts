@@ -1,0 +1,151 @@
+import type { ProjectChatMessage } from "@darshan/shared";
+import type { FastifyInstance } from "fastify";
+import type pg from "pg";
+import { appendAuditEvent } from "../audit.js";
+import { broadcast } from "../broadcast.js";
+import { getRequestUser } from "./auth.js";
+
+type ProjectRole = "owner" | "admin" | "contributor" | "viewer";
+const ROLE_RANK: Record<ProjectRole, number> = { owner: 4, admin: 3, contributor: 2, viewer: 1 };
+
+export async function registerProjectChat(server: FastifyInstance, db: pg.Pool) {
+  async function checkAccess(
+    idOrSlug: string,
+    req: unknown,
+    minRole: ProjectRole = "viewer"
+  ): Promise<{ projectId: string; role: ProjectRole } | { deny: 404 | 403 }> {
+    const { rows } = await db.query(
+      `select id, owner_user_id, org_id from projects where id::text = $1 or lower(slug) = lower($1)`,
+      [idOrSlug]
+    );
+    if (!rows[0]) return { deny: 404 };
+
+    const userId = getRequestUser(req)?.userId ?? null;
+    const authHeader = (req as { headers?: Record<string, string | undefined> })?.headers?.authorization ?? "";
+    const bearer = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+    const INTERNAL_API_KEY = process.env.DARSHAN_API_KEY ?? "824cdfcdec0e35cf550002c2dfa3541932f58e2e2497cfaa3c844dc99f5b972f";
+
+    if (bearer && bearer === INTERNAL_API_KEY) return { projectId: rows[0].id, role: "owner" };
+    if (!userId) return { deny: 403 };
+
+    let role: ProjectRole;
+    if (rows[0].owner_user_id === userId) {
+      role = "owner";
+    } else {
+      const { rows: projectRoles } = await db.query(
+        `select role from project_users where project_id = $1 and user_id = $2`,
+        [rows[0].id, userId]
+      );
+      if (projectRoles[0]) {
+        role = projectRoles[0].role as ProjectRole;
+      } else if (rows[0].org_id) {
+        const { rows: orgRoles } = await db.query(
+          `select role from org_users where org_id = $1 and user_id = $2`,
+          [rows[0].org_id, userId]
+        );
+        if (!orgRoles[0]) return { deny: 403 };
+        role = orgRoles[0].role as ProjectRole;
+      } else {
+        return { deny: 403 };
+      }
+    }
+
+    if (ROLE_RANK[role] < ROLE_RANK[minRole]) return { deny: 403 };
+    return { projectId: rows[0].id, role };
+  }
+
+  server.get<{ Params: { id: string }; Querystring: { limit?: string } }>(
+    "/api/v1/projects/:id/chat/messages",
+    async (req, reply) => {
+      const access = await checkAccess(req.params.id, req, "viewer");
+      if ("deny" in access) {
+        return reply.status(access.deny).send({
+          ok: false,
+          error: access.deny === 404 ? "project not found" : "forbidden",
+        });
+      }
+
+      const limit = Math.min(Math.max(Number(req.query.limit ?? 100), 1), 200);
+      const { rows } = await db.query<ProjectChatMessage>(
+        `select pcm.id,
+                pcm.project_id,
+                pcm.author_type,
+                pcm.author_user_id,
+                pcm.author_agent_id,
+                pcm.content,
+                pcm.created_at,
+                coalesce(u.name, a.name, 'System') as author_name,
+                u.avatar_url as author_avatar_url
+         from project_chat_messages pcm
+         left join users u on u.id = pcm.author_user_id
+         left join agents a on a.id = pcm.author_agent_id
+         where pcm.project_id = $1
+         order by pcm.created_at desc
+         limit $2`,
+        [access.projectId, limit]
+      );
+
+      return { ok: true, messages: rows.reverse() };
+    }
+  );
+
+  server.post<{ Params: { id: string }; Body: { content?: string } }>(
+    "/api/v1/projects/:id/chat/messages",
+    async (req, reply) => {
+      const access = await checkAccess(req.params.id, req, "viewer");
+      if ("deny" in access) {
+        return reply.status(access.deny).send({
+          ok: false,
+          error: access.deny === 404 ? "project not found" : "forbidden",
+        });
+      }
+
+      const content = req.body?.content?.trim();
+      if (!content) return reply.status(400).send({ ok: false, error: "content is required" });
+
+      const user = getRequestUser(req);
+      const authorType: ProjectChatMessage["author_type"] = user ? "human" : "system";
+      const authorUserId = user?.userId ?? null;
+
+      const { rows: insertedRows } = await db.query<ProjectChatMessage>(
+        `insert into project_chat_messages (project_id, author_type, author_user_id, content)
+         values ($1, $2, $3, $4)
+         returning id, project_id, author_type, author_user_id, author_agent_id, content, created_at`,
+        [access.projectId, authorType, authorUserId, content]
+      );
+      const inserted = insertedRows[0];
+
+      const { rows: messageRows } = await db.query<ProjectChatMessage>(
+        `select pcm.id,
+                pcm.project_id,
+                pcm.author_type,
+                pcm.author_user_id,
+                pcm.author_agent_id,
+                pcm.content,
+                pcm.created_at,
+                coalesce(u.name, a.name, 'System') as author_name,
+                u.avatar_url as author_avatar_url
+         from project_chat_messages pcm
+         left join users u on u.id = pcm.author_user_id
+         left join agents a on a.id = pcm.author_agent_id
+         where pcm.id = $1`,
+        [inserted.id]
+      );
+      const message = messageRows[0];
+
+      await appendAuditEvent(db, {
+        actor: user
+          ? { actor_type: "human", actor_user_id: user.userId }
+          : { actor_type: "system" },
+        action: "project_chat.message.create",
+        resource_type: "project_chat_message",
+        resource_id: inserted.id,
+        decision: "allow",
+        metadata: { project_id: access.projectId },
+      });
+
+      broadcast("project_chat:message_created", { message });
+      return reply.status(201).send({ ok: true, message });
+    }
+  );
+}
