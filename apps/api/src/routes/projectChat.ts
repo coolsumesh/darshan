@@ -5,6 +5,55 @@ import { appendAuditEvent } from "../audit.js";
 import { broadcast } from "../broadcast.js";
 import { getRequestUser } from "./auth.js";
 
+function extractAgentMentions(content: string): string[] {
+  const matches = content.matchAll(/@([a-zA-Z0-9._-]+)/g);
+  const names = new Set<string>();
+  for (const m of matches) {
+    const raw = (m[1] ?? "").trim().toLowerCase();
+    if (raw) names.add(raw);
+  }
+  return [...names];
+}
+
+type BridgeResponse = { ok?: boolean; reply?: string };
+
+async function getBridgeReply(params: {
+  agentId: string;
+  agentName: string;
+  projectId: string;
+  runId: string;
+  userMessage: string;
+}): Promise<string | null> {
+  const bridgeUrl = process.env.OPENCLAW_CHAT_BRIDGE_URL?.trim();
+  if (!bridgeUrl) return null;
+
+  try {
+    const res = await fetch(bridgeUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(process.env.OPENCLAW_CHAT_BRIDGE_TOKEN
+          ? { Authorization: `Bearer ${process.env.OPENCLAW_CHAT_BRIDGE_TOKEN}` }
+          : {}),
+      },
+      body: JSON.stringify({
+        agent_id: params.agentId,
+        agent_name: params.agentName,
+        thread_id: `project:${params.projectId}`,
+        run_id: params.runId,
+        message: params.userMessage,
+      }),
+    });
+
+    if (!res.ok) return null;
+    const data = (await res.json()) as BridgeResponse;
+    if (!data?.reply || typeof data.reply !== "string") return null;
+    return data.reply.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
 type ProjectRole = "owner" | "admin" | "contributor" | "viewer";
 const ROLE_RANK: Record<ProjectRole, number> = { owner: 4, admin: 3, contributor: 2, viewer: 1 };
 
@@ -145,6 +194,65 @@ export async function registerProjectChat(server: FastifyInstance, db: pg.Pool) 
       });
 
       broadcast("project_chat:message_created", { message });
+
+      // Mention-triggered agent responses (noise control): agents only reply when explicitly tagged.
+      // Example: "@Mithran @Sanjaya can you split today's blockers?"
+      if (authorType === "human") {
+        const mentionKeys = extractAgentMentions(content);
+        if (mentionKeys.length > 0) {
+          void (async () => {
+            const { rows: projectAgents } = await db.query<{ id: string; name: string }>(
+              `select a.id, a.name
+               from project_agents pa
+               join agents a on a.id = pa.agent_id
+               where pa.project_id = $1`,
+              [access.projectId]
+            );
+
+            const targets = projectAgents.filter((a) => mentionKeys.includes(a.name.toLowerCase()));
+            for (const target of targets) {
+              const bridgedReply = await getBridgeReply({
+                agentId: target.id,
+                agentName: target.name,
+                projectId: access.projectId,
+                runId: inserted.id,
+                userMessage: content,
+              });
+              const replyText = bridgedReply ?? `${target.name} acknowledged. Mention me directly with @${target.name} to continue.`;
+
+              const { rows: agentRows } = await db.query<ProjectChatMessage>(
+                `insert into project_chat_messages (project_id, author_type, author_agent_id, content)
+                 values ($1, 'agent', $2, $3)
+                 returning id, project_id, author_type, author_user_id, author_agent_id, content, created_at`,
+                [access.projectId, target.id, replyText]
+              );
+
+              const { rows: hydratedRows } = await db.query<ProjectChatMessage>(
+                `select pcm.id,
+                        pcm.project_id,
+                        pcm.author_type,
+                        pcm.author_user_id,
+                        pcm.author_agent_id,
+                        pcm.content,
+                        pcm.created_at,
+                        coalesce(u.name, a.name, 'System') as author_name,
+                        u.avatar_url as author_avatar_url
+                 from project_chat_messages pcm
+                 left join users u on u.id = pcm.author_user_id
+                 left join agents a on a.id = pcm.author_agent_id
+                 where pcm.id = $1`,
+                [agentRows[0].id]
+              );
+
+              const agentMessage = hydratedRows[0];
+              if (agentMessage) {
+                broadcast("project_chat:message_created", { message: agentMessage });
+              }
+            }
+          })();
+        }
+      }
+
       return reply.status(201).send({ ok: true, message });
     }
   );
