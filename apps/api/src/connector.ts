@@ -52,6 +52,8 @@ async function getBridgeReply(params: {
         thread_id: params.threadId,
         run_id: params.runId,
         message: params.userMessage,
+        channel: "darshan",
+        chat_id: params.threadId,
       }),
     });
 

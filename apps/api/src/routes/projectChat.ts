@@ -87,6 +87,9 @@ async function getBridgeReply(params: {
   threadId: string;
   runId: string;
   userMessage: string;
+  senderId?: string;
+  senderName?: string;
+  projectId?: string;
 }): Promise<string | null> {
   const bridgeUrl = process.env.OPENCLAW_CHAT_BRIDGE_URL?.trim();
   if (!bridgeUrl) return null;
@@ -106,6 +109,11 @@ async function getBridgeReply(params: {
         thread_id: params.threadId,
         run_id: params.runId,
         message: params.userMessage,
+        channel: "darshan",
+        chat_id: params.threadId,
+        sender_id: params.senderId,
+        sender_name: params.senderName,
+        project_id: params.projectId,
       }),
     });
 
@@ -282,6 +290,9 @@ export async function registerProjectChat(server: FastifyInstance, db: pg.Pool) 
                 threadId,
                 runId: inserted.id,
                 userMessage: content,
+                senderId: user.userId,
+                senderName: user.name,
+                projectId: access.projectId,
               });
               const replyText = bridgedReply ?? pickProjectFallback(target.name);
 

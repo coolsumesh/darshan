@@ -11,7 +11,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Write .env to server
+      - name: Write API + Chat Bridge env to server
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: darshan.caringgems.in
@@ -29,17 +29,28 @@ jobs:
             GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }}
             GOOGLE_CLIENT_SECRET=${{ secrets.GOOGLE_CLIENT_SECRET }}
             GOOGLE_REDIRECT_URI=https://darshan.caringgems.in/api/backend/api/v1/auth/google/callback
-            OPENCLAW_CHAT_BRIDGE_URL=${{ secrets.OPENCLAW_CHAT_BRIDGE_URL }}
+            OPENCLAW_CHAT_BRIDGE_URL=http://127.0.0.1:4400/darshan/chat
             OPENCLAW_CHAT_BRIDGE_TOKEN=${{ secrets.OPENCLAW_CHAT_BRIDGE_TOKEN }}
             EOF
 
-      - name: Deploy API + Web
+            cat > /home/ubuntu/projects/darshan/apps/chat-bridge/.env << 'EOF'
+            NODE_ENV=production
+            PORT=4400
+            HOST=0.0.0.0
+            OPENCLAW_CHAT_BRIDGE_TOKEN=${{ secrets.OPENCLAW_CHAT_BRIDGE_TOKEN }}
+            OPENCLAW_BASE_URL=${{ secrets.OPENCLAW_BASE_URL || 'http://127.0.0.1:18789' }}
+            OPENCLAW_API_KEY=${{ secrets.OPENCLAW_API_KEY }}
+            OPENCLAW_MODEL=${{ secrets.OPENCLAW_MODEL || 'openclaw' }}
+            OPENCLAW_AGENT_ID_MAP_JSON=${{ secrets.OPENCLAW_AGENT_ID_MAP_JSON }}
+            EOF
+
+      - name: Deploy API + Chat Bridge + Web
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: darshan.caringgems.in
           username: ubuntu
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          command_timeout: 10m
+          command_timeout: 12m
           script: |
             set -e
             source ~/.nvm/nvm.sh
@@ -53,7 +64,15 @@ jobs:
             pnpm build
             pm2 delete darshan-api 2>/dev/null || true
             pm2 start dist/index.js --name darshan-api --cwd /home/ubuntu/projects/darshan/apps/api
-            sleep 3
+            sleep 2
+
+            # Chat Bridge
+            cd ../chat-bridge
+            pnpm install --frozen-lockfile
+            pnpm build
+            pm2 delete darshan-chat-bridge 2>/dev/null || true
+            pm2 start dist/index.js --name darshan-chat-bridge --cwd /home/ubuntu/projects/darshan/apps/chat-bridge
+            sleep 2
 
             # Web
             cd ../web
