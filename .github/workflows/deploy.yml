@@ -29,6 +29,8 @@ jobs:
             GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }}
             GOOGLE_CLIENT_SECRET=${{ secrets.GOOGLE_CLIENT_SECRET }}
             GOOGLE_REDIRECT_URI=https://darshan.caringgems.in/api/backend/api/v1/auth/google/callback
+            OPENCLAW_CHAT_BRIDGE_URL=${{ secrets.OPENCLAW_CHAT_BRIDGE_URL }}
+            OPENCLAW_CHAT_BRIDGE_TOKEN=${{ secrets.OPENCLAW_CHAT_BRIDGE_TOKEN }}
             EOF
 
       - name: Deploy API + Web

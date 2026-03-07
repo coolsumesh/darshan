@@ -276,7 +276,7 @@ export async function registerProjectChat(server: FastifyInstance, db: pg.Pool) 
                 runId: inserted.id,
                 userMessage: content,
               });
-              const replyText = bridgedReply ?? `${target.name} acknowledged. Mention me directly with @${target.name} to continue.`;
+              const replyText = bridgedReply ?? `Bridge unavailable for ${target.name}. Please check OPENCLAW_CHAT_BRIDGE_URL / TOKEN config.`;
 
               const { rows: agentRows } = await db.query<ProjectChatMessage>(
                 `insert into project_chat_messages (project_id, author_type, author_agent_id, content)
