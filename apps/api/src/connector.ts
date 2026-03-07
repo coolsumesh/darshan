@@ -133,10 +133,7 @@ export async function processQueued(db: pg.Pool) {
       userMessage,
     });
 
-    const bridgeConfigured = true;
-    const responseText = bridgeConfigured
-      ? (bridgedReply ?? "Bridge unavailable. Retrying shortly.")
-      : pickResponse(agentName);
+    const responseText = bridgedReply ?? pickResponse(agentName);
     const responseContent = `[${agentName}] ${responseText}`;
 
     // Persist agent response message

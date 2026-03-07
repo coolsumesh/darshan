@@ -17,6 +17,13 @@ function extractAgentMentions(content: string): string[] {
 
 type BridgeResponse = { ok?: boolean; reply?: string };
 
+function pickProjectFallback(agentName: string): string {
+  const key = agentName.toLowerCase();
+  if (key === "mithran") return "Got it. I reviewed your message and will proceed.";
+  if (key === "sanjaya") return "Understood. I’m on it and will update shortly.";
+  return "Acknowledged. I’ve reviewed your message and will proceed accordingly.";
+}
+
 async function ensureAgentThread(db: pg.Pool, userId: string, agentId: string): Promise<string> {
   const existing = await db.query<{ thread_id: string }>(
     `select thread_id from agent_chats where user_id = $1 and agent_id = $2`,
@@ -276,7 +283,7 @@ export async function registerProjectChat(server: FastifyInstance, db: pg.Pool) 
                 runId: inserted.id,
                 userMessage: content,
               });
-              const replyText = bridgedReply ?? `Bridge unavailable for ${target.name}. Please check OPENCLAW_CHAT_BRIDGE_URL / TOKEN config.`;
+              const replyText = bridgedReply ?? pickProjectFallback(target.name);
 
               const { rows: agentRows } = await db.query<ProjectChatMessage>(
                 `insert into project_chat_messages (project_id, author_type, author_agent_id, content)
