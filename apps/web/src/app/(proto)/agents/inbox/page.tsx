@@ -27,7 +27,7 @@ function InboxPageInner() {
   const [status, setStatus] = React.useState<"all" | "pending" | "ack" | "failed">("all");
   const [items, setItems] = React.useState<AgentInboxItem[]>([]);
   const [loading, setLoading] = React.useState(true);
-  const [openId, setOpenId] = React.useState<string | null>(null);
+  const [selectedId, setSelectedId] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     fetchAgents().then((rows) => {
@@ -60,6 +60,16 @@ function InboxPageInner() {
     load();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [agentId, tab, status]);
+
+  React.useEffect(() => {
+    if (!items.length) {
+      setSelectedId(null);
+      return;
+    }
+    if (!selectedId || !items.some(i => i.id === selectedId)) {
+      setSelectedId(items[0].id);
+    }
+  }, [items, selectedId]);
 
   const typeBadge = (t: string) =>
     t === "a2a_message" ? "bg-violet-100 text-violet-700 dark:bg-violet-500/15 dark:text-violet-400"
@@ -141,52 +151,69 @@ function InboxPageInner() {
         ) : items.length === 0 ? (
           <div className="py-12 text-center text-sm text-zinc-400">No messages</div>
         ) : (
-          <div className="divide-y divide-zinc-100 dark:divide-[#2D2A45]">
-            {items.map(item => {
-              const from = item.payload?.from_agent_name ?? item.from_agent_id ?? "unknown";
-              const to = item.to_agent_name ?? item.agent_id ?? "unknown";
-              const body = String(item.payload?.text ?? "(no body)");
-              const preview = body.replace(/\s+/g, " ");
-              const subject = String(item.payload?.subject ?? item.type ?? "(no subject)");
-              const isOpen = openId === item.id;
+          <div className="grid min-h-[520px] grid-cols-1 md:grid-cols-[380px_1fr]">
+            <div className="border-r border-zinc-100 dark:border-[#2D2A45]">
+              <div className="max-h-[70vh] overflow-y-auto">
+                {items.map(item => {
+                  const from = item.payload?.from_agent_name ?? item.from_agent_id ?? "unknown";
+                  const body = String(item.payload?.text ?? "(no body)");
+                  const subject = String(item.payload?.subject ?? item.type ?? "(no subject)");
+                  const selected = selectedId === item.id;
+                  return (
+                    <button
+                      key={item.id}
+                      onClick={() => setSelectedId(item.id)}
+                      className={cn(
+                        "w-full border-b border-zinc-100 px-4 py-3 text-left transition-colors dark:border-[#2D2A45]",
+                        selected ? "bg-brand-50 dark:bg-brand-500/10" : "hover:bg-zinc-50 dark:hover:bg-white/5"
+                      )}
+                    >
+                      <div className="mb-1 flex items-center gap-2">
+                        <span className="truncate text-sm font-semibold text-zinc-800 dark:text-zinc-100">{from}</span>
+                        <span className="ml-auto text-[11px] text-zinc-400">{relativeTime(item.created_at)}</span>
+                      </div>
+                      <div className="truncate text-xs font-medium text-zinc-700 dark:text-zinc-200">{subject}</div>
+                      <div className="truncate text-xs text-zinc-500 dark:text-zinc-400">{body.replace(/\s+/g, " ")}</div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
 
-              return (
-                <div key={item.id}>
-                  <button
-                    onClick={() => setOpenId(isOpen ? null : item.id)}
-                    className="w-full px-4 py-3 text-left hover:bg-zinc-50 dark:hover:bg-white/5 transition-colors"
-                  >
-                    <div className="flex items-center gap-2 text-xs">
-                      <span className="text-zinc-500">From <span className="font-semibold text-zinc-700 dark:text-zinc-200">{from}</span></span>
-                      <span className="text-zinc-400">→</span>
-                      <span className="text-zinc-500">To <span className="font-semibold text-zinc-700 dark:text-zinc-200">{to}</span></span>
-                      <span className="truncate text-zinc-700 dark:text-zinc-200">| {subject} — {preview}</span>
-                      <span className="ml-auto text-zinc-400">{relativeTime(item.created_at)}</span>
-                    </div>
-                  </button>
-
-                  {isOpen && (
-                    <div className="px-4 pb-3 text-sm">
-                      <div className="rounded-xl bg-zinc-50 p-3 dark:bg-white/5">
-                        <div className="mb-2 grid gap-1 text-xs text-zinc-500">
-                          <div>From: <span className="font-semibold text-zinc-700 dark:text-zinc-200">{from}</span></div>
-                          <div>To: <span className="font-semibold text-zinc-700 dark:text-zinc-200">{to}</span></div>
-                          <div>Subject: <span className="font-semibold text-zinc-700 dark:text-zinc-200">{subject}</span></div>
-                        </div>
-                        <p className="whitespace-pre-wrap text-zinc-700 dark:text-zinc-200">{body}</p>
-                        <div className="mt-2 flex flex-wrap gap-3 text-[11px] text-zinc-400">
-                          <span className={cn("rounded-full px-2 py-0.5 font-semibold", statusBadge(item.status))}>{item.status}</span>
-                          {item.corr_id && <span>Message ID: <span className="font-mono text-zinc-500">{item.corr_id}</span></span>}
-                          {item.reply_to_corr_id && <span>Reply To: <span className="font-mono text-zinc-500">{item.reply_to_corr_id}</span></span>}
-                          {item.thread_id && <span>Conversation: <span className="font-mono text-zinc-500">{item.thread_id}</span></span>}
-                          <span className={cn("rounded-full px-2 py-0.5 font-semibold", typeBadge(item.type))}>{item.type}</span>
-                        </div>
+            <div className="p-5">
+              {(() => {
+                const item = items.find(i => i.id === selectedId) ?? items[0];
+                if (!item) return null;
+                const from = item.payload?.from_agent_name ?? item.from_agent_id ?? "unknown";
+                const to = item.to_agent_name ?? item.agent_id ?? "unknown";
+                const subject = String(item.payload?.subject ?? item.type ?? "(no subject)");
+                const body = String(item.payload?.text ?? "(no body)");
+                return (
+                  <div>
+                    <div className="mb-4 border-b border-zinc-100 pb-4 dark:border-[#2D2A45]">
+                      <h2 className="text-lg font-semibold text-zinc-900 dark:text-white">{subject}</h2>
+                      <div className="mt-2 grid gap-1 text-xs text-zinc-500">
+                        <div>From: <span className="font-semibold text-zinc-700 dark:text-zinc-200">{from}</span></div>
+                        <div>To: <span className="font-semibold text-zinc-700 dark:text-zinc-200">{to}</span></div>
+                        <div>Received: <span className="font-semibold text-zinc-700 dark:text-zinc-200">{relativeTime(item.created_at)}</span></div>
                       </div>
                     </div>
-                  )}
-                </div>
-              );
-            })}
+
+                    <div className="rounded-xl bg-zinc-50 p-4 text-sm text-zinc-700 dark:bg-white/5 dark:text-zinc-200">
+                      <p className="whitespace-pre-wrap">{body}</p>
+                    </div>
+
+                    <div className="mt-4 flex flex-wrap gap-3 text-[11px] text-zinc-400">
+                      <span className={cn("rounded-full px-2 py-0.5 font-semibold", statusBadge(item.status))}>{item.status}</span>
+                      {item.corr_id && <span>Message ID: <span className="font-mono text-zinc-500">{item.corr_id}</span></span>}
+                      {item.reply_to_corr_id && <span>Reply To: <span className="font-mono text-zinc-500">{item.reply_to_corr_id}</span></span>}
+                      {item.thread_id && <span>Conversation: <span className="font-mono text-zinc-500">{item.thread_id}</span></span>}
+                      <span className={cn("rounded-full px-2 py-0.5 font-semibold", typeBadge(item.type))}>{item.type}</span>
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
           </div>
         )}
       </div>
