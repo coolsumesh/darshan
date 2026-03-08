@@ -60,12 +60,6 @@ export async function registerA2A(server: FastifyInstance, db: pg.Pool) {
       });
     }
 
-    if (from_agent_id === to_agent_id) {
-      return reply.status(400).send({
-        ok: false,
-        error: "from_agent_id and to_agent_id must differ",
-      });
-    }
 
     const { rows } = await db.query(
       `insert into a2a_routes (from_agent_id, to_agent_id, policy, notes)
@@ -106,28 +100,31 @@ export async function registerA2A(server: FastifyInstance, db: pg.Pool) {
       return reply.status(403).send({ ok: false, error: "from_agent_id must match authenticated agent" });
     }
 
-    // Verify both agents exist
+    // Verify agent(s) exist (self-send allowed)
     const { rows: agentRows } = await db.query(
       `select id, name from agents where id = any($1)`,
       [[from_agent_id, to_agent_id]]
     );
-    if (agentRows.length < 2) {
+    const requiredCount = from_agent_id === to_agent_id ? 1 : 2;
+    if (agentRows.length < requiredCount) {
       return reply.status(404).send({ ok: false, error: "one or both agents not found" });
     }
     const fromAgent = agentRows.find((a: { id: string }) => a.id === from_agent_id);
     const toAgent   = agentRows.find((a: { id: string }) => a.id === to_agent_id);
 
-    // Check route policy
-    const { rows: routeRows } = await db.query(
-      `select policy from a2a_routes where from_agent_id = $1 and to_agent_id = $2 limit 1`,
-      [from_agent_id, to_agent_id]
-    );
-    const policy = routeRows[0]?.policy ?? "blocked";
-    if (policy === "blocked") {
-      return reply.status(403).send({ ok: false, error: `a2a route ${fromAgent?.name} → ${toAgent?.name} is blocked. Create a route first.` });
-    }
-    if (policy === "requires_human_approval") {
-      return reply.status(403).send({ ok: false, error: `a2a route ${fromAgent?.name} → ${toAgent?.name} requires human approval.` });
+    // Check route policy (self-send bypasses route table)
+    if (from_agent_id !== to_agent_id) {
+      const { rows: routeRows } = await db.query(
+        `select policy from a2a_routes where from_agent_id = $1 and to_agent_id = $2 limit 1`,
+        [from_agent_id, to_agent_id]
+      );
+      const policy = routeRows[0]?.policy ?? "blocked";
+      if (policy === "blocked") {
+        return reply.status(403).send({ ok: false, error: `a2a route ${fromAgent?.name} → ${toAgent?.name} is blocked. Create a route first.` });
+      }
+      if (policy === "requires_human_approval") {
+        return reply.status(403).send({ ok: false, error: `a2a route ${fromAgent?.name} → ${toAgent?.name} requires human approval.` });
+      }
     }
 
     // Generate corr_id if not provided
