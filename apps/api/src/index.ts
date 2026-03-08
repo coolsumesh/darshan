@@ -71,6 +71,8 @@ server.addHook("preHandler", async (req, reply) => {
   if (url.startsWith("/api/v1/auth/")) return;
   // Allow internal A2A callback token routes (they use their own auth)
   if (url.includes("/inbox")) return;
+  // Allow A2A send/thread routes (they handle auth internally via callback token or API key)
+  if (url.startsWith("/api/v1/a2a/")) return;
   // Allow agent callback-token task polling route (agent auth handled in route)
   if (/^\/api\/v1\/agents\/[^/]+\/tasks$/.test(url)) return;
   // Allow task status patch route for agent callback-token flow (auth handled in route)
