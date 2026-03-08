@@ -1,0 +1,380 @@
+import type { OpenClawPluginApi, PluginRuntime } from "openclaw/plugin-sdk";
+import { emptyPluginConfigSchema } from "openclaw/plugin-sdk";
+
+const CHANNEL_ID = "darshan";
+const POLL_INTERVAL_MS = 3000;
+
+let _runtime: PluginRuntime | null = null;
+
+function getDarshanConfig(cfg: any) {
+  const c = cfg?.channels?.darshan ?? {};
+  const baseUrl = (
+    c.endpoint ??
+    process.env.DARSHAN_BASE_URL ??
+    "https://darshan.caringgems.in/api/backend"
+  ).replace(/\/$/, "");
+  const apiKey =
+    c.apiKey ??
+    process.env.DARSHAN_API_KEY ??
+    "824cdfcdec0e35cf550002c2dfa3541932f58e2e2497cfaa3c844dc99f5b972f";
+  // Agent-specific credentials for inbox WS push (optional)
+  const agentId =
+    c.agentId ??
+    process.env.AGENT_SANJAYA_ID ??
+    process.env.DARSHAN_AGENT_ID ??
+    null;
+  const agentToken =
+    c.agentToken ??
+    process.env.AGENT_SANJAYA_TOKEN ??
+    process.env.DARSHAN_AGENT_TOKEN ??
+    null;
+  return { baseUrl, apiKey, agentId, agentToken };
+}
+
+// ── Agent inbox WS subscription (real-time push) ─────────────────────────────
+let _wsReconnectTimer: ReturnType<typeof setTimeout> | null = null;
+
+function startAgentInboxWs(
+  wsUrl: string,
+  agentId: string,
+  agentToken: string,
+  onInboxItem: (item: any) => void,
+  abortSignal: AbortSignal,
+  log: any
+) {
+  if (abortSignal.aborted) return;
+
+  let ws: any;
+  try {
+    // Use the global WebSocket (available in Node 22+ / modern runtimes)
+    ws = new (globalThis as any).WebSocket(wsUrl);
+  } catch {
+    log?.warn?.("[darshan] WebSocket not available, skipping realtime push");
+    return;
+  }
+
+  ws.onopen = () => {
+    log?.info?.("[darshan] WS connected, authenticating agent...");
+    ws.send(JSON.stringify({ type: "agent_auth", agent_id: agentId, token: agentToken }));
+  };
+
+  ws.onmessage = (event: any) => {
+    try {
+      const msg = JSON.parse(typeof event.data === "string" ? event.data : event.data.toString());
+      if (msg.type === "agent_subscribed") {
+        log?.info?.(`[darshan] WS subscribed to inbox push for agent ${agentId}`);
+      } else if (msg.type === "inbox_item") {
+        log?.info?.(`[darshan] WS push received: ${msg.data?.type} corr=${msg.data?.corr_id}`);
+        onInboxItem(msg.data);
+      }
+    } catch { /* ignore */ }
+  };
+
+  ws.onclose = () => {
+    if (abortSignal.aborted) return;
+    log?.warn?.("[darshan] WS closed, reconnecting in 5s...");
+    _wsReconnectTimer = setTimeout(() => {
+      startAgentInboxWs(wsUrl, agentId, agentToken, onInboxItem, abortSignal, log);
+    }, 5000);
+  };
+
+  ws.onerror = () => {
+    log?.warn?.("[darshan] WS error");
+  };
+
+  abortSignal.addEventListener("abort", () => {
+    if (_wsReconnectTimer) clearTimeout(_wsReconnectTimer);
+    try { ws.close(); } catch { /* ignore */ }
+  }, { once: true });
+}
+
+async function fetchPending(baseUrl: string, apiKey: string) {
+  try {
+    const res = await fetch(`${baseUrl}/api/v1/openclaw/pending`, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!res.ok) return [];
+    const data: any = await res.json();
+    return (data.runs ?? []) as Array<{
+      run_id: string;
+      thread_id: string;
+      agent_id: string;
+      agent_name: string;
+      content: string | null;
+      requested_by_user_id: string | null;
+    }>;
+  } catch {
+    return [];
+  }
+}
+
+async function claimRun(baseUrl: string, apiKey: string, runId: string) {
+  try {
+    const res = await fetch(`${baseUrl}/api/v1/openclaw/claim/${runId}`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}` },
+      signal: AbortSignal.timeout(10000),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+async function postReply(
+  baseUrl: string,
+  apiKey: string,
+  params: { run_id: string; thread_id: string; agent_id: string; agent_name: string; text: string }
+) {
+  try {
+    await fetch(`${baseUrl}/api/v1/openclaw/reply`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify(params),
+      signal: AbortSignal.timeout(15000),
+    });
+  } catch {}
+}
+
+async function processRun(
+  run: { run_id: string; thread_id: string; agent_id: string; agent_name: string; content: string | null; requested_by_user_id: string | null },
+  baseUrl: string,
+  apiKey: string,
+  log: any
+) {
+  const claimed = await claimRun(baseUrl, apiKey, run.run_id);
+  if (!claimed) return;
+
+  const message = run.content?.trim() ?? "";
+  log?.info?.(`[darshan] processing run ${run.run_id} for agent ${run.agent_name}`);
+
+  if (!message) {
+    await postReply(baseUrl, apiKey, {
+      run_id: run.run_id, thread_id: run.thread_id,
+      agent_id: run.agent_id, agent_name: run.agent_name,
+      text: "No message content received.",
+    });
+    return;
+  }
+
+  try {
+    const rt = _runtime!;
+    const cfg = await (rt as any).config.loadConfig();
+    const msgCtx = {
+      Body: message,
+      From: run.thread_id,
+      To: run.agent_name,
+      SessionKey: run.thread_id,
+      AccountId: "default",
+      OriginatingChannel: CHANNEL_ID as any,
+      OriginatingTo: run.thread_id,
+      ChatType: "direct" as const,
+      SenderName: run.requested_by_user_id ?? "user",
+    };
+    await (rt as any).channel.reply.dispatchReplyWithBufferedBlockDispatcher({
+      ctx: msgCtx,
+      cfg,
+      dispatcherOptions: {
+        deliver: async (payload: { text?: string; body?: string }) => {
+          const text = payload?.text ?? payload?.body ?? "";
+          if (text.trim()) {
+            await postReply(baseUrl, apiKey, {
+              run_id: run.run_id, thread_id: run.thread_id,
+              agent_id: run.agent_id, agent_name: run.agent_name,
+              text,
+            });
+          }
+        },
+      },
+    });
+  } catch (err: any) {
+    log?.error?.(`[darshan] run ${run.run_id} error: ${err?.message ?? err}`);
+    await postReply(baseUrl, apiKey, {
+      run_id: run.run_id, thread_id: run.thread_id,
+      agent_id: run.agent_id, agent_name: run.agent_name,
+      text: "Sorry, I encountered an error processing your message.",
+    });
+  }
+}
+
+const plugin = {
+  id: CHANNEL_ID,
+  name: "Darshan",
+  description: "Darshan native channel plugin",
+  configSchema: emptyPluginConfigSchema(),
+
+  register(api: OpenClawPluginApi) {
+    _runtime = (api as any).runtime ?? null;
+    console.log("[darshan] register() called, runtime:", !!_runtime);
+
+    api.registerChannel({
+      plugin: {
+        id: CHANNEL_ID,
+        meta: {
+          id: CHANNEL_ID,
+          label: "Darshan",
+          selectionLabel: "Darshan",
+          detailLabel: "Darshan",
+          blurb: "Native Darshan channel",
+          order: 95,
+        },
+        capabilities: {
+          chatTypes: ["direct" as const, "group" as const],
+          media: false, threads: true, reactions: false,
+          edit: false, unsend: false, reply: true, effects: false, blockStreaming: false,
+        },
+        reload: { configPrefixes: ["channels.darshan"] },
+        configSchema: emptyPluginConfigSchema(),
+        config: {
+          listAccountIds: (_cfg: any) => ["default"],
+          resolveAccount: (cfg: any) => ({
+            accountId: "default",
+            enabled: cfg?.channels?.darshan?.enabled !== false,
+          }),
+          describeAccount: (_account: any, _cfg: any) => ({ configured: true }),
+          isConfigured: async (_account: any, _cfg: any) => true,
+          defaultAccountId: () => "default",
+          setAccountEnabled: ({ cfg, enabled }: any) => ({
+            ...cfg,
+            channels: { ...(cfg?.channels ?? {}), darshan: { ...(cfg?.channels?.darshan ?? {}), enabled } },
+          }),
+        },
+        messaging: { normalizeTarget: (t: string) => t?.trim() || undefined },
+        directory: { self: async () => null, listPeers: async () => [], listGroups: async () => [] },
+        outbound: {
+          deliveryMode: "gateway" as const,
+          textChunkLimit: 4000,
+          sendText: async ({ to }: any) => ({
+            channel: CHANNEL_ID,
+            messageId: `darshan-${Date.now()}`,
+            chatId: String(to ?? "unknown"),
+          }),
+        },
+        gateway: {
+          startAccount: async (ctx: any) => {
+            const { cfg, abortSignal, setStatus, log } = ctx;
+            const { baseUrl, apiKey, agentId, agentToken } = getDarshanConfig(cfg);
+
+            setStatus?.({ configured: true, running: true, lastError: null });
+            log?.info?.(`[darshan] started, polling ${baseUrl}`);
+            console.log(`[darshan] startAccount called, polling ${baseUrl}`);
+
+            // ── Real-time inbox push via WebSocket ──────────────────────────
+            if (agentId && agentToken) {
+              const wsUrl = baseUrl
+                .replace(/^https:\/\//, "wss://")
+                .replace(/^http:\/\//, "ws://")
+                .replace(/\/api\/backend$/, "") + "/ws";
+
+              startAgentInboxWs(
+                wsUrl, agentId, agentToken,
+                async (item: any) => {
+                  // Immediate handling of a2a_message pushed in real-time
+                  if (item?.type !== "a2a_message") return;
+                  log?.info?.(`[darshan] realtime a2a from ${item.from_agent_name}: ${item.text}`);
+
+                  try {
+                    const rt = _runtime!;
+                    const freshCfg = await (rt as any).config.loadConfig();
+                    const sessionKey = `darshan:a2a:${item.from_agent_id}`;
+
+                    const msgCtx = {
+                      Body: `[A2A from ${item.from_agent_name}]: ${item.text}`,
+                      From: item.from_agent_id,
+                      To: agentId,
+                      SessionKey: sessionKey,
+                      AccountId: "default",
+                      OriginatingChannel: CHANNEL_ID as any,
+                      OriginatingTo: item.from_agent_id,
+                      ChatType: "direct" as const,
+                      SenderName: item.from_agent_name ?? "agent",
+                    };
+
+                    await (rt as any).channel.reply.dispatchReplyWithBufferedBlockDispatcher({
+                      ctx: msgCtx,
+                      cfg: freshCfg,
+                      dispatcherOptions: {
+                        deliver: async (payload: { text?: string; body?: string }) => {
+                          const replyText = payload?.text ?? payload?.body ?? "";
+                          if (!replyText.trim()) return;
+
+                          // Send reply back via a2a relay
+                          await fetch(`${baseUrl}/api/v1/a2a/send`, {
+                            method: "POST",
+                            headers: {
+                              Authorization: `Bearer ${agentToken}`,
+                              "Content-Type": "application/json",
+                            },
+                            body: JSON.stringify({
+                              from_agent_id:    agentId,
+                              to_agent_id:      item.from_agent_id,
+                              text:             replyText,
+                              thread_id:        item.thread_id ?? null,
+                              reply_to_corr_id: item.corr_id,
+                            }),
+                            signal: AbortSignal.timeout(15000),
+                          });
+
+                          // ACK the inbox item
+                          await fetch(`${baseUrl}/api/v1/agents/${agentId}/inbox/ack`, {
+                            method: "POST",
+                            headers: {
+                              Authorization: `Bearer ${agentToken}`,
+                              "Content-Type": "application/json",
+                            },
+                            body: JSON.stringify({
+                              inbox_id:       item.inbox_id,
+                              callback_token: agentToken,
+                              response:       `replied: ${replyText.slice(0, 80)}`,
+                            }),
+                            signal: AbortSignal.timeout(10000),
+                          });
+                        },
+                      },
+                    });
+                  } catch (err: any) {
+                    log?.error?.(`[darshan] realtime a2a error: ${err?.message ?? err}`);
+                  }
+                },
+                abortSignal,
+                log
+              );
+            } else {
+              log?.warn?.("[darshan] no agentId/agentToken configured — skipping realtime inbox push");
+            }
+
+            // ── Chat run polling (existing) ─────────────────────────────────
+            while (!(abortSignal?.aborted ?? false)) {
+              try {
+                const runs = await fetchPending(baseUrl, apiKey);
+                for (const run of runs) {
+                  if (abortSignal?.aborted) break;
+                  processRun(run, baseUrl, apiKey, log).catch((e: any) =>
+                    log?.error?.(`[darshan] processRun error: ${e?.message ?? e}`)
+                  );
+                }
+              } catch (e: any) {
+                log?.warn?.(`[darshan] poll error: ${e?.message ?? e}`);
+              }
+
+              // Sleep POLL_INTERVAL_MS or until aborted
+              await new Promise<void>((resolve) => {
+                if (abortSignal?.aborted) { resolve(); return; }
+                const t = setTimeout(resolve, POLL_INTERVAL_MS);
+                abortSignal?.addEventListener?.("abort", () => { clearTimeout(t); resolve(); }, { once: true });
+              });
+            }
+
+            log?.info?.(`[darshan] stopped`);
+            console.log("[darshan] startAccount exiting");
+            return { stop: () => {} };
+          },
+          stopAccount: async () => {},
+        },
+      },
+    });
+  },
+};
+
+export default plugin;
