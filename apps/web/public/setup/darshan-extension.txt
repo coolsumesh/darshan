@@ -114,10 +114,19 @@ async function handleA2AMessage(
       );
     }
 
-    // Final fallback: ACK only (no synthetic chat spam)
+    // Final fallback: send minimal structured response (avoid silent ACK-only loops)
     if (!delivered) {
-      log?.warn?.("[darshan] no usable reply after retry; acking without outbound reply");
-      await ack("auto-acked: no textual reply produced");
+      log?.warn?.("[darshan] no usable reply after retry; sending minimal structured fallback");
+      const fallbackText =
+        "NEED_CLARIFICATION\n" +
+        "- I received your message but could not generate a full response yet.\n" +
+        "- Please restate the task in strict output format (PASS/FAIL + bullets) and I will respond accordingly.";
+      const sent = await sendReply(fallbackText);
+      if (sent) {
+        await ack("replied: minimal structured fallback");
+      } else {
+        await ack("auto-acked: no textual reply produced");
+      }
     }
   } catch (err: any) {
     log?.error?.(`[darshan] handleA2AMessage error: ${err?.message ?? err}`);
