@@ -258,6 +258,26 @@ export async function pingAgent(agentId: string): Promise<boolean> {
   return data?.ok ?? false;
 }
 
+export type AgentInboxItem = {
+  id: string;
+  agent_id?: string;
+  type: string;
+  payload?: any;
+  status: "pending" | "ack" | "failed" | string;
+  created_at?: string;
+  acked_at?: string;
+  from_agent_id?: string;
+  corr_id?: string;
+  reply_to_corr_id?: string;
+  thread_id?: string;
+};
+
+export async function fetchAgentInbox(agentId: string, callbackToken: string): Promise<AgentInboxItem[]> {
+  const q = new URLSearchParams({ token: callbackToken });
+  const data = await apiFetch<{ ok: boolean; items: AgentInboxItem[] }>(`/api/v1/agents/${agentId}/inbox?${q.toString()}`);
+  return data?.ok ? (data.items ?? []) : [];
+}
+
 export async function createOrg(payload: { name: string; slug: string; description?: string }): Promise<Org | null> {
   const data = await apiFetch<{ ok: boolean; org: Org }>("/api/v1/orgs", {
     method: "POST",

@@ -12,8 +12,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   fetchAgents, createAgent, pingAgent,
-  fetchAgentProjects, deleteAgent, updateAgent,
-  type AgentProject,
+  fetchAgentProjects, deleteAgent, updateAgent, fetchAgentInbox,
+  type AgentProject, type AgentInboxItem,
 } from "@/lib/api";
 import type { Agent } from "@/lib/agents";
 
@@ -363,11 +363,12 @@ function AgentIdRow({ id }: { id: string }) {
 }
 
 // â”€â”€â”€ Agent Detail Panel â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-function AgentDetailPanel({ agent, onClose, onPing, onRemove, onUpdated, pinging }: {
+function AgentDetailPanel({ agent, onClose, onPing, onRemove, onUpdated, onOpenInbox, pinging }: {
   agent: ExtAgent; onClose: () => void;
   onPing: (id: string) => void;
   onRemove: (id: string) => void;
   onUpdated: () => void;
+  onOpenInbox: () => void;
   pinging: boolean;
 }) {
   const sm  = STATUS_META[agent.status] ?? STATUS_META.offline;
@@ -442,6 +443,11 @@ function AgentDetailPanel({ agent, onClose, onPing, onRemove, onUpdated, pinging
               className="grid h-7 w-7 place-items-center rounded-lg text-zinc-400 hover:bg-violet-50 hover:text-violet-600 dark:hover:bg-violet-500/10 transition-colors">
               <Terminal className="h-3.5 w-3.5" />
             </Link>
+
+            <button onClick={onOpenInbox} title="Open inbox sidebar"
+              className="grid h-7 w-7 place-items-center rounded-lg text-zinc-400 hover:bg-cyan-50 hover:text-cyan-600 dark:hover:bg-cyan-500/10 transition-colors">
+              <Share2 className="h-3.5 w-3.5" />
+            </button>
 
             <button onClick={startEdit} title="Edit"
               className="grid h-7 w-7 place-items-center rounded-lg text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-white/10 transition-colors">
@@ -682,6 +688,105 @@ function AgentDetailPanel({ agent, onClose, onPing, onRemove, onUpdated, pinging
 }
 
 // â”€â”€â”€ Onboard Agent Modal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+function AgentInboxSidebar({ agent, onClose }: { agent: ExtAgent; onClose: () => void }) {
+  const [items, setItems] = React.useState<AgentInboxItem[]>([]);
+  const [loading, setLoading] = React.useState(true);
+  const [status, setStatus] = React.useState<"all" | "pending" | "ack" | "failed">("all");
+
+  async function load() {
+    if (!agent.callback_token) {
+      setItems([]);
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    const rows = await fetchAgentInbox(agent.id, agent.callback_token);
+    setItems(rows);
+    setLoading(false);
+  }
+
+  React.useEffect(() => { load(); }, [agent.id, agent.callback_token]);
+
+  const filtered = items.filter(i => status === "all" ? true : i.status === status);
+
+  const typeBadge = (t: string) =>
+    t === "a2a_message" ? "bg-violet-100 text-violet-700 dark:bg-violet-500/15 dark:text-violet-400"
+    : t === "task_assigned" ? "bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400"
+    : t === "ping" ? "bg-cyan-100 text-cyan-700 dark:bg-cyan-500/15 dark:text-cyan-400"
+    : "bg-zinc-100 text-zinc-600 dark:bg-white/10 dark:text-zinc-300";
+
+  const statusBadge = (s: string) =>
+    s === "pending" ? "bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400"
+    : s === "ack" ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400"
+    : s === "failed" ? "bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-400"
+    : "bg-zinc-100 text-zinc-600 dark:bg-white/10 dark:text-zinc-300";
+
+  return (
+    <div className="flex h-full w-[360px] shrink-0 flex-col border-l border-zinc-200 bg-white dark:border-[#2D2A45] dark:bg-[#111026] animate-slide-in-right">
+      <div className="flex shrink-0 items-center gap-2 border-b border-zinc-200 px-4 py-3 dark:border-[#2D2A45]">
+        <button onClick={onClose} className="grid h-7 w-7 place-items-center rounded-lg text-zinc-400 hover:bg-zinc-100 dark:hover:bg-white/10">
+          <X className="h-4 w-4" />
+        </button>
+        <div className="font-display font-bold text-zinc-900 dark:text-white">Agent Inbox</div>
+        <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] text-zinc-500 dark:bg-white/10">{agent.name}</span>
+        <button onClick={load} className="ml-auto rounded-lg px-2.5 py-1 text-xs font-semibold text-zinc-500 ring-1 ring-zinc-200 hover:bg-zinc-50 dark:text-zinc-300 dark:ring-white/10">
+          Refresh
+        </button>
+      </div>
+
+      <div className="shrink-0 border-b border-zinc-100 px-3 py-2 dark:border-[#2D2A45]">
+        <div className="flex items-center gap-1">
+          {(["all","pending","ack","failed"] as const).map(s => (
+            <button key={s} onClick={() => setStatus(s)}
+              className={cn(
+                "rounded-lg px-2.5 py-1 text-[11px] font-semibold transition-colors",
+                status === s ? "bg-brand-600 text-white" : "bg-zinc-100 text-zinc-500 hover:bg-zinc-200 dark:bg-white/10 dark:text-zinc-300"
+              )}>
+              {s}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-y-auto p-3">
+        {loading ? (
+          <div className="py-10 text-center text-sm text-zinc-400">Loading inbox…</div>
+        ) : filtered.length === 0 ? (
+          <div className="py-10 text-center text-sm text-zinc-400">No messages</div>
+        ) : (
+          <div className="flex flex-col gap-2.5">
+            {filtered.map(item => (
+              <div key={item.id} className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-[#2D2A45] dark:bg-white/5">
+                <div className="mb-2 flex items-center gap-1.5">
+                  <span className={cn("rounded-full px-2 py-0.5 text-[10px] font-semibold", typeBadge(item.type))}>{item.type}</span>
+                  <span className={cn("rounded-full px-2 py-0.5 text-[10px] font-semibold", statusBadge(item.status))}>{item.status}</span>
+                  <span className="ml-auto text-[10px] text-zinc-400">{relativeTime(item.created_at)}</span>
+                </div>
+
+                {item.payload?.from_agent_name && (
+                  <div className="mb-1.5 text-[11px] text-zinc-500">
+                    from <span className="font-semibold text-zinc-700 dark:text-zinc-200">{item.payload.from_agent_name}</span>
+                  </div>
+                )}
+
+                {item.payload?.text && (
+                  <p className="line-clamp-3 text-xs text-zinc-700 dark:text-zinc-200">{String(item.payload.text)}</p>
+                )}
+
+                <div className="mt-2 grid gap-1 text-[10px] text-zinc-400">
+                  {item.corr_id && <div>corr: <span className="font-mono text-zinc-500">{item.corr_id}</span></div>}
+                  {item.reply_to_corr_id && <div>reply_to: <span className="font-mono text-zinc-500">{item.reply_to_corr_id}</span></div>}
+                  {item.thread_id && <div>thread: <span className="font-mono text-zinc-500">{item.thread_id}</span></div>}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function OnboardAgentModal({ onDone, onClose }: {
   onDone: () => void; onClose: () => void;
 }) {
@@ -922,6 +1027,7 @@ export default function AgentsPage() {
   const [query,        setQuery]        = React.useState("");
   const [pingingIds,   setPingingIds]   = React.useState<Set<string>>(new Set());
   const [detailAgent,  setDetailAgent]  = React.useState<ExtAgent | null>(null);
+  const [showInboxSidebar, setShowInboxSidebar] = React.useState(true);
   const [showAgentModal,  setShowAgentModal]  = React.useState(false);
   const [showImportModal, setShowImportModal] = React.useState(false);
   const [deleteTarget,    setDeleteTarget]    = React.useState<ExtAgent | null>(null);
@@ -1081,7 +1187,7 @@ export default function AgentsPage() {
               </div>
               {filtered.map(a => (
                 <AgentRow key={a.id} agent={a}
-                  onInspect={() => setDetailAgent(a)}
+                  onInspect={() => { setDetailAgent(a); setShowInboxSidebar(true); }}
                   onPing={() => handlePing(a.id)}
                   onDelete={() => setDeleteTarget(a)}
                   pinging={pingingIds.has(a.id)}
@@ -1096,11 +1202,20 @@ export default function AgentsPage() {
       {detailAgent && (
         <AgentDetailPanel
           agent={detailAgent}
-          onClose={() => setDetailAgent(null)}
+          onClose={() => { setDetailAgent(null); setShowInboxSidebar(false); }}
           onPing={id => { handlePing(id); setDetailAgent(a => a ? { ...a, ping_status: "pending" } : null); }}
           onRemove={async id => { await handleDelete(id); }}
-          onUpdated={() => { reload(); setDetailAgent(null); }}
+          onUpdated={() => { reload(); setDetailAgent(null); setShowInboxSidebar(false); }}
+          onOpenInbox={() => setShowInboxSidebar(true)}
           pinging={pingingIds.has(detailAgent.id)}
+        />
+      )}
+
+      {/* Separate inbox sidebar */}
+      {detailAgent && showInboxSidebar && (
+        <AgentInboxSidebar
+          agent={detailAgent}
+          onClose={() => setShowInboxSidebar(false)}
         />
       )}
 
