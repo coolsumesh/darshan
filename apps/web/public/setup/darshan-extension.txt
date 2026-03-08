@@ -262,10 +262,11 @@ const plugin = {
 
             // ── Real-time inbox push via WebSocket ──────────────────────────
             if (agentId && agentToken) {
+              // baseUrl = "https://darshan.caringgems.in/api/backend"
+              // WS must go through /api/backend/ws so Nginx routes it to the API (port 4000)
               const wsUrl = baseUrl
                 .replace(/^https:\/\//, "wss://")
-                .replace(/^http:\/\//, "ws://")
-                .replace(/\/api\/backend$/, "") + "/ws";
+                .replace(/^http:\/\//, "ws://") + "/ws";
 
               startAgentInboxWs(
                 wsUrl, agentId, agentToken,
@@ -344,6 +345,72 @@ const plugin = {
               log?.warn?.("[darshan] no agentId/agentToken configured — skipping realtime inbox push");
             }
 
+            // ── Inbox poll fallback for a2a_message (runs every 30s) ────────
+            // Handles a2a messages even if WS push isn't connected
+            let lastInboxPoll = 0;
+            const INBOX_POLL_MS = 30000;
+
+            async function pollInboxForA2A() {
+              if (!agentId || !agentToken) return;
+              try {
+                const res = await fetch(`${baseUrl}/api/v1/agents/${agentId}/inbox`, {
+                  headers: { Authorization: `Bearer ${agentToken}` },
+                  signal: AbortSignal.timeout(10000),
+                });
+                if (!res.ok) return;
+                const data = await res.json() as { items?: any[] };
+                const a2aItems = (data.items ?? []).filter((i: any) => i.type === "a2a_message" && i.status === "pending");
+                for (const item of a2aItems) {
+                  log?.info?.(`[darshan] inbox poll found a2a from ${item.payload?.from_agent_name}`);
+                  try {
+                    const rt = _runtime!;
+                    const freshCfg = await (rt as any).config.loadConfig();
+                    const sessionKey = `darshan:a2a:${item.from_agent_id}`;
+                    await (rt as any).channel.reply.dispatchReplyWithBufferedBlockDispatcher({
+                      ctx: {
+                        Body: `[A2A from ${item.payload?.from_agent_name ?? "agent"}]: ${item.payload?.text}`,
+                        From: item.from_agent_id,
+                        To: agentId,
+                        SessionKey: sessionKey,
+                        AccountId: "default",
+                        OriginatingChannel: CHANNEL_ID as any,
+                        OriginatingTo: item.from_agent_id,
+                        ChatType: "direct" as const,
+                        SenderName: item.payload?.from_agent_name ?? "agent",
+                      },
+                      cfg: freshCfg,
+                      dispatcherOptions: {
+                        deliver: async (payload: { text?: string; body?: string }) => {
+                          const replyText = payload?.text ?? payload?.body ?? "";
+                          if (!replyText.trim()) return;
+                          await fetch(`${baseUrl}/api/v1/a2a/send`, {
+                            method: "POST",
+                            headers: { Authorization: `Bearer ${agentToken}`, "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                              from_agent_id: agentId, to_agent_id: item.from_agent_id,
+                              text: replyText, thread_id: item.thread_id ?? null,
+                              reply_to_corr_id: item.corr_id,
+                            }),
+                            signal: AbortSignal.timeout(15000),
+                          });
+                          await fetch(`${baseUrl}/api/v1/agents/${agentId}/inbox/ack`, {
+                            method: "POST",
+                            headers: { Authorization: `Bearer ${agentToken}`, "Content-Type": "application/json" },
+                            body: JSON.stringify({ inbox_id: item.id, callback_token: agentToken, response: `replied: ${replyText.slice(0, 80)}` }),
+                            signal: AbortSignal.timeout(10000),
+                          });
+                        },
+                      },
+                    });
+                  } catch (err: any) {
+                    log?.error?.(`[darshan] inbox poll a2a error: ${err?.message ?? err}`);
+                  }
+                }
+              } catch (err: any) {
+                log?.warn?.(`[darshan] inbox poll error: ${err?.message ?? err}`);
+              }
+            }
+
             // ── Chat run polling (existing) ─────────────────────────────────
             while (!(abortSignal?.aborted ?? false)) {
               try {
@@ -356,6 +423,12 @@ const plugin = {
                 }
               } catch (e: any) {
                 log?.warn?.(`[darshan] poll error: ${e?.message ?? e}`);
+              }
+
+              // Poll inbox for a2a messages every 30s as WS fallback
+              if (Date.now() - lastInboxPoll > INBOX_POLL_MS) {
+                lastInboxPoll = Date.now();
+                pollInboxForA2A().catch(() => {});
               }
 
               // Sleep POLL_INTERVAL_MS or until aborted
