@@ -110,7 +110,7 @@ await registerOpsRateLimits(server, db);
 await registerProjects(server, db);
 await registerProjectChat(server, db);
 await registerInvites(server, db);
-await registerWs(server);
+await registerWs(server, db);
 
 startConnector(db);
 

@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import type pg from "pg";
 import { randomUUID } from "crypto";
+import { pushToAgent } from "../broadcast.js";
 
 const INTERNAL_API_KEY = process.env.DARSHAN_API_KEY ?? "";
 
@@ -149,6 +150,20 @@ export async function registerA2A(server: FastifyInstance, db: pg.Pool) {
     );
 
     const item = inboxRows[0];
+
+    // Real-time push — notify target agent immediately if connected via WS
+    pushToAgent(to_agent_id, "inbox_item", {
+      inbox_id:         item.id,
+      type:             "a2a_message",
+      from_agent_id,
+      from_agent_name:  fromAgent?.name,
+      corr_id:          item.corr_id,
+      reply_to_corr_id: reply_to_corr_id ?? null,
+      thread_id:        thread_id ?? null,
+      text:             text.trim(),
+      created_at:       item.created_at,
+    });
+
     return {
       ok: true,
       inbox_id: item.id,
