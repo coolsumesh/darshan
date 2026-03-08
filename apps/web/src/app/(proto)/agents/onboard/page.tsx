@@ -98,7 +98,7 @@ function StepCard({ num, title, badge, children }: {
   );
 }
 
-export default function AgentsOnboardPage() {
+function AgentsOnboardInner() {
   const params       = useSearchParams();
   const [agents,     setAgents]     = React.useState<ExtAgent[]>([]);
   const [selectedId, setSelectedId] = React.useState<string>("");
@@ -455,5 +455,13 @@ Return HEARTBEAT_OK only when no actionable inbox/task exists.` : "";
         </div>
       )}
     </div>
+  );
+}
+
+export default function AgentsOnboardPage() {
+  return (
+    <React.Suspense fallback={<div className="py-16 text-center text-sm text-zinc-400">Loading…</div>}>
+      <AgentsOnboardInner />
+    </React.Suspense>
   );
 }
