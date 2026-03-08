@@ -74,36 +74,50 @@ async function handleA2AMessage(
     const cfg = await (rt as any).config.loadConfig();
     let delivered = false;
 
-    await (rt as any).channel.reply.dispatchReplyWithBufferedBlockDispatcher({
-      ctx: {
-        // Format as a plain conversational message so the agent doesn't treat it as system/heartbeat
-        Body: `${fromName}: ${text}`,
-        From: item.from_agent_id,
-        To: agentId,
-        SessionKey: `darshan:a2a:${item.from_agent_id}`,
-        AccountId: "default",
-        OriginatingChannel: CHANNEL_ID as any,
-        OriginatingTo: item.from_agent_id,
-        ChatType: "direct" as const,
-        SenderName: fromName,
-      },
-      cfg,
-      dispatcherOptions: {
-        deliver: async (payload: { text?: string; body?: string }) => {
-          const sent = await sendReply(payload?.text ?? payload?.body ?? "");
-          if (sent) {
-            delivered = true;
-            await ack(`replied: ${(payload?.text ?? "").slice(0, 80)}`);
-          }
+    const attemptDispatch = async (bodyText: string) => {
+      await (rt as any).channel.reply.dispatchReplyWithBufferedBlockDispatcher({
+        ctx: {
+          Body: bodyText,
+          From: item.from_agent_id,
+          To: agentId,
+          SessionKey: `darshan:a2a:${item.from_agent_id}`,
+          AccountId: "default",
+          OriginatingChannel: CHANNEL_ID as any,
+          OriginatingTo: item.from_agent_id,
+          ChatType: "direct" as const,
+          SenderName: fromName,
         },
-      },
-    });
+        cfg,
+        dispatcherOptions: {
+          deliver: async (payload: { text?: string; body?: string }) => {
+            const out = payload?.text ?? payload?.body ?? "";
+            const sent = await sendReply(out);
+            if (sent) {
+              delivered = true;
+              await ack(`replied: ${out.slice(0, 80)}`);
+            }
+          },
+        },
+      });
+    };
 
-    // Fallback: deliver was never called (agent said NO_REPLY) â€” ACK and send received notice
+    // First pass: normal conversational input
+    await attemptDispatch(`${fromName}: ${text}`);
+
+    // Second pass: force explicit response if model returned NO_REPLY/empty
     if (!delivered) {
-      log?.warn?.(`[darshan] deliver not called for a2a â€” sending fallback`);
-      await sendReply(`[ack] Message received from ${fromName}.`);
-      await ack("auto-acked: agent returned NO_REPLY");
+      log?.warn?.("[darshan] no usable reply on first pass; retrying with explicit instruction");
+      await attemptDispatch(
+        `You are responding to another agent in Darshan A2A.\n` +
+        `You MUST send a concise textual reply now (do not output NO_REPLY or HEARTBEAT_OK).\n` +
+        `Sender: ${fromName}\nMessage: ${text}`
+      );
+    }
+
+    // Final fallback: ACK only (no synthetic chat spam)
+    if (!delivered) {
+      log?.warn?.("[darshan] no usable reply after retry; acking without outbound reply");
+      await ack("auto-acked: no textual reply produced");
     }
   } catch (err: any) {
     log?.error?.(`[darshan] handleA2AMessage error: ${err?.message ?? err}`);
