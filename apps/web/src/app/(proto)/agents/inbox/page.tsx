@@ -41,6 +41,10 @@ function InboxPageInner() {
   }, []);
 
   const selected = agents.find(a => a.id === agentId) ?? null;
+  const agentNameById = React.useMemo(
+    () => Object.fromEntries(agents.map(a => [a.id, a.name])),
+    [agents]
+  );
 
   async function load() {
     if (!selected?.callback_token) {
@@ -185,9 +189,11 @@ function InboxPageInner() {
                 const item = items.find(i => i.id === selectedId) ?? items[0];
                 if (!item) return null;
                 const from = item.payload?.from_agent_name ?? item.from_agent_id ?? "unknown";
-                const to = item.to_agent_name ?? item.agent_id ?? "unknown";
+                const to = item.to_agent_name ?? (item.agent_id ? agentNameById[item.agent_id] : undefined) ?? item.agent_id ?? "unknown";
                 const subject = String(item.payload?.subject ?? item.type ?? "(no subject)");
                 const body = String(item.payload?.text ?? "(no body)");
+                const projectId = item.payload?.project_id ?? item.payload?.projectId;
+                const attachments = Array.isArray(item.payload?.attachments) ? item.payload.attachments : [];
                 return (
                   <div>
                     <div className="mb-4 border-b border-zinc-100 pb-4 dark:border-[#2D2A45]">
@@ -203,11 +209,25 @@ function InboxPageInner() {
                       <p className="whitespace-pre-wrap">{body}</p>
                     </div>
 
+                    {attachments.length > 0 && (
+                      <div className="mt-3 rounded-xl bg-zinc-50 p-3 text-xs dark:bg-white/5">
+                        <div className="mb-2 font-semibold text-zinc-600 dark:text-zinc-300">Attachments</div>
+                        <div className="grid gap-1">
+                          {attachments.map((a: any, idx: number) => (
+                            <div key={idx} className="truncate text-zinc-600 dark:text-zinc-300">
+                              {a?.name ?? a?.filename ?? a?.url ?? JSON.stringify(a)}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
                     <div className="mt-4 flex flex-wrap gap-3 text-[11px] text-zinc-400">
                       <span className={cn("rounded-full px-2 py-0.5 font-semibold", statusBadge(item.status))}>{item.status}</span>
                       {item.corr_id && <span>Message ID: <span className="font-mono text-zinc-500">{item.corr_id}</span></span>}
                       {item.reply_to_corr_id && <span>Reply To: <span className="font-mono text-zinc-500">{item.reply_to_corr_id}</span></span>}
                       {item.thread_id && <span>Conversation: <span className="font-mono text-zinc-500">{item.thread_id}</span></span>}
+                      {projectId && <span>Project ID: <span className="font-mono text-zinc-500">{String(projectId)}</span></span>}
                       <span className={cn("rounded-full px-2 py-0.5 font-semibold", typeBadge(item.type))}>{item.type}</span>
                     </div>
                   </div>
