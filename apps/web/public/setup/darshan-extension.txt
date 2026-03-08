@@ -351,7 +351,6 @@ const plugin = {
               startAgentInboxWs(
                 wsUrl, agentId, agentToken,
                 async (item: any) => {
-                async (item: any) => {
                   if (item?.type !== "a2a_message") return;
                   log?.info?.(`[darshan] WS push: a2a from ${item.from_agent_name}`);
                   // Normalize WS item shape to match REST inbox shape
@@ -366,9 +365,11 @@ const plugin = {
                   handleA2AMessage(normalized, baseUrl, agentId, agentToken, log)
                     .catch((e: any) => log?.error?.(`[darshan] WS a2a error: ${e?.message ?? e}`));
                 },
+                abortSignal,
+                log
               );
             } else {
-              log?.warn?.("[darshan] no agentId/agentToken configured â€” skipping realtime inbox push");
+              log?.warn?.("[darshan] no agentId/agentToken configured - skipping realtime inbox push");
             }
 
             // ── Inbox poll fallback for a2a_message (runs every 30s) ────────
@@ -394,6 +395,8 @@ const plugin = {
                 log?.warn?.(`[darshan] inbox poll error: ${err?.message ?? err}`);
               }
             }
+
+            while (!abortSignal?.aborted) {
               // Poll inbox for a2a messages every 30s as WS fallback
               if (Date.now() - lastInboxPoll > INBOX_POLL_MS) {
                 lastInboxPoll = Date.now();
