@@ -200,48 +200,57 @@ Write-Host "✅ Done. Restart terminal for changes to take effect."
   const BASE_SETUP = "https://darshan.caringgems.in/setup";
   const extCmds: Record<OsTab, string> = {
     linux: [
-      `# 1. Download extension files (all 3 required)`,
+      `# 1. Download all 3 extension files`,
       `mkdir -p ~/.openclaw/extensions/darshan`,
-      `curl -o ~/.openclaw/extensions/darshan/index.ts        ${BASE_SETUP}/darshan-extension.txt`,
-      `curl -o ~/.openclaw/extensions/darshan/package.json    ${BASE_SETUP}/darshan-package.json`,
+      `curl -o ~/.openclaw/extensions/darshan/index.ts             ${BASE_SETUP}/darshan-extension.txt`,
+      `curl -o ~/.openclaw/extensions/darshan/package.json         ${BASE_SETUP}/darshan-package.json`,
       `curl -o ~/.openclaw/extensions/darshan/openclaw.plugin.json ${BASE_SETUP}/openclaw.plugin.json`,
       ``,
-      `# 2. Point extension to your agent (reuses vars set in Step 1)`,
+      `# 2. Restart gateway so OpenClaw loads the plugin`,
+      `openclaw gateway restart`,
+      ``,
+      `# 3. Now configure the channel (plugin must be loaded first)`,
+      `openclaw config set channels.darshan.enabled true`,
       `openclaw config set channels.darshan.agentId   "$AGENT_${slug}_ID"`,
       `openclaw config set channels.darshan.agentToken "$AGENT_${slug}_TOKEN"`,
       ``,
-      `# 3. Enable channel + restart`,
-      `openclaw config set channels.darshan.enabled true`,
+      `# 4. Final restart to apply config`,
       `openclaw gateway restart`,
     ].join("\n"),
     windows_ps: [
-      `# 1. Download extension files (all 3 required)`,
+      `# 1. Download all 3 extension files`,
       `New-Item -ItemType Directory -Force "$env:USERPROFILE\\.openclaw\\extensions\\darshan"`,
-      `Invoke-WebRequest "${BASE_SETUP}/darshan-extension.txt"    -OutFile "$env:USERPROFILE\\.openclaw\\extensions\\darshan\\index.ts"`,
-      `Invoke-WebRequest "${BASE_SETUP}/darshan-package.json"     -OutFile "$env:USERPROFILE\\.openclaw\\extensions\\darshan\\package.json"`,
-      `Invoke-WebRequest "${BASE_SETUP}/openclaw.plugin.json"     -OutFile "$env:USERPROFILE\\.openclaw\\extensions\\darshan\\openclaw.plugin.json"`,
+      `Invoke-WebRequest "${BASE_SETUP}/darshan-extension.txt"        -OutFile "$env:USERPROFILE\\.openclaw\\extensions\\darshan\\index.ts"`,
+      `Invoke-WebRequest "${BASE_SETUP}/darshan-package.json"         -OutFile "$env:USERPROFILE\\.openclaw\\extensions\\darshan\\package.json"`,
+      `Invoke-WebRequest "${BASE_SETUP}/openclaw.plugin.json"         -OutFile "$env:USERPROFILE\\.openclaw\\extensions\\darshan\\openclaw.plugin.json"`,
       ``,
-      `# 2. Point extension to your agent (reuses vars set in Step 1)`,
+      `# 2. Restart gateway so OpenClaw loads the plugin`,
+      `openclaw gateway restart`,
+      ``,
+      `# 3. Now configure the channel (plugin must be loaded first)`,
+      `openclaw config set channels.darshan.enabled true`,
       `openclaw config set channels.darshan.agentId   "$env:AGENT_${slug}_ID"`,
       `openclaw config set channels.darshan.agentToken "$env:AGENT_${slug}_TOKEN"`,
       ``,
-      `# 3. Enable channel + restart`,
-      `openclaw config set channels.darshan.enabled true`,
+      `# 4. Final restart to apply config`,
       `openclaw gateway restart`,
     ].join("\n"),
     windows_cmd: [
-      `:: 1. Download extension files (all 3 required)`,
+      `:: 1. Download all 3 extension files`,
       `mkdir "%USERPROFILE%\\.openclaw\\extensions\\darshan" 2>nul`,
-      `curl -o "%USERPROFILE%\\.openclaw\\extensions\\darshan\\index.ts"                 ${BASE_SETUP}/darshan-extension.txt`,
-      `curl -o "%USERPROFILE%\\.openclaw\\extensions\\darshan\\package.json"             ${BASE_SETUP}/darshan-package.json`,
-      `curl -o "%USERPROFILE%\\.openclaw\\extensions\\darshan\\openclaw.plugin.json"     ${BASE_SETUP}/openclaw.plugin.json`,
+      `curl -o "%USERPROFILE%\\.openclaw\\extensions\\darshan\\index.ts"             ${BASE_SETUP}/darshan-extension.txt`,
+      `curl -o "%USERPROFILE%\\.openclaw\\extensions\\darshan\\package.json"         ${BASE_SETUP}/darshan-package.json`,
+      `curl -o "%USERPROFILE%\\.openclaw\\extensions\\darshan\\openclaw.plugin.json" ${BASE_SETUP}/openclaw.plugin.json`,
       ``,
-      `:: 2. Point extension to your agent (reuses vars set in Step 1)`,
+      `:: 2. Restart gateway so OpenClaw loads the plugin`,
+      `openclaw gateway restart`,
+      ``,
+      `:: 3. Now configure the channel (plugin must be loaded first)`,
+      `openclaw config set channels.darshan.enabled true`,
       `openclaw config set channels.darshan.agentId   "%AGENT_${slug}_ID%"`,
       `openclaw config set channels.darshan.agentToken "%AGENT_${slug}_TOKEN%"`,
       ``,
-      `:: 3. Enable channel + restart`,
-      `openclaw config set channels.darshan.enabled true`,
+      `:: 4. Final restart to apply config`,
       `openclaw gateway restart`,
     ].join("\n"),
   };
@@ -397,7 +406,8 @@ Return HEARTBEAT_OK only when no actionable inbox/task exists.` : "";
             </div>
             <CopyBlock code={extCmds[os]} id="ext" copied={copied} onCopy={copy} />
             <p className="text-[11px] text-zinc-400">
-              After restart, <code className="rounded bg-zinc-200 px-1 dark:bg-white/10">openclaw status</code> should show{" "}
+              The first restart loads the plugin. The second applies config. After the final restart,{" "}
+              <code className="rounded bg-zinc-200 px-1 dark:bg-white/10">openclaw status</code> should show{" "}
               <span className="font-semibold text-zinc-600 dark:text-zinc-300">Darshan │ ON │ OK</span>.
             </p>
           </StepCard>
