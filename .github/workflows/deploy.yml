@@ -31,6 +31,7 @@ jobs:
             GOOGLE_REDIRECT_URI=https://darshan.caringgems.in/api/backend/api/v1/auth/google/callback
             OPENCLAW_CHAT_BRIDGE_URL=http://127.0.0.1:4400/darshan/chat
             OPENCLAW_CHAT_BRIDGE_TOKEN=${{ secrets.OPENCLAW_CHAT_BRIDGE_TOKEN }}
+            DEV_LOGIN_SECRET=${{ secrets.DEV_LOGIN_SECRET }}
             EOF
 
             cat > /home/ubuntu/projects/darshan/apps/chat-bridge/.env << 'EOF'

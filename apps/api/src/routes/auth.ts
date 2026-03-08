@@ -119,6 +119,53 @@ export async function registerAuth(server: FastifyInstance) {
     }
   );
 
+  // ── Dev Login Bypass (only works when DEV_LOGIN_SECRET is set) ─────────────
+  // Usage: GET /api/v1/auth/dev-login?email=ssumesh@gmail.com&secret=<DEV_LOGIN_SECRET>
+  // Never set DEV_LOGIN_SECRET in production — that's the entire guard.
+  server.get<{ Querystring: { email?: string; secret?: string; next?: string } }>(
+    "/api/v1/auth/dev-login",
+    async (req, reply) => {
+      const DEV_SECRET = process.env.DEV_LOGIN_SECRET;
+      if (!DEV_SECRET) {
+        return reply.status(404).send({ ok: false, error: "not found" });
+      }
+
+      const { email, secret, next } = req.query;
+      if (!secret || secret !== DEV_SECRET) {
+        return reply.status(401).send({ ok: false, error: "unauthorized" });
+      }
+      if (!email) {
+        return reply.status(400).send({ ok: false, error: "email required" });
+      }
+
+      const { rows } = await db.query(
+        `select id, email, name, role from users where lower(email) = lower($1)`,
+        [email.trim()]
+      );
+      if (!rows.length) {
+        return reply.status(404).send({ ok: false, error: "user not found" });
+      }
+
+      const user = rows[0];
+      const payload: JwtPayload = { userId: user.id, email: user.email, name: user.name, role: user.role };
+      const token = jwt.sign(payload, JWT_SECRET, { expiresIn: "7d" });
+
+      reply.setCookie(COOKIE_NAME, token, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
+        maxAge: COOKIE_MAX_AGE,
+        path: "/",
+      });
+
+      const redirectTo = next && next.startsWith("/")
+        ? `${APP_BASE_URL}${next}`
+        : `${APP_BASE_URL}/dashboard`;
+
+      return reply.redirect(redirectTo, 302);
+    }
+  );
+
   // ── Google OAuth 2.0 ────────────────────────────────────────────────────────
 
   // GET /api/v1/auth/google — redirect to Google consent screen
