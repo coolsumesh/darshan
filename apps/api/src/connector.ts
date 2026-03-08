@@ -79,7 +79,13 @@ async function getNativeReply(params: {
   }
 }
 
+export function isOpenClawNative(): boolean {
+  return Boolean(process.env.OPENCLAW_NATIVE?.trim());
+}
+
 export async function processQueued(db: pg.Pool) {
+  // When OpenClaw native channel is configured, it handles all runs via polling
+  if (isOpenClawNative()) return;
   // Claim queued runs (limit to small batch to avoid thundering herd)
   const { rows: queued } = await db.query<{
     id: string;

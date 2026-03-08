@@ -26,6 +26,7 @@ import { startConnector } from "./connector.js";
 import { registerProjects } from "./routes/projects.js";
 import { registerInvites } from "./routes/invites.js";
 import { registerAuth, verifyToken } from "./routes/auth.js";
+import { openclawRoutes } from "./routes/openclaw.js";
 
 const PORT = Number(process.env.PORT ?? 4000);
 const HOST = process.env.HOST ?? "0.0.0.0";
@@ -76,6 +77,8 @@ server.addHook("preHandler", async (req, reply) => {
   if (req.method === "PATCH" && /^\/api\/v1\/projects\/[^/]+\/tasks\/[^/]+$/.test(url)) return;
   // Allow public invite routes (view + accept — no auth needed)
   if (url.startsWith("/api/v1/invites/")) return;
+  // Allow OpenClaw native channel polling routes (they use their own Bearer auth)
+  if (url.startsWith("/api/v1/openclaw/")) return;
 
   // 1. Try Bearer API key (for internal/agent calls)
   const authHeader = req.headers.authorization ?? "";
@@ -107,6 +110,7 @@ await registerOpsRateLimits(server, db);
 await registerProjects(server, db);
 await registerInvites(server, db);
 await registerWs(server);
+await openclawRoutes(server, db);
 
 startConnector(db);
 
