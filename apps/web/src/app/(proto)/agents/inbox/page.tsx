@@ -143,10 +143,11 @@ function InboxPageInner() {
         ) : (
           <div className="divide-y divide-zinc-100 dark:divide-[#2D2A45]">
             {items.map(item => {
-              const peer = tab === "inbox"
-                ? (item.payload?.from_agent_name ?? item.from_agent_id ?? "unknown")
-                : (item.to_agent_name ?? item.agent_id ?? "unknown");
-              const preview = String(item.payload?.text ?? "(no text)").replace(/\s+/g, " ");
+              const from = item.payload?.from_agent_name ?? item.from_agent_id ?? "unknown";
+              const to = item.to_agent_name ?? item.agent_id ?? "unknown";
+              const body = String(item.payload?.text ?? "(no body)");
+              const preview = body.replace(/\s+/g, " ");
+              const subject = String(item.payload?.subject ?? item.type ?? "(no subject)");
               const isOpen = openId === item.id;
 
               return (
@@ -156,9 +157,10 @@ function InboxPageInner() {
                     className="w-full px-4 py-3 text-left hover:bg-zinc-50 dark:hover:bg-white/5 transition-colors"
                   >
                     <div className="flex items-center gap-2 text-xs">
-                      <span className={cn("rounded-full px-2 py-0.5 font-semibold", typeBadge(item.type))}>{item.type}</span>
-                      <span className="text-zinc-500">{tab === "inbox" ? "from" : "to"} <span className="font-semibold text-zinc-700 dark:text-zinc-200">{peer}</span></span>
-                      <span className="truncate text-zinc-600 dark:text-zinc-300">— {preview}</span>
+                      <span className="text-zinc-500">From <span className="font-semibold text-zinc-700 dark:text-zinc-200">{from}</span></span>
+                      <span className="text-zinc-400">→</span>
+                      <span className="text-zinc-500">To <span className="font-semibold text-zinc-700 dark:text-zinc-200">{to}</span></span>
+                      <span className="truncate text-zinc-700 dark:text-zinc-200">| {subject} — {preview}</span>
                       <span className="ml-auto text-zinc-400">{relativeTime(item.created_at)}</span>
                     </div>
                   </button>
@@ -166,12 +168,18 @@ function InboxPageInner() {
                   {isOpen && (
                     <div className="px-4 pb-3 text-sm">
                       <div className="rounded-xl bg-zinc-50 p-3 dark:bg-white/5">
-                        <p className="whitespace-pre-wrap text-zinc-700 dark:text-zinc-200">{String(item.payload?.text ?? "(no text)")}</p>
+                        <div className="mb-2 grid gap-1 text-xs text-zinc-500">
+                          <div>From: <span className="font-semibold text-zinc-700 dark:text-zinc-200">{from}</span></div>
+                          <div>To: <span className="font-semibold text-zinc-700 dark:text-zinc-200">{to}</span></div>
+                          <div>Subject: <span className="font-semibold text-zinc-700 dark:text-zinc-200">{subject}</span></div>
+                        </div>
+                        <p className="whitespace-pre-wrap text-zinc-700 dark:text-zinc-200">{body}</p>
                         <div className="mt-2 flex flex-wrap gap-3 text-[11px] text-zinc-400">
                           <span className={cn("rounded-full px-2 py-0.5 font-semibold", statusBadge(item.status))}>{item.status}</span>
-                          {item.corr_id && <span>corr: <span className="font-mono text-zinc-500">{item.corr_id}</span></span>}
-                          {item.reply_to_corr_id && <span>reply_to: <span className="font-mono text-zinc-500">{item.reply_to_corr_id}</span></span>}
-                          {item.thread_id && <span>thread: <span className="font-mono text-zinc-500">{item.thread_id}</span></span>}
+                          {item.corr_id && <span>Message ID: <span className="font-mono text-zinc-500">{item.corr_id}</span></span>}
+                          {item.reply_to_corr_id && <span>Reply To: <span className="font-mono text-zinc-500">{item.reply_to_corr_id}</span></span>}
+                          {item.thread_id && <span>Conversation: <span className="font-mono text-zinc-500">{item.thread_id}</span></span>}
+                          <span className={cn("rounded-full px-2 py-0.5 font-semibold", typeBadge(item.type))}>{item.type}</span>
                         </div>
                       </div>
                     </div>
