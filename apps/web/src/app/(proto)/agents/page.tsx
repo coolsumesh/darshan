@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   fetchAgents, createAgent, pingAgent,
-  fetchAgentProjects, deleteAgent, updateAgent, fetchAgentInbox,
+  fetchAgentProjects, deleteAgent, updateAgent, fetchAgentInbox, fetchAgentInboxSent,
   type AgentProject, type AgentInboxItem,
 } from "@/lib/api";
 import type { Agent } from "@/lib/agents";
@@ -692,6 +692,7 @@ function AgentInboxSidebar({ agent, onClose }: { agent: ExtAgent; onClose: () =>
   const [items, setItems] = React.useState<AgentInboxItem[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [status, setStatus] = React.useState<"all" | "pending" | "ack" | "failed">("all");
+  const [folder, setFolder] = React.useState<"received" | "sent">("received");
 
   async function load() {
     if (!agent.callback_token) {
@@ -700,14 +701,14 @@ function AgentInboxSidebar({ agent, onClose }: { agent: ExtAgent; onClose: () =>
       return;
     }
     setLoading(true);
-    const rows = await fetchAgentInbox(agent.id, agent.callback_token);
+    const rows = folder === "received"
+      ? await fetchAgentInbox(agent.id, agent.callback_token, status)
+      : await fetchAgentInboxSent(agent.id, agent.callback_token, status);
     setItems(rows);
     setLoading(false);
   }
 
-  React.useEffect(() => { load(); }, [agent.id, agent.callback_token]);
-
-  const filtered = items.filter(i => status === "all" ? true : i.status === status);
+  React.useEffect(() => { load(); }, [agent.id, agent.callback_token, folder, status]);
 
   const typeBadge = (t: string) =>
     t === "a2a_message" ? "bg-violet-100 text-violet-700 dark:bg-violet-500/15 dark:text-violet-400"
@@ -735,12 +736,23 @@ function AgentInboxSidebar({ agent, onClose }: { agent: ExtAgent; onClose: () =>
       </div>
 
       <div className="shrink-0 border-b border-zinc-100 px-3 py-2 dark:border-[#2D2A45]">
+        <div className="mb-2 flex items-center gap-1">
+          {(["received","sent"] as const).map(f => (
+            <button key={f} onClick={() => setFolder(f)}
+              className={cn(
+                "rounded-lg px-2.5 py-1 text-[11px] font-semibold transition-colors",
+                folder === f ? "bg-brand-600 text-white" : "bg-zinc-100 text-zinc-500 hover:bg-zinc-200 dark:bg-white/10 dark:text-zinc-300"
+              )}>
+              {f === "received" ? "Inbox Received" : "Inbox Sent"}
+            </button>
+          ))}
+        </div>
         <div className="flex items-center gap-1">
           {(["all","pending","ack","failed"] as const).map(s => (
             <button key={s} onClick={() => setStatus(s)}
               className={cn(
                 "rounded-lg px-2.5 py-1 text-[11px] font-semibold transition-colors",
-                status === s ? "bg-brand-600 text-white" : "bg-zinc-100 text-zinc-500 hover:bg-zinc-200 dark:bg-white/10 dark:text-zinc-300"
+                status === s ? "bg-zinc-800 text-white dark:bg-zinc-100 dark:text-zinc-900" : "bg-zinc-100 text-zinc-500 hover:bg-zinc-200 dark:bg-white/10 dark:text-zinc-300"
               )}>
               {s}
             </button>
@@ -751,11 +763,11 @@ function AgentInboxSidebar({ agent, onClose }: { agent: ExtAgent; onClose: () =>
       <div className="flex-1 overflow-y-auto p-3">
         {loading ? (
           <div className="py-10 text-center text-sm text-zinc-400">Loading inbox…</div>
-        ) : filtered.length === 0 ? (
+        ) : items.length === 0 ? (
           <div className="py-10 text-center text-sm text-zinc-400">No messages</div>
         ) : (
           <div className="flex flex-col gap-2.5">
-            {filtered.map(item => (
+            {items.map(item => (
               <div key={item.id} className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-[#2D2A45] dark:bg-white/5">
                 <div className="mb-2 flex items-center gap-1.5">
                   <span className={cn("rounded-full px-2 py-0.5 text-[10px] font-semibold", typeBadge(item.type))}>{item.type}</span>
@@ -763,9 +775,10 @@ function AgentInboxSidebar({ agent, onClose }: { agent: ExtAgent; onClose: () =>
                   <span className="ml-auto text-[10px] text-zinc-400">{relativeTime(item.created_at)}</span>
                 </div>
 
-                {item.payload?.from_agent_name && (
+                {(item.payload?.from_agent_name || item.from_agent_id) && (
                   <div className="mb-1.5 text-[11px] text-zinc-500">
-                    from <span className="font-semibold text-zinc-700 dark:text-zinc-200">{item.payload.from_agent_name}</span>
+                    {folder === "received" ? "from" : "to"}{" "}
+                    <span className="font-semibold text-zinc-700 dark:text-zinc-200">{item.payload?.from_agent_name ?? item.from_agent_id}</span>
                   </div>
                 )}
 

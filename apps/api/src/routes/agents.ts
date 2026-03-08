@@ -604,9 +604,35 @@ ACK_URL: ${ackUrl}
     await db.query(`update agents set last_seen_at = now() where id = $1`, [agents[0].id]);
 
     const { rows } = await db.query(
-      `select * from agent_inbox where agent_id = $1 and status = $2 order by created_at asc`,
-      [agents[0].id, status]
+      status === "all"
+        ? `select * from agent_inbox where agent_id = $1 order by created_at desc limit 200`
+        : `select * from agent_inbox where agent_id = $1 and status = $2 order by created_at desc limit 200`,
+      status === "all" ? [agents[0].id] : [agents[0].id, status]
     );
+    return { ok: true, items: rows };
+  });
+
+  // ── Agent sent inbox messages (outgoing a2a/task events authored by this agent) ──
+  server.get<{
+    Params: { id: string };
+    Querystring: { token?: string; status?: string };
+  }>("/api/v1/agents/:id/inbox/sent", async (req, reply) => {
+    const { status = "all" } = req.query;
+    const token = (req.headers.authorization?.replace(/^Bearer\s+/i, "") || req.query.token) ?? "";
+
+    const { rows: agents } = await db.query(
+      `select id from agents where id::text = $1 and callback_token = $2`,
+      [req.params.id, token]
+    );
+    if (!agents.length) return reply.status(401).send({ ok: false, error: "invalid token" });
+
+    const { rows } = await db.query(
+      status === "all"
+        ? `select * from agent_inbox where from_agent_id = $1 order by created_at desc limit 200`
+        : `select * from agent_inbox where from_agent_id = $1 and status = $2 order by created_at desc limit 200`,
+      status === "all" ? [agents[0].id] : [agents[0].id, status]
+    );
+
     return { ok: true, items: rows };
   });
 

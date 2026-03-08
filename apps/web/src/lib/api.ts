@@ -272,9 +272,23 @@ export type AgentInboxItem = {
   thread_id?: string;
 };
 
-export async function fetchAgentInbox(agentId: string, callbackToken: string): Promise<AgentInboxItem[]> {
-  const q = new URLSearchParams({ token: callbackToken });
+export async function fetchAgentInbox(
+  agentId: string,
+  callbackToken: string,
+  status: "all" | "pending" | "ack" | "failed" = "all"
+): Promise<AgentInboxItem[]> {
+  const q = new URLSearchParams({ token: callbackToken, status });
   const data = await apiFetch<{ ok: boolean; items: AgentInboxItem[] }>(`/api/v1/agents/${agentId}/inbox?${q.toString()}`);
+  return data?.ok ? (data.items ?? []) : [];
+}
+
+export async function fetchAgentInboxSent(
+  agentId: string,
+  callbackToken: string,
+  status: "all" | "pending" | "ack" | "failed" = "all"
+): Promise<AgentInboxItem[]> {
+  const q = new URLSearchParams({ token: callbackToken, status });
+  const data = await apiFetch<{ ok: boolean; items: AgentInboxItem[] }>(`/api/v1/agents/${agentId}/inbox/sent?${q.toString()}`);
   return data?.ok ? (data.items ?? []) : [];
 }
 
