@@ -86,9 +86,18 @@ function InboxPageInner() {
     }
     setLoading(true);
     const rows = tab === "inbox"
-      ? await fetchAgentInbox(selected.id, selected.callback_token, status)
+      ? (() => Promise.all([
+          fetchAgentInbox(selected.id, selected.callback_token, status),
+          fetchAgentInboxSent(selected.id, selected.callback_token, status),
+        ]).then(([recv, sent]) => {
+          const map = new Map<string, AgentInboxItem>();
+          [...recv, ...sent].forEach((r) => map.set(r.id, r));
+          return Array.from(map.values()).sort((a, b) =>
+            new Date(b.created_at ?? 0).getTime() - new Date(a.created_at ?? 0).getTime()
+          );
+        }))()
       : await fetchAgentInboxSent(selected.id, selected.callback_token, status);
-    setItems(rows);
+    setItems(await rows);
     setLoading(false);
   }
 
@@ -108,15 +117,34 @@ function InboxPageInner() {
     [items, typeFilter]
   );
 
+  const conversationGroups = React.useMemo(() => {
+    const m = new Map<string, AgentInboxItem[]>();
+    for (const it of filteredItems) {
+      const key = it.thread_id || `msg:${it.id}`;
+      const arr = m.get(key) ?? [];
+      arr.push(it);
+      m.set(key, arr);
+    }
+    return Array.from(m.entries())
+      .map(([conversationId, msgs]) => ({
+        conversationId,
+        messages: msgs.sort((a, b) => new Date(a.created_at ?? 0).getTime() - new Date(b.created_at ?? 0).getTime()),
+      }))
+      .sort((a, b) => new Date(b.messages[b.messages.length - 1].created_at ?? 0).getTime() - new Date(a.messages[b.messages.length - 1].created_at ?? 0).getTime());
+  }, [filteredItems]);
+
   React.useEffect(() => {
-    if (!filteredItems.length) {
+    const sourceIds = tab === "inbox"
+      ? conversationGroups.map(g => g.conversationId)
+      : filteredItems.map(i => i.id);
+    if (!sourceIds.length) {
       setSelectedId(null);
       return;
     }
-    if (!selectedId || !filteredItems.some(i => i.id === selectedId)) {
-      setSelectedId(filteredItems[0].id);
+    if (!selectedId || !sourceIds.includes(selectedId)) {
+      setSelectedId(sourceIds[0]);
     }
-  }, [filteredItems, selectedId]);
+  }, [conversationGroups, filteredItems, selectedId, tab]);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-5">
@@ -203,31 +231,31 @@ function InboxPageInner() {
           <div className="grid min-h-[520px] grid-cols-1 md:grid-cols-[380px_1fr]">
             <div className="border-r border-zinc-100 dark:border-[#2D2A45]">
               <div className="max-h-[70vh] overflow-y-auto">
-                {filteredItems.map(item => {
-                  const from = tab === "sent"
-                    ? (selected?.name ?? "unknown")
-                    : (item.payload?.from_agent_name ?? item.from_agent_id ?? "unknown");
-                  const body = String(item.payload?.text ?? "(no body)");
-                  const subject = String(item.payload?.subject ?? "(no subject)");
-                  const isSelected = selectedId === item.id;
+                {(tab === "inbox" ? conversationGroups : filteredItems.map(i => ({ conversationId: i.id, messages: [i] }))).map(group => {
+                  const latest = group.messages[group.messages.length - 1];
+                  const from = latest.payload?.from_agent_name ?? agentNameById[latest.from_agent_id ?? ""] ?? latest.from_agent_id ?? "unknown";
+                  const body = String(latest.payload?.text ?? "(no body)");
+                  const subject = String(latest.payload?.subject ?? "(no subject)");
+                  const isSelected = selectedId === group.conversationId;
                   return (
                     <button
-                      key={item.id}
-                      onClick={() => setSelectedId(item.id)}
+                      key={group.conversationId}
+                      onClick={() => setSelectedId(group.conversationId)}
                       className={cn(
                         "w-full border-b border-zinc-100 px-4 py-3 text-left transition-colors dark:border-[#2D2A45]",
                         isSelected ? "bg-brand-50 dark:bg-brand-500/10" : "hover:bg-zinc-50 dark:hover:bg-white/5"
                       )}
                     >
                       <div className="mb-1 flex items-center gap-2">
-                        <span className={cn("grid h-6 w-6 place-items-center rounded-full text-[11px] font-bold text-white", avatarColor(from))}>
-                          {from.slice(0,1).toUpperCase()}
-                        </span>
+                        <span className={cn("grid h-6 w-6 place-items-center rounded-full text-[11px] font-bold text-white", avatarColor(from))}>{from.slice(0,1).toUpperCase()}</span>
                         <span className="truncate text-sm font-semibold text-zinc-800 dark:text-zinc-100">{from}</span>
-                        <span className="ml-auto text-[11px] text-zinc-400">{relativeTime(item.created_at)}</span>
+                        <span className="ml-auto text-[11px] text-zinc-400">{relativeTime(latest.created_at)}</span>
                       </div>
                       <div className="truncate text-xs font-medium text-zinc-700 dark:text-zinc-200">{subject}</div>
                       <div className="truncate text-xs text-zinc-500 dark:text-zinc-400">{body.replace(/\s+/g, " ")}</div>
+                      {tab === "inbox" && group.messages.length > 1 && (
+                        <div className="mt-1 text-[10px] text-zinc-400">{group.messages.length} messages • {group.conversationId}</div>
+                      )}
                     </button>
                   );
                 })}
@@ -236,14 +264,13 @@ function InboxPageInner() {
 
             <div className="p-5">
               {(() => {
-                const item = filteredItems.find(i => i.id === selectedId) ?? filteredItems[0];
+                const selectedMessages = tab === "inbox"
+                  ? (conversationGroups.find(g => g.conversationId === selectedId)?.messages ?? conversationGroups[0]?.messages ?? [])
+                  : ((filteredItems.find(i => i.id === selectedId) ?? filteredItems[0]) ? [filteredItems.find(i => i.id === selectedId) ?? filteredItems[0]] : []);
+                const item = selectedMessages[selectedMessages.length - 1];
                 if (!item) return null;
-                const from = tab === "sent"
-                  ? (selected?.name ?? agentNameById[item.from_agent_id ?? ""] ?? item.from_agent_id ?? "unknown")
-                  : (item.payload?.from_agent_name ?? agentNameById[item.from_agent_id ?? ""] ?? item.from_agent_id ?? "unknown");
-                const to = tab === "sent"
-                  ? (item.to_agent_name ?? (item.agent_id ? agentNameById[item.agent_id] : undefined) ?? item.agent_id ?? "unknown")
-                  : (selected?.name ?? item.to_agent_name ?? (item.agent_id ? agentNameById[item.agent_id] : undefined) ?? item.agent_id ?? "unknown");
+                const from = item.payload?.from_agent_name ?? agentNameById[item.from_agent_id ?? ""] ?? item.from_agent_id ?? "unknown";
+                const to = item.to_agent_name ?? (item.agent_id ? agentNameById[item.agent_id] : undefined) ?? item.agent_id ?? "unknown";
                 const subject = String(item.payload?.subject ?? "(no subject)");
                 const body = String(item.payload?.text ?? "(no body)");
                 const projectId = item.payload?.project_id ?? item.payload?.projectId;
@@ -276,6 +303,12 @@ function InboxPageInner() {
                         <div>Received: <span className="font-semibold text-zinc-700 dark:text-zinc-200">{relativeTime(item.created_at)}</span></div>
                       </div>
                     </div>
+
+                    {tab === "inbox" && selectedMessages.length > 1 && (
+                      <div className="mb-3 rounded-xl bg-zinc-50 p-3 text-xs text-zinc-600 dark:bg-white/5 dark:text-zinc-300">
+                        {selectedMessages.length} messages in this conversation
+                      </div>
+                    )}
 
                     <div className="rounded-xl bg-zinc-50 p-4 text-sm text-zinc-700 dark:bg-white/5 dark:text-zinc-200">
                       <p className="whitespace-pre-wrap">{body}</p>
