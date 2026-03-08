@@ -1,4 +1,4 @@
-import type { OpenClawPluginApi, PluginRuntime } from "openclaw/plugin-sdk";
+﻿import type { OpenClawPluginApi, PluginRuntime } from "openclaw/plugin-sdk";
 import { emptyPluginConfigSchema } from "openclaw/plugin-sdk";
 
 const CHANNEL_ID = "darshan";
@@ -17,21 +17,101 @@ function getDarshanConfig(cfg: any) {
     c.apiKey ??
     process.env.DARSHAN_API_KEY ??
     "824cdfcdec0e35cf550002c2dfa3541932f58e2e2497cfaa3c844dc99f5b972f";
-  // Agent-specific credentials for inbox WS push (optional)
+  // Agent-specific credentials â€” read from openclaw config (set via `openclaw config set channels.darshan.agentId`)
+  // Env var fallback uses generic DARSHAN_AGENT_* (slug-based vars like AGENT_SANJAYA_* are set in env but
+  // each instance should configure via openclaw config so the extension stays slug-agnostic)
   const agentId =
     c.agentId ??
-    process.env.AGENT_SANJAYA_ID ??
     process.env.DARSHAN_AGENT_ID ??
     null;
   const agentToken =
     c.agentToken ??
-    process.env.AGENT_SANJAYA_TOKEN ??
     process.env.DARSHAN_AGENT_TOKEN ??
     null;
   return { baseUrl, apiKey, agentId, agentToken };
 }
 
-// ── Agent inbox WS subscription (real-time push) ─────────────────────────────
+// â”€â”€ Shared A2A message handler â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+async function handleA2AMessage(
+  item: { id?: string; inbox_id?: string; from_agent_id: string; corr_id: string; thread_id?: string; payload: { text?: string; from_agent_name?: string }; status?: string },
+  baseUrl: string,
+  agentId: string,
+  agentToken: string,
+  log: any
+) {
+  const inboxId  = item.id ?? item.inbox_id ?? "";
+  const fromName = item.payload?.from_agent_name ?? "agent";
+  const text     = item.payload?.text ?? "";
+
+  const ack = async (response: string) => {
+    await fetch(`${baseUrl}/api/v1/agents/${agentId}/inbox/ack`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${agentToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ inbox_id: inboxId, callback_token: agentToken, response }),
+      signal: AbortSignal.timeout(10000),
+    }).catch(() => {});
+  };
+
+  const sendReply = async (replyText: string) => {
+    const clean = replyText.trim();
+    if (!clean || clean === "NO_REPLY" || clean === "HEARTBEAT_OK") return false;
+    await fetch(`${baseUrl}/api/v1/a2a/send`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${agentToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        from_agent_id: agentId, to_agent_id: item.from_agent_id,
+        text: clean, thread_id: item.thread_id ?? null,
+        reply_to_corr_id: item.corr_id,
+      }),
+      signal: AbortSignal.timeout(15000),
+    });
+    log?.info?.(`[darshan] a2a reply sent to ${fromName}: ${clean.slice(0, 60)}`);
+    return true;
+  };
+
+  try {
+    const rt = _runtime!;
+    const cfg = await (rt as any).config.loadConfig();
+    let delivered = false;
+
+    await (rt as any).channel.reply.dispatchReplyWithBufferedBlockDispatcher({
+      ctx: {
+        // Format as a plain conversational message so the agent doesn't treat it as system/heartbeat
+        Body: `${fromName}: ${text}`,
+        From: item.from_agent_id,
+        To: agentId,
+        SessionKey: `darshan:a2a:${item.from_agent_id}`,
+        AccountId: "default",
+        OriginatingChannel: CHANNEL_ID as any,
+        OriginatingTo: item.from_agent_id,
+        ChatType: "direct" as const,
+        SenderName: fromName,
+      },
+      cfg,
+      dispatcherOptions: {
+        deliver: async (payload: { text?: string; body?: string }) => {
+          const sent = await sendReply(payload?.text ?? payload?.body ?? "");
+          if (sent) {
+            delivered = true;
+            await ack(`replied: ${(payload?.text ?? "").slice(0, 80)}`);
+          }
+        },
+      },
+    });
+
+    // Fallback: deliver was never called (agent said NO_REPLY) â€” ACK and send received notice
+    if (!delivered) {
+      log?.warn?.(`[darshan] deliver not called for a2a â€” sending fallback`);
+      await sendReply(`[ack] Message received from ${fromName}.`);
+      await ack("auto-acked: agent returned NO_REPLY");
+    }
+  } catch (err: any) {
+    log?.error?.(`[darshan] handleA2AMessage error: ${err?.message ?? err}`);
+    await ack(`error: ${String(err?.message ?? err).slice(0, 80)}`);
+  }
+}
+
+// â”€â”€ Agent inbox WS subscription (real-time push) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 let _wsReconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
 function startAgentInboxWs(
@@ -260,7 +340,7 @@ const plugin = {
             log?.info?.(`[darshan] started, polling ${baseUrl}`);
             console.log(`[darshan] startAccount called, polling ${baseUrl}`);
 
-            // ── Real-time inbox push via WebSocket ──────────────────────────
+            // â”€â”€ Real-time inbox push via WebSocket â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
             if (agentId && agentToken) {
               // baseUrl = "https://darshan.caringgems.in/api/backend"
               // WS must go through /api/backend/ws so Nginx routes it to the API (port 4000)
@@ -271,82 +351,27 @@ const plugin = {
               startAgentInboxWs(
                 wsUrl, agentId, agentToken,
                 async (item: any) => {
-                  // Immediate handling of a2a_message pushed in real-time
+                async (item: any) => {
                   if (item?.type !== "a2a_message") return;
-                  log?.info?.(`[darshan] realtime a2a from ${item.from_agent_name}: ${item.text}`);
-
-                  try {
-                    const rt = _runtime!;
-                    const freshCfg = await (rt as any).config.loadConfig();
-                    const sessionKey = `darshan:a2a:${item.from_agent_id}`;
-
-                    const msgCtx = {
-                      Body: `[A2A from ${item.from_agent_name}]: ${item.text}`,
-                      From: item.from_agent_id,
-                      To: agentId,
-                      SessionKey: sessionKey,
-                      AccountId: "default",
-                      OriginatingChannel: CHANNEL_ID as any,
-                      OriginatingTo: item.from_agent_id,
-                      ChatType: "direct" as const,
-                      SenderName: item.from_agent_name ?? "agent",
-                    };
-
-                    await (rt as any).channel.reply.dispatchReplyWithBufferedBlockDispatcher({
-                      ctx: msgCtx,
-                      cfg: freshCfg,
-                      dispatcherOptions: {
-                        deliver: async (payload: { text?: string; body?: string }) => {
-                          const replyText = payload?.text ?? payload?.body ?? "";
-                          if (!replyText.trim()) return;
-
-                          // Send reply back via a2a relay
-                          await fetch(`${baseUrl}/api/v1/a2a/send`, {
-                            method: "POST",
-                            headers: {
-                              Authorization: `Bearer ${agentToken}`,
-                              "Content-Type": "application/json",
-                            },
-                            body: JSON.stringify({
-                              from_agent_id:    agentId,
-                              to_agent_id:      item.from_agent_id,
-                              text:             replyText,
-                              thread_id:        item.thread_id ?? null,
-                              reply_to_corr_id: item.corr_id,
-                            }),
-                            signal: AbortSignal.timeout(15000),
-                          });
-
-                          // ACK the inbox item
-                          await fetch(`${baseUrl}/api/v1/agents/${agentId}/inbox/ack`, {
-                            method: "POST",
-                            headers: {
-                              Authorization: `Bearer ${agentToken}`,
-                              "Content-Type": "application/json",
-                            },
-                            body: JSON.stringify({
-                              inbox_id:       item.inbox_id,
-                              callback_token: agentToken,
-                              response:       `replied: ${replyText.slice(0, 80)}`,
-                            }),
-                            signal: AbortSignal.timeout(10000),
-                          });
-                        },
-                      },
-                    });
-                  } catch (err: any) {
-                    log?.error?.(`[darshan] realtime a2a error: ${err?.message ?? err}`);
-                  }
+                  log?.info?.(`[darshan] WS push: a2a from ${item.from_agent_name}`);
+                  // Normalize WS item shape to match REST inbox shape
+                  const normalized = {
+                    id: item.inbox_id ?? item.id ?? "",
+                    inbox_id: item.inbox_id ?? item.id ?? "",
+                    from_agent_id: item.from_agent_id,
+                    corr_id: item.corr_id,
+                    thread_id: item.thread_id,
+                    payload: { text: item.text, from_agent_name: item.from_agent_name },
+                  };
+                  handleA2AMessage(normalized, baseUrl, agentId, agentToken, log)
+                    .catch((e: any) => log?.error?.(`[darshan] WS a2a error: ${e?.message ?? e}`));
                 },
-                abortSignal,
-                log
               );
             } else {
-              log?.warn?.("[darshan] no agentId/agentToken configured — skipping realtime inbox push");
+              log?.warn?.("[darshan] no agentId/agentToken configured â€” skipping realtime inbox push");
             }
 
             // ── Inbox poll fallback for a2a_message (runs every 30s) ────────
-            // Handles a2a messages even if WS push isn't connected
             let lastInboxPoll = 0;
             const INBOX_POLL_MS = 30000;
 
@@ -362,69 +387,13 @@ const plugin = {
                 const a2aItems = (data.items ?? []).filter((i: any) => i.type === "a2a_message" && i.status === "pending");
                 for (const item of a2aItems) {
                   log?.info?.(`[darshan] inbox poll found a2a from ${item.payload?.from_agent_name}`);
-                  try {
-                    const rt = _runtime!;
-                    const freshCfg = await (rt as any).config.loadConfig();
-                    const sessionKey = `darshan:a2a:${item.from_agent_id}`;
-                    await (rt as any).channel.reply.dispatchReplyWithBufferedBlockDispatcher({
-                      ctx: {
-                        Body: `[A2A from ${item.payload?.from_agent_name ?? "agent"}]: ${item.payload?.text}`,
-                        From: item.from_agent_id,
-                        To: agentId,
-                        SessionKey: sessionKey,
-                        AccountId: "default",
-                        OriginatingChannel: CHANNEL_ID as any,
-                        OriginatingTo: item.from_agent_id,
-                        ChatType: "direct" as const,
-                        SenderName: item.payload?.from_agent_name ?? "agent",
-                      },
-                      cfg: freshCfg,
-                      dispatcherOptions: {
-                        deliver: async (payload: { text?: string; body?: string }) => {
-                          const replyText = payload?.text ?? payload?.body ?? "";
-                          if (!replyText.trim()) return;
-                          await fetch(`${baseUrl}/api/v1/a2a/send`, {
-                            method: "POST",
-                            headers: { Authorization: `Bearer ${agentToken}`, "Content-Type": "application/json" },
-                            body: JSON.stringify({
-                              from_agent_id: agentId, to_agent_id: item.from_agent_id,
-                              text: replyText, thread_id: item.thread_id ?? null,
-                              reply_to_corr_id: item.corr_id,
-                            }),
-                            signal: AbortSignal.timeout(15000),
-                          });
-                          await fetch(`${baseUrl}/api/v1/agents/${agentId}/inbox/ack`, {
-                            method: "POST",
-                            headers: { Authorization: `Bearer ${agentToken}`, "Content-Type": "application/json" },
-                            body: JSON.stringify({ inbox_id: item.id, callback_token: agentToken, response: `replied: ${replyText.slice(0, 80)}` }),
-                            signal: AbortSignal.timeout(10000),
-                          });
-                        },
-                      },
-                    });
-                  } catch (err: any) {
-                    log?.error?.(`[darshan] inbox poll a2a error: ${err?.message ?? err}`);
-                  }
+                  await handleA2AMessage(item, baseUrl, agentId, agentToken, log)
+                    .catch((e: any) => log?.error?.(`[darshan] poll a2a error: ${e?.message ?? e}`));
                 }
               } catch (err: any) {
                 log?.warn?.(`[darshan] inbox poll error: ${err?.message ?? err}`);
               }
             }
-
-            // ── Chat run polling (existing) ─────────────────────────────────
-            while (!(abortSignal?.aborted ?? false)) {
-              try {
-                const runs = await fetchPending(baseUrl, apiKey);
-                for (const run of runs) {
-                  if (abortSignal?.aborted) break;
-                  processRun(run, baseUrl, apiKey, log).catch((e: any) =>
-                    log?.error?.(`[darshan] processRun error: ${e?.message ?? e}`)
-                  );
-                }
-              } catch (e: any) {
-                log?.warn?.(`[darshan] poll error: ${e?.message ?? e}`);
-              }
-
               // Poll inbox for a2a messages every 30s as WS fallback
               if (Date.now() - lastInboxPoll > INBOX_POLL_MS) {
                 lastInboxPoll = Date.now();
