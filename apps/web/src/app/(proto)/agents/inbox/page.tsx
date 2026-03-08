@@ -267,12 +267,14 @@ function InboxPageInner() {
                 const selectedMessages = tab === "inbox"
                   ? (conversationGroups.find(g => g.conversationId === selectedId)?.messages ?? conversationGroups[0]?.messages ?? [])
                   : ((filteredItems.find(i => i.id === selectedId) ?? filteredItems[0]) ? [filteredItems.find(i => i.id === selectedId) ?? filteredItems[0]] : []);
-                const item = selectedMessages[selectedMessages.length - 1];
+                const orderedByReceived = [...selectedMessages].sort(
+                  (a, b) => new Date(b.created_at ?? 0).getTime() - new Date(a.created_at ?? 0).getTime()
+                );
+                const item = orderedByReceived[0];
                 if (!item) return null;
                 const from = item.payload?.from_agent_name ?? agentNameById[item.from_agent_id ?? ""] ?? item.from_agent_id ?? "unknown";
                 const to = item.to_agent_name ?? (item.agent_id ? agentNameById[item.agent_id] : undefined) ?? item.agent_id ?? "unknown";
                 const subject = String(item.payload?.subject ?? "(no subject)");
-                const body = String(item.payload?.text ?? "(no body)");
                 const projectId = item.payload?.project_id ?? item.payload?.projectId;
                 const projectName = projectId ? (projectNameById[String(projectId)] ?? "Unknown") : null;
                 const attachmentsRaw = Array.isArray(item.payload?.attachments) ? item.payload.attachments : [];
@@ -304,14 +306,27 @@ function InboxPageInner() {
                       </div>
                     </div>
 
-                    {tab === "inbox" && selectedMessages.length > 1 && (
+                    {tab === "inbox" && orderedByReceived.length > 1 && (
                       <div className="mb-3 rounded-xl bg-zinc-50 p-3 text-xs text-zinc-600 dark:bg-white/5 dark:text-zinc-300">
-                        {selectedMessages.length} messages in this conversation
+                        {orderedByReceived.length} messages in this conversation (latest first)
                       </div>
                     )}
 
-                    <div className="rounded-xl bg-zinc-50 p-4 text-sm text-zinc-700 dark:bg-white/5 dark:text-zinc-200">
-                      <p className="whitespace-pre-wrap">{body}</p>
+                    <div className="grid gap-2">
+                      {orderedByReceived.map((m) => {
+                        const msgFrom = m.payload?.from_agent_name ?? agentNameById[m.from_agent_id ?? ""] ?? m.from_agent_id ?? "unknown";
+                        const msgTo = m.to_agent_name ?? (m.agent_id ? agentNameById[m.agent_id] : undefined) ?? m.agent_id ?? "unknown";
+                        const msgBody = String(m.payload?.text ?? "(no body)");
+                        return (
+                          <div key={m.id} className="rounded-xl bg-zinc-50 p-4 text-sm text-zinc-700 dark:bg-white/5 dark:text-zinc-200">
+                            <div className="mb-1 text-[11px] text-zinc-500">
+                              <span className="font-semibold">{msgFrom}</span> → <span className="font-semibold">{msgTo}</span>
+                              <span className="ml-2 text-zinc-400">{relativeTime(m.created_at)}</span>
+                            </div>
+                            <p className="whitespace-pre-wrap">{msgBody}</p>
+                          </div>
+                        );
+                      })}
                     </div>
 
                     {attachments.length > 0 && (
