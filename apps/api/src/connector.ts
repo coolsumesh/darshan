@@ -22,43 +22,58 @@ function pickResponse(agentName: string): string {
   return CANNED_RESPONSES[key] ?? CANNED_RESPONSES["default"]!;
 }
 
-type BridgeResponse = {
-  ok?: boolean;
-  reply?: string;
+type OpenClawResponse = {
+  choices?: Array<{ message?: { content?: string } }>;
 };
 
-async function getBridgeReply(params: {
+async function getNativeReply(params: {
   agentId: string;
   agentName: string;
   threadId: string;
   runId: string;
   userMessage: string;
 }): Promise<string | null> {
-  const bridgeUrl = process.env.OPENCLAW_CHAT_BRIDGE_URL?.trim();
-  if (!bridgeUrl) return null;
+  const baseUrl = (process.env.OPENCLAW_BASE_URL?.trim() || "http://127.0.0.1:18789").replace(/\/$/, "");
+  const model = process.env.OPENCLAW_MODEL?.trim() || "openclaw";
 
   try {
-    const res = await fetch(bridgeUrl, {
+    const res = await fetch(`${baseUrl}/v1/chat/completions`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        ...(process.env.OPENCLAW_CHAT_BRIDGE_TOKEN
-          ? { Authorization: `Bearer ${process.env.OPENCLAW_CHAT_BRIDGE_TOKEN}` }
+        ...(process.env.OPENCLAW_API_KEY
+          ? { Authorization: `Bearer ${process.env.OPENCLAW_API_KEY}` }
           : {}),
+        "x-openclaw-agent-id": params.agentId,
+        "x-openclaw-channel": "darshan",
+        "x-openclaw-chat-id": params.threadId,
       },
       body: JSON.stringify({
-        agent_id: params.agentId,
-        agent_name: params.agentName,
-        thread_id: params.threadId,
-        run_id: params.runId,
-        message: params.userMessage,
+        model,
+        messages: [
+          {
+            role: "system",
+            content: `You are ${params.agentName}. Reply as Darshan channel assistant. Keep responses concise and practical.`,
+          },
+          {
+            role: "user",
+            content: params.userMessage,
+          },
+        ],
+        metadata: {
+          channel: "darshan",
+          chat_id: params.threadId,
+          run_id: params.runId,
+          darshan_agent_id: params.agentId,
+        },
       }),
     });
 
     if (!res.ok) return null;
-    const data = (await res.json()) as BridgeResponse;
-    if (!data?.reply || typeof data.reply !== "string") return null;
-    return data.reply.trim() || null;
+    const data = (await res.json()) as OpenClawResponse;
+    const text = data?.choices?.[0]?.message?.content;
+    if (!text || typeof text !== "string") return null;
+    return text.trim() || null;
   } catch {
     return null;
   }
@@ -125,7 +140,7 @@ export async function processQueued(db: pg.Pool) {
       userMessage = inputRows[0]?.content ?? "";
     }
 
-    const bridgedReply = await getBridgeReply({
+    const nativeReply = await getNativeReply({
       agentId: run.target_agent_id,
       agentName,
       threadId: run.thread_id,
@@ -133,10 +148,7 @@ export async function processQueued(db: pg.Pool) {
       userMessage,
     });
 
-    const bridgeConfigured = true;
-    const responseText = bridgeConfigured
-      ? (bridgedReply ?? "Bridge unavailable. Retrying shortly.")
-      : pickResponse(agentName);
+    const responseText = nativeReply ?? pickResponse(agentName);
     const responseContent = `[${agentName}] ${responseText}`;
 
     // Persist agent response message
