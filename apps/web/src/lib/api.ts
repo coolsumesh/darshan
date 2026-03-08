@@ -267,6 +267,7 @@ export type AgentInboxItem = {
   created_at?: string;
   acked_at?: string;
   from_agent_id?: string;
+  to_agent_name?: string;
   corr_id?: string;
   reply_to_corr_id?: string;
   thread_id?: string;

@@ -628,8 +628,18 @@ ACK_URL: ${ackUrl}
 
     const { rows } = await db.query(
       status === "all"
-        ? `select * from agent_inbox where from_agent_id = $1 order by created_at desc limit 200`
-        : `select * from agent_inbox where from_agent_id = $1 and status = $2 order by created_at desc limit 200`,
+        ? `select i.*, to_a.name as to_agent_name
+             from agent_inbox i
+             left join agents to_a on to_a.id = i.agent_id
+            where i.from_agent_id = $1
+            order by i.created_at desc
+            limit 200`
+        : `select i.*, to_a.name as to_agent_name
+             from agent_inbox i
+             left join agents to_a on to_a.id = i.agent_id
+            where i.from_agent_id = $1 and i.status = $2
+            order by i.created_at desc
+            limit 200`,
       status === "all" ? [agents[0].id] : [agents[0].id, status]
     );
 

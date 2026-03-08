@@ -149,9 +149,14 @@ function InboxPageInner() {
                   <span className="ml-auto text-[11px] text-zinc-400">{relativeTime(item.created_at)}</span>
                 </div>
 
-                {(item.payload?.from_agent_name || item.from_agent_id) && (
+                {(item.payload?.from_agent_name || item.from_agent_id || item.to_agent_name) && (
                   <div className="mb-1 text-[11px] text-zinc-500">
-                    {tab === "inbox" ? "from" : "to"} <span className="font-semibold text-zinc-700 dark:text-zinc-200">{item.payload?.from_agent_name ?? item.from_agent_id}</span>
+                    {tab === "inbox" ? "from" : "to"}{" "}
+                    <span className="font-semibold text-zinc-700 dark:text-zinc-200">
+                      {tab === "inbox"
+                        ? (item.payload?.from_agent_name ?? item.from_agent_id)
+                        : (item.to_agent_name ?? item.agent_id)}
+                    </span>
                   </div>
                 )}
 
