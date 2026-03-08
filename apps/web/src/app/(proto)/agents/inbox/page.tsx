@@ -37,12 +37,22 @@ function fileNameFromUrl(url?: string): string {
   }
 }
 
+function avatarColor(name: string): string {
+  const palette = [
+    "bg-rose-500", "bg-orange-500", "bg-amber-500", "bg-lime-500", "bg-emerald-500",
+    "bg-cyan-500", "bg-sky-500", "bg-indigo-500", "bg-violet-500", "bg-fuchsia-500",
+  ];
+  const n = name.split("").reduce((a, c) => a + c.charCodeAt(0), 0);
+  return palette[n % palette.length];
+}
+
 function InboxPageInner() {
   const params = useSearchParams();
   const [agents, setAgents] = React.useState<ExtAgent[]>([]);
   const [agentId, setAgentId] = React.useState("");
   const [tab, setTab] = React.useState<"inbox" | "sent">("inbox");
   const [status, setStatus] = React.useState<"all" | "pending" | "ack" | "failed">("all");
+  const [typeFilter, setTypeFilter] = React.useState<"all" | "a2a_message" | "ping" | "task_assigned">("all");
   const [items, setItems] = React.useState<AgentInboxItem[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
@@ -87,27 +97,26 @@ function InboxPageInner() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [agentId, tab, status]);
 
-  React.useEffect(() => {
-    if (!items.length) {
-      setSelectedId(null);
-      return;
-    }
-    if (!selectedId || !items.some(i => i.id === selectedId)) {
-      setSelectedId(items[0].id);
-    }
-  }, [items, selectedId]);
-
-  const typeBadge = (t: string) =>
-    t === "a2a_message" ? "bg-violet-100 text-violet-700 dark:bg-violet-500/15 dark:text-violet-400"
-    : t === "task_assigned" ? "bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400"
-    : t === "ping" ? "bg-cyan-100 text-cyan-700 dark:bg-cyan-500/15 dark:text-cyan-400"
-    : "bg-zinc-100 text-zinc-600 dark:bg-white/10 dark:text-zinc-300";
-
   const statusBadge = (s: string) =>
     s === "pending" ? "bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400"
     : s === "ack" ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400"
     : s === "failed" ? "bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-400"
     : "bg-zinc-100 text-zinc-600 dark:bg-white/10 dark:text-zinc-300";
+
+  const filteredItems = React.useMemo(
+    () => items.filter(i => typeFilter === "all" ? true : i.type === typeFilter),
+    [items, typeFilter]
+  );
+
+  React.useEffect(() => {
+    if (!filteredItems.length) {
+      setSelectedId(null);
+      return;
+    }
+    if (!selectedId || !filteredItems.some(i => i.id === selectedId)) {
+      setSelectedId(filteredItems[0].id);
+    }
+  }, [filteredItems, selectedId]);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-5">
@@ -117,7 +126,7 @@ function InboxPageInner() {
       </div>
 
       <div className="rounded-2xl bg-white p-4 ring-1 ring-zinc-200 dark:bg-[#16132A] dark:ring-[#2D2A45]">
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
           <div>
             <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-zinc-400">Agent</label>
             <select
@@ -168,33 +177,52 @@ function InboxPageInner() {
               ))}
             </div>
           </div>
+
+          <div>
+            <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-zinc-400">Type</label>
+            <select
+              value={typeFilter}
+              onChange={(e) => setTypeFilter(e.target.value as any)}
+              className="w-full rounded-xl bg-zinc-50 px-3 py-2 text-sm ring-1 ring-zinc-200 dark:bg-zinc-900 dark:text-zinc-100 dark:ring-zinc-700"
+            >
+              <option value="all">all</option>
+              <option value="a2a_message">a2a_message</option>
+              <option value="ping">ping</option>
+              <option value="task_assigned">task_assigned</option>
+            </select>
+          </div>
         </div>
       </div>
 
       <div className="overflow-hidden rounded-2xl bg-white ring-1 ring-zinc-200 dark:bg-[#16132A] dark:ring-[#2D2A45]">
         {loading ? (
           <div className="py-12 text-center text-sm text-zinc-400">Loading…</div>
-        ) : items.length === 0 ? (
+        ) : filteredItems.length === 0 ? (
           <div className="py-12 text-center text-sm text-zinc-400">No messages</div>
         ) : (
           <div className="grid min-h-[520px] grid-cols-1 md:grid-cols-[380px_1fr]">
             <div className="border-r border-zinc-100 dark:border-[#2D2A45]">
               <div className="max-h-[70vh] overflow-y-auto">
-                {items.map(item => {
-                  const from = item.payload?.from_agent_name ?? item.from_agent_id ?? "unknown";
+                {filteredItems.map(item => {
+                  const from = tab === "sent"
+                    ? (selected?.name ?? "unknown")
+                    : (item.payload?.from_agent_name ?? item.from_agent_id ?? "unknown");
                   const body = String(item.payload?.text ?? "(no body)");
-                  const subject = String(item.payload?.subject ?? item.type ?? "(no subject)");
-                  const selected = selectedId === item.id;
+                  const subject = String(item.payload?.subject ?? "(no subject)");
+                  const isSelected = selectedId === item.id;
                   return (
                     <button
                       key={item.id}
                       onClick={() => setSelectedId(item.id)}
                       className={cn(
                         "w-full border-b border-zinc-100 px-4 py-3 text-left transition-colors dark:border-[#2D2A45]",
-                        selected ? "bg-brand-50 dark:bg-brand-500/10" : "hover:bg-zinc-50 dark:hover:bg-white/5"
+                        isSelected ? "bg-brand-50 dark:bg-brand-500/10" : "hover:bg-zinc-50 dark:hover:bg-white/5"
                       )}
                     >
                       <div className="mb-1 flex items-center gap-2">
+                        <span className={cn("grid h-6 w-6 place-items-center rounded-full text-[11px] font-bold text-white", avatarColor(from))}>
+                          {from.slice(0,1).toUpperCase()}
+                        </span>
                         <span className="truncate text-sm font-semibold text-zinc-800 dark:text-zinc-100">{from}</span>
                         <span className="ml-auto text-[11px] text-zinc-400">{relativeTime(item.created_at)}</span>
                       </div>
@@ -208,11 +236,15 @@ function InboxPageInner() {
 
             <div className="p-5">
               {(() => {
-                const item = items.find(i => i.id === selectedId) ?? items[0];
+                const item = filteredItems.find(i => i.id === selectedId) ?? filteredItems[0];
                 if (!item) return null;
-                const from = item.payload?.from_agent_name ?? item.from_agent_id ?? "unknown";
-                const to = item.to_agent_name ?? (item.agent_id ? agentNameById[item.agent_id] : undefined) ?? item.agent_id ?? "unknown";
-                const subject = String(item.payload?.subject ?? item.type ?? "(no subject)");
+                const from = tab === "sent"
+                  ? (selected?.name ?? agentNameById[item.from_agent_id ?? ""] ?? item.from_agent_id ?? "unknown")
+                  : (item.payload?.from_agent_name ?? agentNameById[item.from_agent_id ?? ""] ?? item.from_agent_id ?? "unknown");
+                const to = tab === "sent"
+                  ? (item.to_agent_name ?? (item.agent_id ? agentNameById[item.agent_id] : undefined) ?? item.agent_id ?? "unknown")
+                  : (selected?.name ?? item.to_agent_name ?? (item.agent_id ? agentNameById[item.agent_id] : undefined) ?? item.agent_id ?? "unknown");
+                const subject = String(item.payload?.subject ?? "(no subject)");
                 const body = String(item.payload?.text ?? "(no body)");
                 const projectId = item.payload?.project_id ?? item.payload?.projectId;
                 const projectName = projectId ? (projectNameById[String(projectId)] ?? "Unknown") : null;
@@ -271,7 +303,6 @@ function InboxPageInner() {
                       <span className={cn("rounded-full px-2 py-0.5 font-semibold", statusBadge(item.status))}>{item.status}</span>
                       {item.corr_id && <span>Message ID: <span className="font-mono text-zinc-500">{item.corr_id}</span></span>}
                       {item.reply_to_corr_id && <span>Reply To: <span className="font-mono text-zinc-500">{item.reply_to_corr_id}</span></span>}
-                      <span className={cn("rounded-full px-2 py-0.5 font-semibold", typeBadge(item.type))}>{item.type}</span>
                     </div>
                   </div>
                 );
