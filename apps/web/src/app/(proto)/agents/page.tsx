@@ -26,6 +26,7 @@ type ExtAgent = Agent & {
   last_ping_ms?: number;
   open_task_count?: number;
   platform?: string;
+  slug?: string;
 };
 type StatusFilter = "all" | "online" | "offline";
 

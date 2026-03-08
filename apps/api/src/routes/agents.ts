@@ -27,12 +27,13 @@ export async function registerAgents(server: FastifyInstance, db: pg.Pool) {
     if (!name?.trim()) return reply.status(400).send({ ok: false, error: "name required" });
 
     const token = randomBytes(32).toString("hex");
+    const slug  = name.trim().toUpperCase().replace(/[^A-Z0-9]/g, "_");
     const { rows } = await db.query(
       `insert into agents
-         (name, description, status, owner_user_id, agent_type, model, provider,
+         (name, slug, description, status, owner_user_id, agent_type, model, provider,
           capabilities, endpoint_type, endpoint_config, callback_token, ping_status, platform)
-       values ($1,$2,'offline',$3,$4,$5,$6,$7,$8,$9,$10,'unknown',$11) returning *`,
-      [name.trim(), desc ?? null, user.userId, agent_type,
+       values ($1,$2,$3,'offline',$4,$5,$6,$7,$8,$9,$10,$11,'unknown',$12) returning *`,
+      [name.trim(), slug, desc ?? null, user.userId, agent_type,
        model ?? null, provider ?? null, JSON.stringify(capabilities),
        endpoint_type, JSON.stringify({}), token, platform]
     );
@@ -381,10 +382,11 @@ POST ACK_URL: { inbox_id, callback_token: "${token}", response: "ack" }`;
 
     const userId = getRequestUser(req)?.userId ?? null;
     const token = randomBytes(32).toString("hex");
+    const slug2 = (name as string).trim().toUpperCase().replace(/[^A-Z0-9]/g, "_");
     const { rows } = await db.query(
-      `insert into agents (name, description, status, owner_user_id, agent_type, model, provider, capabilities, endpoint_type, endpoint_config, callback_token, ping_status)
-       values ($1,$2,'offline',$3,$4,$5,$6,$7,$8,$9,$10,'unknown') returning *`,
-      [name, desc ?? null, userId, agent_type, model ?? null, provider ?? null,
+      `insert into agents (name, slug, description, status, owner_user_id, agent_type, model, provider, capabilities, endpoint_type, endpoint_config, callback_token, ping_status)
+       values ($1,$2,$3,'offline',$4,$5,$6,$7,$8,$9,$10,$11,'unknown') returning *`,
+      [name, slug2, desc ?? null, userId, agent_type, model ?? null, provider ?? null,
        JSON.stringify(capabilities), endpoint_type, JSON.stringify(endpoint_config), token]
     );
 
@@ -1042,11 +1044,12 @@ ACK_URL: ${ackUrl}
 
     // Create agent
     const token = randomBytes(32).toString("hex");
+    const slug3 = name.trim().toUpperCase().replace(/[^A-Z0-9]/g, "_");
     const { rows } = await db.query(
-      `insert into agents (name, description, status, agent_type, model, provider,
+      `insert into agents (name, slug, description, status, agent_type, model, provider,
                            capabilities, endpoint_type, endpoint_config, callback_token, ping_status)
-       values ($1,$2,'offline',$3,$4,$5,$6,$7,$8,$9,'unknown') returning *`,
-      [name.trim(), desc ?? null, agent_type, model ?? null, provider,
+       values ($1,$2,$3,'offline',$4,$5,$6,$7,$8,$9,$10,'unknown') returning *`,
+      [name.trim(), slug3, desc ?? null, agent_type, model ?? null, provider,
        JSON.stringify(capabilities), endpoint_type, JSON.stringify({}), token]
     );
     const agent = rows[0];

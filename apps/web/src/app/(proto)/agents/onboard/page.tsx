@@ -13,6 +13,7 @@ type ExtAgent = Agent & {
   last_ping_at?: string;
   last_ping_ms?: number;
   platform?: string;
+  slug?: string;
 };
 type OsTab = "linux" | "windows_ps" | "windows_cmd";
 
@@ -118,7 +119,8 @@ function AgentsOnboardInner() {
   }, []);
 
   const agent = agents.find(a => a.id === selectedId) ?? null;
-  const slug  = (agent?.name ?? "AGENT").toUpperCase().replace(/[^A-Z0-9]/g, "_");
+  // Use stored slug (set at creation, never drifts with renames)
+  const slug  = agent?.slug ?? (agent?.name ?? "AGENT").toUpperCase().replace(/[^A-Z0-9]/g, "_");
   const id    = agent?.id    ?? "";
   const token = agent?.callback_token ?? "YOUR_TOKEN_HERE";
 
