@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { useSearchParams } from "next/navigation";
-import { fetchAgents, fetchAgentInbox, fetchAgentInboxSent, type AgentInboxItem } from "@/lib/api";
+import { fetchAgents, fetchAgentInbox, fetchAgentInboxSent, fetchProjects, type AgentInboxItem } from "@/lib/api";
 import type { Agent } from "@/lib/agents";
 import { cn } from "@/lib/cn";
 
@@ -19,6 +19,24 @@ function relativeTime(dateStr?: string): string {
   return `${Math.floor(h / 24)}d ago`;
 }
 
+function formatBytes(input?: number | string | null): string {
+  const n = typeof input === "string" ? Number(input) : input;
+  if (!n || Number.isNaN(n)) return "";
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function fileNameFromUrl(url?: string): string {
+  if (!url) return "attachment";
+  try {
+    const p = new URL(url).pathname;
+    return decodeURIComponent(p.split("/").pop() || "attachment");
+  } catch {
+    return url;
+  }
+}
+
 function InboxPageInner() {
   const params = useSearchParams();
   const [agents, setAgents] = React.useState<ExtAgent[]>([]);
@@ -28,6 +46,7 @@ function InboxPageInner() {
   const [items, setItems] = React.useState<AgentInboxItem[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
+  const [projectNameById, setProjectNameById] = React.useState<Record<string, string>>({});
 
   React.useEffect(() => {
     fetchAgents().then((rows) => {
@@ -37,6 +56,9 @@ function InboxPageInner() {
       const init = fromQ && list.find(a => a.id === fromQ) ? fromQ : (list[0]?.id ?? "");
       setAgentId(init);
     });
+    fetchProjects()
+      .then((rows) => setProjectNameById(Object.fromEntries(rows.map((p) => [p.id, p.name]))))
+      .catch(() => setProjectNameById({}));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -193,11 +215,29 @@ function InboxPageInner() {
                 const subject = String(item.payload?.subject ?? item.type ?? "(no subject)");
                 const body = String(item.payload?.text ?? "(no body)");
                 const projectId = item.payload?.project_id ?? item.payload?.projectId;
-                const attachments = Array.isArray(item.payload?.attachments) ? item.payload.attachments : [];
+                const projectName = projectId ? (projectNameById[String(projectId)] ?? "Unknown") : null;
+                const attachmentsRaw = Array.isArray(item.payload?.attachments) ? item.payload.attachments : [];
+                const attachments = attachmentsRaw.map((a: any) => {
+                  if (typeof a === "string") {
+                    return { name: fileNameFromUrl(a), size: null, url: a };
+                  }
+                  return {
+                    name: a?.name ?? a?.filename ?? fileNameFromUrl(a?.url),
+                    size: a?.size ?? a?.bytes ?? null,
+                    url: a?.url ?? a?.href ?? null,
+                  };
+                });
                 return (
                   <div>
                     <div className="mb-4 border-b border-zinc-100 pb-4 dark:border-[#2D2A45]">
                       <h2 className="text-lg font-semibold text-zinc-900 dark:text-white">{subject}</h2>
+                      {projectId && (
+                        <div className="mt-1 text-xs text-zinc-500">
+                          Project: <span className="font-semibold text-zinc-700 dark:text-zinc-200">{projectName}</span>
+                          <div className="font-mono text-[10px] text-zinc-400">{String(projectId)}</div>
+                        </div>
+                      )}
+                      {item.thread_id && <div className="mt-1 font-mono text-[10px] text-zinc-400">conversation: {item.thread_id}</div>}
                       <div className="mt-2 grid gap-1 text-xs text-zinc-500">
                         <div>From: <span className="font-semibold text-zinc-700 dark:text-zinc-200">{from}</span></div>
                         <div>To: <span className="font-semibold text-zinc-700 dark:text-zinc-200">{to}</span></div>
@@ -212,10 +252,15 @@ function InboxPageInner() {
                     {attachments.length > 0 && (
                       <div className="mt-3 rounded-xl bg-zinc-50 p-3 text-xs dark:bg-white/5">
                         <div className="mb-2 font-semibold text-zinc-600 dark:text-zinc-300">Attachments</div>
-                        <div className="grid gap-1">
+                        <div className="grid gap-2">
                           {attachments.map((a: any, idx: number) => (
-                            <div key={idx} className="truncate text-zinc-600 dark:text-zinc-300">
-                              {a?.name ?? a?.filename ?? a?.url ?? JSON.stringify(a)}
+                            <div key={idx} className="flex items-center gap-2 rounded-lg bg-white px-2 py-1.5 ring-1 ring-zinc-200 dark:bg-white/5 dark:ring-white/10">
+                              <span className="truncate text-zinc-700 dark:text-zinc-200">{a.name}</span>
+                              {formatBytes(a.size) && <span className="text-zinc-400">({formatBytes(a.size)})</span>}
+                              <span className="ml-auto flex items-center gap-2">
+                                {a.url && <a className="text-brand-600 hover:underline" href={a.url} target="_blank" rel="noreferrer">Open</a>}
+                                {a.url && <button onClick={() => navigator.clipboard?.writeText(String(a.url))} className="text-zinc-500 hover:underline">Copy URL</button>}
+                              </span>
                             </div>
                           ))}
                         </div>
@@ -226,8 +271,6 @@ function InboxPageInner() {
                       <span className={cn("rounded-full px-2 py-0.5 font-semibold", statusBadge(item.status))}>{item.status}</span>
                       {item.corr_id && <span>Message ID: <span className="font-mono text-zinc-500">{item.corr_id}</span></span>}
                       {item.reply_to_corr_id && <span>Reply To: <span className="font-mono text-zinc-500">{item.reply_to_corr_id}</span></span>}
-                      {item.thread_id && <span>Conversation: <span className="font-mono text-zinc-500">{item.thread_id}</span></span>}
-                      {projectId && <span>Project ID: <span className="font-mono text-zinc-500">{String(projectId)}</span></span>}
                       <span className={cn("rounded-full px-2 py-0.5 font-semibold", typeBadge(item.type))}>{item.type}</span>
                     </div>
                   </div>
