@@ -1,0 +1,15 @@
+{
+  "name": "darshan",
+  "version": "0.0.1",
+  "type": "module",
+  "description": "Darshan channel plugin for OpenClaw",
+  "openclaw": {
+    "extensions": ["./index.ts"],
+    "channel": {
+      "id": "darshan",
+      "label": "Darshan",
+      "selectionLabel": "Darshan",
+      "blurb": "Darshan native channel"
+    }
+  }
+}

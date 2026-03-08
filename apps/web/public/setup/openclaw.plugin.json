@@ -1,0 +1,9 @@
+{
+  "id": "darshan",
+  "channels": ["darshan"],
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": true,
+    "properties": {}
+  }
+}
