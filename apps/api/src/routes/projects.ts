@@ -375,13 +375,12 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
       } else {
         // Agent callback-token path (heartbeat/runtime)
         const { rows: taskRows } = await db.query(
-          `select t.project_id, t.status, t.assignee, a.name as agent_name
+          `select t.project_id, t.status, t.assignee, t.proposer, a.name as agent_name
            from tasks t
            join projects p on p.id = t.project_id
            join agents a on a.callback_token = $1
            where t.id = $2
              and (p.id::text = $3 or lower(p.slug) = lower($3))
-             and lower(coalesce(t.assignee, '')) = lower(a.name)
            limit 1`,
           [bearer, req.params.taskId, req.params.id]
         );
@@ -395,8 +394,103 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
           }
         }
 
+        const bodyKeys = Object.keys(req.body);
+        const agentName = (taskRows[0].agent_name ?? "Agent") as string;
+        const isAssignedToAgent =
+          typeof taskRows[0].assignee === "string" &&
+          taskRows[0].assignee.toLowerCase() === agentName.toLowerCase();
+        let requestedAssignee = req.body.assignee as string | undefined;
+
+        if (requestedAssignee !== undefined) {
+          if (typeof requestedAssignee !== "string" || requestedAssignee.trim().length === 0) {
+            return reply.status(400).send({ ok: false, error: "invalid assignee target" });
+          }
+          requestedAssignee = requestedAssignee.trim();
+          req.body.assignee = requestedAssignee;
+        }
+
+        let hasTerminalHandoffByAgent = false;
+        if (!isAssignedToAgent) {
+          const { rows: handoffRows } = await db.query(
+            `select 1
+             from task_activity
+             where task_id = $1
+               and actor_type = 'agent'
+               and lower(actor_name) = lower($2)
+               and action = 'status_changed'
+               and lower(coalesce(to_value, '')) in ('review', 'done')
+             limit 1`,
+            [req.params.taskId, agentName]
+          );
+          hasTerminalHandoffByAgent = !!handoffRows[0];
+        }
+
+        // Allow post-handoff completion-note finalization only for the same agent.
+        const isCompletionNoteOnlyUpdate = bodyKeys.length > 0 && bodyKeys.every((k) => k === "completion_note");
+        if (!isAssignedToAgent && !(hasTerminalHandoffByAgent && isCompletionNoteOnlyUpdate)) {
+          return reply.status(401).send({ ok: false, error: "not authenticated" });
+        }
+
+        // If handing off away from the agent, constrain the transition and validate the target.
+        if (
+          isAssignedToAgent &&
+          requestedAssignee !== undefined &&
+          requestedAssignee.toLowerCase() !== agentName.toLowerCase()
+        ) {
+          const requestedStatus = req.body.status;
+          if (requestedStatus !== "review" && requestedStatus !== "done") {
+            return reply.status(403).send({ ok: false, error: "handoff requires terminal status transition" });
+          }
+
+          const nextAssignee = requestedAssignee;
+          const { rows: validRows } = await db.query(
+            `select 1
+             from tasks t
+             join projects p on p.id = t.project_id
+             where t.id = $1
+               and p.id = $2
+               and (
+                 lower(coalesce(t.proposer, '')) = lower($3)
+                 or exists (
+                   select 1
+                   from users u
+                   where u.id = p.owner_user_id
+                     and lower(u.name) = lower($3)
+                 )
+                 or exists (
+                   select 1
+                   from project_users pu
+                   join users u on u.id = pu.user_id
+                   where pu.project_id = p.id
+                     and lower(u.name) = lower($3)
+                 )
+                 or exists (
+                   select 1
+                   from org_users ou
+                   join users u on u.id = ou.user_id
+                   where ou.org_id = p.org_id
+                     and lower(u.name) = lower($3)
+                 )
+                 or exists (
+                   select 1
+                   from project_agents pa
+                   join agents a2 on a2.id = pa.agent_id
+                   join project_agent_roles par
+                     on par.project_id = pa.project_id
+                    and par.agent_id = pa.agent_id
+                   where pa.project_id = p.id
+                     and par.agent_role = 'coordinator'
+                     and lower(a2.name) = lower($3)
+                 )
+               )
+             limit 1`,
+            [req.params.taskId, taskRows[0].project_id, nextAssignee]
+          );
+          if (!validRows[0]) return reply.status(400).send({ ok: false, error: "invalid handoff assignee" });
+        }
+
         projectIdForUpdate = taskRows[0].project_id;
-        actorName = taskRows[0].agent_name ?? "Agent";
+        actorName = agentName;
         actorType = "agent";
       }
 
@@ -420,8 +514,13 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
       const oldStatus: string          = before[0]?.status ?? "";
 
       vals.push(req.params.taskId);
+      vals.push(projectIdForUpdate);
       const { rows } = await db.query(
-        `update tasks set ${sets.join(", ")}, updated_at = now() where id = $${vals.length} returning *`,
+        `update tasks
+         set ${sets.join(", ")}, updated_at = now()
+         where id = $${vals.length - 1}
+           and project_id = $${vals.length}
+         returning *`,
         vals
       );
       broadcast("task:updated", { task: rows[0] });
@@ -503,9 +602,16 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
         `select pt.id, pt.joined_at,
                 a.id as agent_id, a.name, a.status, a.description,
                 a.agent_type, a.model, a.provider, a.capabilities,
-                a.ping_status, a.last_ping_ms, a.last_seen_at
+                a.ping_status, a.last_ping_ms, a.last_seen_at,
+                coalesce(par.agent_role, 'worker') as agent_role,
+                coalesce(acl.current_level, 0) as agent_level,
+                coalesce(acl.level_confidence, 'low') as level_confidence,
+                acl.last_evaluated_at
          from project_agents pt
          join agents a on a.id = pt.agent_id
+         left join project_agent_roles par
+           on par.project_id = pt.project_id and par.agent_id = pt.agent_id
+         left join agent_capability_levels acl on acl.agent_id = pt.agent_id
          where pt.project_id = $1
          order by pt.joined_at asc`,
         [access.projectId]
@@ -542,6 +648,22 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
          on conflict (project_id, agent_id) do nothing
          returning *`,
         [access.projectId, agent_id, userId]
+      );
+
+      const requestedRole = typeof req.body.role === "string" ? req.body.role.toLowerCase() : null;
+      const agentRole =
+        requestedRole === "coordinator" || requestedRole === "worker" || requestedRole === "reviewer"
+          ? requestedRole
+          : "worker";
+
+      await db.query(
+        `insert into project_agent_roles (project_id, agent_id, agent_role, updated_by)
+         values ($1, $2, $3, $4)
+         on conflict (project_id, agent_id) do update
+         set agent_role = excluded.agent_role,
+             updated_by = excluded.updated_by,
+             updated_at = now()`,
+        [access.projectId, agent_id, agentRole, userId]
       );
 
       // Send project_onboarded inbox item so agent learns about this project

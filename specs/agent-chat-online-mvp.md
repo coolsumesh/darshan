@@ -1,87 +1,58 @@
-# Agent Chat (Online Agents) — MVP Spec
+# Group Chat MVP (Humans + Online Agents)
 
-## Purpose
-Deliver a simple realtime chat page where a human can chat with any currently online agent.
+## Goal
+Ship a focused MVP of project group chat where humans can talk with currently online project agents in one shared conversation.
 
-## Why first
-This is a foundational human↔agent communication layer before implementing full agent↔agent (A2A) communication.
+## MVP Scope
+1. Project-scoped group room (single default room per project).
+2. Show participants with online status.
+3. Humans and online agents can send/receive text in realtime.
+4. Persist message history.
+5. Reload restores recent messages.
 
-## Transport Decision (Confirmed)
-- This chat must be integrated through an **OpenClaw custom channel plugin** (Darshan channel), not a standalone ad-hoc transport.
-- MVP may ship minimal capabilities, but the plumbing should align with channel-plugin architecture so A2A can extend on the same base.
-
-## Scope (MVP)
-- Dedicated **Agent Chat** page.
-- List online agents.
-- Human selects an online agent and chats in realtime.
-- Persist chat messages for basic history.
-- Keep architecture intentionally minimal and extensible.
-
-## Out of Scope (for this phase)
-- Agent↔Agent chat (A2A)
-- Capability testing workflow integration
-- Advanced thread branching
-- Rich media and attachments (text-first MVP)
-
-## Functional Requirements
-1. Show currently online agents in a sidebar/list.
-2. Allow human to open a conversation with one online agent.
-3. Allow human to send text messages to selected agent.
-4. Show agent replies in realtime.
-5. Persist message history with timestamps.
-6. Reloading page should show recent history for selected agent.
+## Out of Scope (MVP)
+- Attachments/media
+- Advanced moderation controls
+- Thread branching UI polish
+- Read receipts/typing indicators
 
 ## Data Model (MVP)
-Create a minimal message store (naming can vary):
+`project_chat_messages`
 - `id`
-- `agent_id`
+- `project_id`
 - `sender_type` (`human` | `agent`)
 - `sender_id`
-- `message`
+- `content`
 - `created_at`
+- `meta` jsonb nullable
 
-Optional now / ready for later:
-- `project_id` nullable
-- `meta` jsonb
+`project_chat_participants` (or derived from project membership + presence)
+- `project_id`
+- `participant_type` (`human` | `agent`)
+- `participant_id`
+- `is_online` (derived/presence)
 
 ## API Surface (MVP)
-- `GET /api/v1/agents/online`
-  - Returns online/reachable agents visible to the user.
-
-- `GET /api/v1/agents/:id/chat?before=&limit=`
-  - Returns chat history for selected agent.
-
-- `POST /api/v1/agents/:id/chat`
-  - Sends a human message to selected agent.
-  - Persists message and triggers realtime delivery.
+- `GET /api/v1/projects/:id/chat/participants`
+- `GET /api/v1/projects/:id/chat/messages?before=&limit=`
+- `POST /api/v1/projects/:id/chat/messages`
 
 ## Realtime
-- Reuse existing websocket infrastructure.
-- Emit event: `agent_chat:message_created`.
-- Client appends message if active chat matches `agent_id`.
+- Websocket event: `project_chat:message_created`
+- Presence event (optional MVP-lite): `project_chat:presence_updated`
 
-## Access Control
-- Only authorized users can chat with/view messages for an agent.
-- Online list should include only agents the user has visibility to.
-- Validate sender identity server-side.
+## Access Rules
+- Sender must belong to project.
+- Reader must belong to project.
+- Return only project-scoped messages.
 
-## UX Requirements
-- Left panel: online agents (with presence indicator).
-- Main panel: message timeline.
-- Input composer at bottom (text).
-- Optional empty-state when no agent selected.
+## UX Layout (MVP)
+- Sidebar: participants list + online badges.
+- Main: timeline (newest at bottom).
+- Bottom composer: text input + send.
+- Empty state when no messages.
 
-## Non-Functional
-- Low latency UX via websocket updates.
-- Message persistence for audit/history.
-- Basic rate limiting to avoid spam.
-
-## Future Evolution Path
-After MVP is stable:
-1. Extend to project-scoped A2A channels.
-2. Add coordinator/human oversight views.
-3. Add delivery/read states, typing, and richer controls.
-
-## Separation Rule
-This feature is communication-only.
-It must not mutate task lifecycle directly; task flow remains governed by `specs/task-flow.md`.
+## Task Separation
+This chat is communication-only for MVP.
+No direct task status mutation from plain messages.
+If needed later, add explicit "promote to task update" action.

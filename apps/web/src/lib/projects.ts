@@ -38,6 +38,10 @@ export type TeamMember = {
   agentId: string;
   role: string;
   joinedAt: string;
+  agent_role?: "coordinator" | "worker" | "reviewer";
+  agent_level?: number;
+  level_confidence?: "low" | "medium" | "high";
+  last_evaluated_at?: string | null;
 };
 
 export const PROJECTS: Project[] = [

@@ -1,37 +1,59 @@
-# Agent-to-Agent Realtime Communication Spec (Darshan)
+# Realtime Messaging Spec — Agent↔Agent + Human Oversight
 
 ## Purpose
-Enable realtime communication between agents within the same project, with strict oversight visibility.
+Standardize realtime communication for all project participants, with A2A as a first-class path inside the same project group chat system.
+
+## Design Choice
+Do not maintain a separate transport for A2A.
+Use one project chat pipeline for:
+- Human → Agent
+- Agent → Human
+- Agent → Agent
 
 ## Scope
-- Project-scoped only.
-- Separate from task lifecycle/status transitions.
-- Used for coordination, clarifications, and execution collaboration.
+- Project-only communication.
+- Optional task-linked thread context.
+- Persistent + realtime delivery.
 
 ## Core Rules
-1. Agents attached to a project can exchange realtime messages with other agents attached to the same project.
-2. Project coordinator agent(s) can both observe and actively participate in the chat.
-3. Human project members with project access can both observe and actively participate in the chat.
-4. Messages must be persisted with metadata:
-   - `project_id`
-   - `sender_type` (`agent` | `human`)
-   - `sender_id`
-   - `receiver_agent_id` (nullable; or channel/broadcast target)
-   - `message`
-   - `created_at`
-5. Realtime delivery should use the existing websocket infrastructure where possible.
-6. This channel must not alter task statuses directly; task flow remains governed by `specs/task-flow.md`.
+1. Any participant (human/agent) can message if they are a project member.
+2. Agent-to-agent messages are visible to project members unless explicitly marked as restricted system/internal events.
+3. Coordinator and human owners can monitor and participate.
+4. Every event is attributable (`sender_type`, `sender_id`) and auditable.
+5. Chat events do not directly mutate task status.
 
-## UX Requirements
-- Dedicated project communication view for agent↔agent traffic.
-- Coordinator + human can observe conversation history and live updates.
-- Clear sender identity on every message.
+## Event Contract
+### Message Created
+`project_chat:message_created`
+- `id`
+- `project_id`
+- `thread_type`
+- `thread_id`
+- `sender_type`
+- `sender_id`
+- `content`
+- `created_at`
+- `meta`
 
-## Security / Access
-- Enforce project membership before allowing send/receive/read.
-- Prevent cross-project message leakage.
-- Maintain auditability of message events.
+### Presence Updated
+`project_chat:presence_updated`
+- `project_id`
+- `participant_type`
+- `participant_id`
+- `online`
+- `last_seen_at`
 
-## Relationship to Capability Testing
-- Capability testing remains a separate module/page.
-- Realtime A2A communication is an independent communication layer.
+## Security
+- Enforce project membership for publish/subscribe.
+- Validate sender identity from auth context; never trust client-provided sender id.
+- Prevent cross-project socket subscriptions.
+- Keep retention policy + audit logging enabled.
+
+## Reliability
+- Persist before fanout (DB-first).
+- Idempotency support for retried sends.
+- Pagination cursor for timeline recovery after reconnect.
+
+## Relationship to Task Flow
+Task lifecycle remains in `specs/task-flow.md`.
+If chat outcome affects task state, use explicit server action to write task updates.
