@@ -1106,11 +1106,6 @@ export default function AgentsPage() {
               </p>
             </div>
             <div className="flex items-center gap-2">
-              <Link
-                href="/agents/inbox"
-                className="flex items-center gap-2 rounded-xl border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 transition-colors dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700">
-                <Share2 className="h-4 w-4" /> Inbox
-              </Link>
               <button
                 onClick={() => setShowImportModal(true)}
                 className="flex items-center gap-2 rounded-xl border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 transition-colors dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700">
