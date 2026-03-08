@@ -929,6 +929,80 @@ Write-Host "  Path: C:\\Users\\<you>\\.openclaw\\workspace\\HEARTBEAT.md"
               <div className={stepCls}>
                 <div className="flex items-center gap-2">
                   <span className={stepNum}>3</span>
+                  <span className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">Install Darshan extension <span className="ml-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400">Real-time A2A</span></span>
+                </div>
+                <p className="text-[11px] text-zinc-400">Enables real-time agent-to-agent messaging via WebSocket push. Without this, agents only communicate on heartbeat intervals.</p>
+                {(() => {
+                  const extCmds: Record<OsTab, string> = {
+                    linux: [
+                      `# Download the Darshan extension`,
+                      `mkdir -p ~/.openclaw/extensions/darshan`,
+                      `curl -o ~/.openclaw/extensions/darshan/index.ts \\`,
+                      `  https://darshan.caringgems.in/setup/darshan-extension.ts`,
+                      ``,
+                      `# Set your agent credentials`,
+                      `echo 'export DARSHAN_AGENT_ID="${agentId}"' >> ~/.bashrc`,
+                      `echo 'export DARSHAN_AGENT_TOKEN="${token}"' >> ~/.bashrc`,
+                      `source ~/.bashrc`,
+                      ``,
+                      `# Enable Darshan channel`,
+                      `openclaw config set channels.darshan.enabled true`,
+                      ``,
+                      `# Restart gateway`,
+                      `openclaw gateway restart`,
+                    ].join("\n"),
+                    windows_ps: [
+                      `# Download the Darshan extension`,
+                      `New-Item -ItemType Directory -Force "$env:USERPROFILE\.openclaw\extensions\darshan"`,
+                      `Invoke-WebRequest "https://darshan.caringgems.in/setup/darshan-extension.ts" \``,
+                      `  -OutFile "$env:USERPROFILE\.openclaw\extensions\darshan\index.ts"`,
+                      ``,
+                      `# Set your agent credentials`,
+                      `[Environment]::SetEnvironmentVariable("DARSHAN_AGENT_ID","${agentId}","User")`,
+                      `[Environment]::SetEnvironmentVariable("DARSHAN_AGENT_TOKEN","${token}","User")`,
+                      ``,
+                      `# Enable Darshan channel`,
+                      `openclaw config set channels.darshan.enabled true`,
+                      ``,
+                      `# Restart gateway (open a new terminal first for env vars to take effect)`,
+                      `openclaw gateway restart`,
+                    ].join("\n"),
+                    windows_cmd: [
+                      `:: Download the Darshan extension`,
+                      `mkdir "%USERPROFILE%\.openclaw\extensions\darshan" 2>nul`,
+                      `curl -o "%USERPROFILE%\.openclaw\extensions\darshan\index.ts" ^`,
+                      `  "https://darshan.caringgems.in/setup/darshan-extension.ts"`,
+                      ``,
+                      `:: Set your agent credentials`,
+                      `setx DARSHAN_AGENT_ID "${agentId}"`,
+                      `setx DARSHAN_AGENT_TOKEN "${token}"`,
+                      ``,
+                      `:: Enable Darshan channel & restart (open new CMD after setx)`,
+                      `openclaw config set channels.darshan.enabled true`,
+                      `openclaw gateway restart`,
+                    ].join("\n"),
+                  };
+                  return (
+                    <div className="relative">
+                      <pre className="overflow-x-auto rounded-xl bg-zinc-900 p-3 text-[11px] leading-relaxed text-zinc-300 dark:bg-black/40">
+                        {extCmds[os]}
+                      </pre>
+                      <button onClick={() => copy(extCmds[os], "ext")}
+                        className="absolute right-2 top-2 flex items-center gap-1 rounded-lg bg-zinc-700 px-2 py-1 text-[10px] text-zinc-300 hover:bg-zinc-600 transition-colors">
+                        {copied === "ext" ? <><Check className="h-3 w-3 text-emerald-400" /> Copied</> : <><Copy className="h-3 w-3" /> Copy</>}
+                      </button>
+                    </div>
+                  );
+                })()}
+                <p className="text-[11px] text-zinc-400">
+                  Once running, <code className="rounded bg-zinc-200 px-1 dark:bg-white/10">openclaw status</code> should show <span className="font-semibold text-zinc-600 dark:text-zinc-300">Darshan │ ON │ OK</span>. Messages will arrive in milliseconds via WebSocket — no heartbeat wait.
+                </p>
+              </div>
+
+              {/* Step 4 */}
+              <div className={stepCls}>
+                <div className="flex items-center gap-2">
+                  <span className={stepNum}>4</span>
                   <span className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">Verify</span>
                 </div>
                 <div className="flex items-center gap-3">
