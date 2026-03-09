@@ -1,48 +1,53 @@
 # Messaging Redesign Spec
-**Status:** Draft v2  
+**Status:** Draft v3  
 **Author:** Sanjaya  
 **Date:** 2026-03-09  
-**Replaces:** v1 (initial draft)
+**Replaces:** v2
 
 ---
 
 ## 1. Problem
 
-The current `agent_inbox` table mixes two concerns that should be separate:
+The current `agent_inbox` table mixes three concerns that belong in separate systems:
 
-1. **Message storage** — content lives inside a `payload` JSON blob on the inbox row
-2. **Notification queue** — the same row also tracks delivery and processing state
+1. **Conversation messaging** — agent ↔ agent, human ↔ agent messages
+2. **Ping / heartbeat tracking** — are agents alive and responding?
+3. **Task notifications** — agent was assigned a task
 
-This causes:
+Mixing them causes:
 
-- **History lost on clear.** Deleting inbox rows deletes the conversation.
-- **Content duplicated per recipient.** The same message text is stored N times.
-- **No read receipts.** No way to tell if a message was opened vs just delivered.
-- **Reply chaining is fragile.** `corr_id` + `reply_to_corr_id` are free-form strings with no FK enforcement.
-- **Redundant threading.** `thread_id` and `corr_id/reply_to_corr_id` both partially solve threading but neither does it completely.
-- **Agent-only.** Column names like `from_agent_id`, `agent_id` prevent humans from participating in the same threads.
-- **No participant control.** No concept of who belongs to a thread, who can be added or removed.
-
----
-
-## 2. Goals
-
-- Separate message storage from notification delivery
-- Support human ↔ agent, agent ↔ agent, and human ↔ human in the same schema
-- Explicit participant management — who is in a thread, who can send and receive
-- Track delivery, read, and processed states independently per recipient
-- Store message content once regardless of recipient count
-- Enforce reply structure at the DB level via FK, not strings
-- Schema readable without knowing internal jargon
+- History lost when inbox is cleared
+- Message content duplicated per recipient
+- No read receipts
+- Reply structure enforced by string IDs, not FK constraints
+- Pings and task events contaminate conversation history
+- Agent-only naming (`from_agent_id`, `agent_id`) blocks human participation
 
 ---
 
-## 3. Non-Goals
+## 2. Three Separate Systems
 
-- Replacing the real-time WebSocket delivery layer
-- Replacing the `tasks` table or task workflow
-- System events (ping, welcome) — handled separately, not through threads
-- Multi-tenancy / org-level isolation (handled by `project_id`)
+Each concern gets its own dedicated design. They do not share tables.
+
+| Concern | Solution |
+|---|---|
+| Conversations | `threads` + `thread_participants` + `thread_messages` + `notifications` |
+| Agent pings | `agent_pings` (separate spec) |
+| Task events | `tasks` table already exists — no change |
+
+This spec covers **conversations only**.
+
+---
+
+## 3. Goals
+
+- Clean separation from pings and tasks
+- Human ↔ agent, agent ↔ agent, human ↔ human in the same schema
+- Explicit participant control — who can join, who can be removed
+- Message content stored once, notifications fan out per recipient
+- Full read receipt tracking: delivered → read → processed
+- Reply structure enforced at DB level via FK
+- Raw data readable without joining — slugs stored alongside UUIDs
 
 ---
 
@@ -54,102 +59,119 @@ A thread is a named conversation. It owns all messages and defines the participa
 
 ```sql
 CREATE TABLE threads (
-  thread_id  uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
-  subject    text        NOT NULL,
-  project_id uuid        REFERENCES projects(id) ON DELETE SET NULL,
-  created_by uuid        NOT NULL,
-  created_at timestamptz NOT NULL DEFAULT now()
+  thread_id    uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+  subject      text        NOT NULL,
+  project_id   uuid        REFERENCES projects(id) ON DELETE SET NULL,
+  created_by   uuid        NOT NULL,
+  created_slug text        NOT NULL,
+  created_at   timestamptz NOT NULL DEFAULT now()
 );
 ```
 
-| Column | Type | Description |
-|---|---|---|
-| `thread_id` | uuid | Unique identifier |
-| `subject` | text | Human-readable topic e.g. "Deploy review needed" |
-| `project_id` | uuid | Optional — scopes thread to a project. Null = global |
-| `created_by` | uuid | Who opened the thread. Resolves to `agents.id` or `users.id` |
-| `created_at` | timestamptz | When the thread was opened |
+| Column | Description |
+|---|---|
+| `thread_id` | Unique identifier |
+| `subject` | Human-readable topic e.g. "Deploy review needed" |
+| `project_id` | Optional — scopes thread to a project |
+| `created_by` | UUID of who opened the thread (agent or user) |
+| `created_slug` | Slug snapshot of creator e.g. `SANJAYA` — for raw readability |
+| `created_at` | When the thread was opened |
+
+**On `created_slug`:** Denormalized at insert time. If a slug changes later, this is a historical snapshot — intentional. Reading the raw table immediately tells you who created a thread without any joins.
 
 ---
 
 ### 4.2 `thread_participants`
 
-Tracks who is in a thread and their current membership state.
+Who is in a thread, when they joined, and whether they are still active.
 
 ```sql
 CREATE TABLE thread_participants (
   thread_id      uuid        NOT NULL REFERENCES threads(thread_id) ON DELETE CASCADE,
   participant_id uuid        NOT NULL,
+  participant_slug text      NOT NULL,
   added_by       uuid        NOT NULL,
+  added_by_slug  text        NOT NULL,
   joined_at      timestamptz NOT NULL DEFAULT now(),
   removed_at     timestamptz,
   PRIMARY KEY (thread_id, participant_id)
 );
 ```
 
-| Column | Type | Description |
-|---|---|---|
-| `thread_id` | uuid | The thread this participant belongs to |
-| `participant_id` | uuid | Agent or user UUID |
-| `added_by` | uuid | Who added them (creator or another participant) |
-| `joined_at` | timestamptz | When they were added |
-| `removed_at` | timestamptz | Null = active. Set = removed. Soft delete for audit |
+| Column | Description |
+|---|---|
+| `participant_id` | Agent or user UUID |
+| `participant_slug` | Slug snapshot e.g. `MITHRAN`, `SUMESH` |
+| `added_by` | UUID of who added them |
+| `added_by_slug` | Slug snapshot of who added them |
+| `joined_at` | When they were added |
+| `removed_at` | Null = active. Set = removed. Soft delete for audit trail |
 
 **Rules:**
-- Creator is auto-added as a participant on thread creation
-- Only active participants (`removed_at IS NULL`) can send messages
-- Only active participants receive new notifications
-- Removed participants keep their historical messages and read receipts
-- A removed participant can be re-added (new `joined_at`, clear `removed_at`)
+- Thread creator is auto-added as participant on creation
+- **Only the thread creator can add or remove participants**
+- Removed participants retain full read access to thread history
+- A removed participant can be re-added: update `removed_at = null`, update `joined_at`
+- Active participant = `removed_at IS NULL`
 
 ---
 
 ### 4.3 `thread_messages`
 
-A single message within a thread. Content stored once regardless of recipient count.
+A single message or event within a thread. Content stored once regardless of recipient count.
 
 ```sql
 CREATE TABLE thread_messages (
-  message_id uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
-  thread_id  uuid        NOT NULL REFERENCES threads(thread_id) ON DELETE CASCADE,
-  reply_to   uuid        REFERENCES thread_messages(message_id) ON DELETE SET NULL,
-  sender_id  uuid        NOT NULL,
-  body       text        NOT NULL,
-  sent_at    timestamptz NOT NULL DEFAULT now()
+  message_id  uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+  thread_id   uuid        NOT NULL REFERENCES threads(thread_id) ON DELETE CASCADE,
+  reply_to    uuid        REFERENCES thread_messages(message_id) ON DELETE SET NULL,
+  sender_id   uuid        NOT NULL,
+  sender_slug text        NOT NULL,
+  type        text        NOT NULL DEFAULT 'message' CHECK (type IN ('message', 'event')),
+  body        text        NOT NULL,
+  sent_at     timestamptz NOT NULL DEFAULT now()
 );
 ```
 
-| Column | Type | Description |
-|---|---|---|
-| `message_id` | uuid | Unique identifier |
-| `thread_id` | uuid | Which thread this belongs to |
-| `reply_to` | uuid | Parent message FK. Null = first message or new branch |
-| `sender_id` | uuid | Who sent it. Resolves to `agents.id` or `users.id` |
-| `body` | text | The message content |
-| `sent_at` | timestamptz | When it was sent |
+| Column | Description |
+|---|---|
+| `message_id` | Unique identifier |
+| `thread_id` | Which thread this belongs to |
+| `reply_to` | FK to parent message. Null = thread opener or new branch |
+| `sender_id` | UUID of sender (agent or user) |
+| `sender_slug` | Slug snapshot e.g. `SANJAYA` — for raw readability |
+| `type` | `message` = real content. `event` = system action (participant added/removed) |
+| `body` | The message content or event description |
+| `sent_at` | When it was sent |
 
-**Reply tree structure:**
+**Event messages** (`type = 'event'`) are auto-generated by the server when participant changes occur. They appear in the thread timeline but are visually distinct in the UI.
+
+Examples:
+```
+type=event  body="ARJUN was removed by SANJAYA"
+type=event  body="SURAKSHA was added by SANJAYA"
+```
+
+**Reply tree:**
 
 ```
-msg-001  reply_to=null          ← thread opener
-  └── msg-002  reply_to=msg-001 ← Mithran replies to opener
-  └── msg-003  reply_to=msg-001 ← Arjun replies to opener independently
-        └── msg-004  reply_to=msg-003 ← Sanjaya replies to Arjun
+msg-001  sender_slug=SANJAYA   reply_to=null
+  └── msg-002  sender_slug=MITHRAN  reply_to=msg-001
+  └── msg-003  sender_slug=ARJUN    reply_to=msg-001
+        └── msg-004  sender_slug=SANJAYA  reply_to=msg-003
 ```
-
-`thread_id` gives you a flat list of all messages.
-`reply_to` gives you the exact tree of who replied to whom.
 
 ---
 
 ### 4.4 `notifications`
 
-One row per recipient per message. The delivery and read-receipt tracking layer.
+One row per recipient per message. Tracks delivery state independently per person.
 
 ```sql
 CREATE TABLE notifications (
   notification_id uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
   recipient_id    uuid        NOT NULL,
+  recipient_slug  text        NOT NULL,
   message_id      uuid        NOT NULL REFERENCES thread_messages(message_id) ON DELETE CASCADE,
   priority        text        NOT NULL DEFAULT 'normal' CHECK (priority IN (
                                 'high', 'normal', 'low'
@@ -166,109 +188,132 @@ CREATE TABLE notifications (
 );
 ```
 
-| Column | Type | Description |
-|---|---|---|
-| `notification_id` | uuid | Unique identifier |
-| `recipient_id` | uuid | Who receives this. Resolves to `agents.id` or `users.id` |
-| `message_id` | uuid | The message being delivered |
-| `priority` | text | `high / normal / low` — agents process high first |
-| `status` | text | Current delivery state (see lifecycle below) |
-| `response_note` | text | What recipient said when processing |
-| `created_at` | timestamptz | When the notification was created |
-| `delivered_at` | timestamptz | When WS push fired |
-| `read_at` | timestamptz | When recipient fetched the message body |
-| `processed_at` | timestamptz | When recipient explicitly acknowledged |
-| `expires_at` | timestamptz | After this time, status moves to `expired` |
+| Column | Description |
+|---|---|
+| `notification_id` | Unique identifier |
+| `recipient_id` | Agent or user UUID |
+| `recipient_slug` | Slug snapshot e.g. `MITHRAN` — for raw readability |
+| `message_id` | The message being delivered |
+| `priority` | `high / normal / low` — agents process high first |
+| `status` | Current delivery state |
+| `response_note` | What recipient said when processing |
+| `created_at` | When notification was created |
+| `delivered_at` | When WS push fired |
+| `read_at` | When recipient fetched the message body |
+| `processed_at` | When recipient explicitly acknowledged |
+| `expires_at` | Auto-expire stale notifications |
 
-**Fan-out rule:** When a message is sent, one notification row is created for every active participant except the sender.
+**Fan-out rule:**  
+When a message is sent, one notification row is created for every **active participant** (`removed_at IS NULL`) except the sender.
 
 ---
 
-## 5. Status Lifecycle
+## 5. Raw Data Readability
+
+Every table stores a slug snapshot alongside each UUID. Reading raw DB output requires no joins to understand who did what.
+
+**Example — reading `thread_messages` raw:**
+
+```
+message_id   thread_id    sender_slug  type     body                                    sent_at
+-----------  -----------  -----------  -------  --------------------------------------  -------------------
+msg-001      thread-002   SANJAYA      message  "Arjun, take ownership of onboarding."  2026-03-09 21:10:00
+msg-002      thread-002   ARJUN        message  "Understood. Starting now."             2026-03-09 21:11:00
+msg-003      thread-002   SANJAYA      event    "ARJUN was removed by SANJAYA"          2026-03-09 21:15:00
+msg-004      thread-002   SANJAYA      event    "SURAKSHA was added by SANJAYA"         2026-03-09 21:15:01
+msg-005      thread-002   SANJAYA      message  "Suraksha, you are taking over."        2026-03-09 21:16:00
+```
+
+No UUID lookups needed to understand the conversation.
+
+---
+
+## 6. Status Lifecycle
 
 ```
             delivered_at        read_at          processed_at
                  │                 │                   │
 pending ──────► delivered ──────► read ──────────► processed
-                                              OR
-                                            expired  ← expires_at passed
+                                                    expired  ← expires_at passed
 ```
 
-| Status | Meaning | Set by |
-|---|---|---|
-| `pending` | Notification created, WS push not yet attempted | Notification insert |
-| `delivered` | WS push fired to recipient | WebSocket layer |
-| `read` | Recipient called `GET /threads/:id/messages/:id` | API — `GET message` endpoint |
-| `processed` | Recipient explicitly marked it done | `POST /notifications/:id/process` |
-| `expired` | `expires_at` passed before `processed` | Background job or lazy eval on read |
-
-**Three signals, three meanings:**
-
-| Signal | Who triggers it | What it proves |
-|---|---|---|
-| `delivered_at` | Server | Notification reached the agent's queue |
-| `read_at` | Recipient (implicit, on fetch) | Recipient opened the message |
-| `processed_at` | Recipient (explicit, on ack) | Recipient acted on it |
+| Status | Triggered by |
+|---|---|
+| `pending` | Notification row inserted |
+| `delivered` | WS push fired by server |
+| `read` | Recipient calls `GET /threads/:id/messages/:message_id` |
+| `processed` | Recipient calls `POST /notifications/:id/process` |
+| `expired` | Background job when `now() > expires_at` |
 
 ---
 
-## 6. Sender Resolution
+## 7. UUID Resolution
 
-`created_by`, `sender_id`, `participant_id`, `recipient_id`, `added_by` are all plain UUIDs with no FK constraint — they may reference either `agents.id` or `users.id`.
-
-Resolution at query time:
+`created_by`, `sender_id`, `participant_id`, `recipient_id` are plain UUIDs — no FK constraint — they may reference `agents.id` or `users.id`. Resolution at the API layer:
 
 ```
-1. Query agents WHERE id = uuid  →  found: it's an agent
-2. Query users  WHERE id = uuid  →  found: it's a user
+1. SELECT id FROM agents WHERE id = $uuid  →  found: agent
+2. SELECT id FROM users  WHERE id = $uuid  →  found: user
 ```
 
-The API layer owns this resolution. No `_type` column stored. No redundancy.
+Slugs stored in the table give immediate readability without this lookup.
 
 ---
 
-## 7. API Design
+## 8. Thread Retention and Visibility
+
+- **Threads live indefinitely** until explicitly deleted by the creator
+- **Frontend default view:** latest 10 threads per user/agent
+- **Older threads:** searchable by subject, participant slug, date range
+- **Who can see a thread:** active participants + removed participants (read-only)
+- **Who can delete a thread:** creator only
+
+---
+
+## 9. API Design
 
 ### Threads
 
-| Method | Endpoint | Auth | Description |
+| Method | Endpoint | Who | Description |
 |---|---|---|---|
-| `POST` | `/api/v1/threads` | user or agent token | Create a thread, define initial participants |
-| `GET` | `/api/v1/threads` | user or agent token | List threads the caller is a participant of |
-| `GET` | `/api/v1/threads/:thread_id` | participant only | Get thread metadata + participant list |
+| `POST` | `/api/v1/threads` | any | Create thread, define initial participants |
+| `GET` | `/api/v1/threads` | caller | List threads caller is part of (latest 10 default) |
+| `GET` | `/api/v1/threads?search=` | caller | Search threads by subject or participant slug |
+| `GET` | `/api/v1/threads/:thread_id` | participant | Thread metadata + participant list |
+| `DELETE` | `/api/v1/threads/:thread_id` | creator only | Delete thread and all messages |
 
 ### Participants
 
-| Method | Endpoint | Auth | Description |
+| Method | Endpoint | Who | Description |
 |---|---|---|---|
-| `POST` | `/api/v1/threads/:thread_id/participants` | participant | Add a new participant |
-| `DELETE` | `/api/v1/threads/:thread_id/participants/:id` | participant | Remove a participant (soft delete) |
-| `GET` | `/api/v1/threads/:thread_id/participants` | participant | List all participants (active + removed) |
+| `POST` | `/api/v1/threads/:thread_id/participants` | creator only | Add a participant |
+| `DELETE` | `/api/v1/threads/:thread_id/participants/:id` | creator only | Remove a participant (soft delete) |
+| `GET` | `/api/v1/threads/:thread_id/participants` | participant | List all — active and removed |
 
 ### Messages
 
-| Method | Endpoint | Auth | Description |
+| Method | Endpoint | Who | Description |
 |---|---|---|---|
-| `POST` | `/api/v1/threads/:thread_id/messages` | active participant | Send a message, fan-out notifications |
-| `GET` | `/api/v1/threads/:thread_id/messages` | participant | List all messages in thread |
-| `GET` | `/api/v1/threads/:thread_id/messages/:message_id` | participant | Fetch one message — sets `read_at` |
+| `POST` | `/api/v1/threads/:thread_id/messages` | active participant | Send message, fan-out notifications |
+| `GET` | `/api/v1/threads/:thread_id/messages` | participant | All messages including events |
+| `GET` | `/api/v1/threads/:thread_id/messages/:message_id` | participant | Single message — sets `read_at` |
 
 ### Notifications
 
-| Method | Endpoint | Auth | Description |
+| Method | Endpoint | Who | Description |
 |---|---|---|---|
-| `GET` | `/api/v1/notifications` | user or agent token | Poll pending notifications for caller |
-| `POST` | `/api/v1/notifications/:id/process` | recipient only | Mark processed, attach `response_note` |
+| `GET` | `/api/v1/notifications` | caller | Poll pending notifications |
+| `POST` | `/api/v1/notifications/:id/process` | recipient | Mark processed, attach `response_note` |
 
 ### Receipts
 
-| Method | Endpoint | Auth | Description |
+| Method | Endpoint | Who | Description |
 |---|---|---|---|
-| `GET` | `/api/v1/threads/:thread_id/messages/:message_id/receipts` | sender only | Per-recipient read receipt breakdown |
+| `GET` | `/api/v1/threads/:thread_id/messages/:message_id/receipts` | sender | Per-recipient read receipt breakdown |
 
 ---
 
-## 8. Scenarios
+## 10. Scenarios
 
 ### Scenario A — Private thread: Sanjaya ↔ Mithran only
 
@@ -277,225 +322,173 @@ POST /api/v1/threads
 { "subject": "Deployment review", "participants": ["mithran-id"] }
 → { "thread_id": "thread-001" }
 ```
-Participants: Sanjaya (auto, creator) + Mithran
+
+Participants: `SANJAYA` (auto, creator) + `MITHRAN`
 
 ```
 POST /api/v1/threads/thread-001/messages
 { "body": "Mithran, can you verify the deploy output?" }
 → { "message_id": "msg-001" }
 ```
-→ 1 notification created for Mithran. Sanjaya gets none (no self-notify).
+Server fans out: 1 notification → `MITHRAN`. Sanjaya gets none.
 
 ```
-GET /api/v1/notifications                       ← Mithran polls
-→ [{ notification_id, message_id: "msg-001", status: "delivered" }]
+GET /api/v1/notifications                              ← MITHRAN polls
+GET /api/v1/threads/thread-001/messages/msg-001        ← MITHRAN reads → read_at set
 
-GET /api/v1/threads/thread-001/messages/msg-001 ← Mithran reads
-→ message body                                  ← read_at set automatically
-
-POST /api/v1/threads/thread-001/messages
+POST /api/v1/threads/thread-001/messages               ← MITHRAN replies
 { "body": "All green. Deploy is clean.", "reply_to": "msg-001" }
 → { "message_id": "msg-002" }
 ```
-→ 1 notification created for Sanjaya.
+Server fans out: 1 notification → `SANJAYA`.
 
 ```
-GET /api/v1/threads/thread-001/messages/msg-001/receipts  ← Sanjaya checks
+GET /api/v1/threads/thread-001/messages/msg-001/receipts   ← SANJAYA checks
 → {
     "receipts": [
       {
-        "recipient_id": "mithran-id",
-        "delivered_at": "21:10:00",
-        "read_at":      "21:12:00",
-        "processed_at": null
+        "recipient_slug": "MITHRAN",
+        "delivered_at":   "21:10:00",
+        "read_at":        "21:12:00",
+        "processed_at":   null
       }
     ]
   }
 ```
 
-**Thread state:**
+**Raw thread_messages:**
 ```
-thread-001: "Deployment review"
-participants: Sanjaya ✅  Mithran ✅
-
-msg-001  Sanjaya → "Mithran, can you verify the deploy output?"
-  └── msg-002  Mithran → "All green. Deploy is clean."
+msg-001  SANJAYA  message  "Mithran, can you verify the deploy output?"
+  └── msg-002  MITHRAN  message  "All green. Deploy is clean."
 ```
 
 ---
 
-### Scenario B — Sanjaya + Arjun, then swap Arjun for Suraksha
+### Scenario B — Swap Arjun for Suraksha
 
-**Create thread:**
 ```
 POST /api/v1/threads
 { "subject": "Agent coordination — Q1 tasks", "participants": ["arjun-id"] }
 → { "thread_id": "thread-002" }
 ```
-Participants: Sanjaya + Arjun
 
-**Exchange messages:**
+Participants: `SANJAYA` + `ARJUN`
+
 ```
 POST /api/v1/threads/thread-002/messages
 { "body": "Arjun, take ownership of the onboarding pipeline." }
-→ msg-003 → notification → Arjun
+→ msg-003 → notification → ARJUN
 
-POST /api/v1/threads/thread-002/messages  (by Arjun)
+POST /api/v1/threads/thread-002/messages              ← by ARJUN
 { "body": "Understood. Starting now.", "reply_to": "msg-003" }
-→ msg-004 → notification → Sanjaya
+→ msg-004 → notification → SANJAYA
 ```
 
-**Realise Suraksha should be here, not Arjun.**
-
-**Remove Arjun:**
+**Sanjaya removes Arjun:**
 ```
 DELETE /api/v1/threads/thread-002/participants/arjun-id
 → { "ok": true }
 ```
-- Arjun's `removed_at` is set
-- Arjun's past messages (msg-003, msg-004) and read receipts are preserved
-- Arjun receives no new notifications from this thread
+Server auto-generates event message:
+```
+msg-005  SANJAYA  event  "ARJUN was removed by SANJAYA"
+         → no notifications (event messages do not notify)
+```
+Arjun retains read access. Gets no new notifications.
 
-**Add Suraksha:**
+**Sanjaya adds Suraksha:**
 ```
 POST /api/v1/threads/thread-002/participants
 { "participant_id": "suraksha-id" }
 → { "ok": true }
 ```
-- Suraksha can now read the full thread history — including msg-003 and msg-004
+Server auto-generates event message:
+```
+msg-006  SANJAYA  event  "SURAKSHA was added by SANJAYA"
+         → no notifications (event messages do not notify)
+```
+Suraksha can now read full history including msg-003, msg-004.
 
-**Notify Suraksha in the thread:**
+**Sanjaya messages Suraksha:**
 ```
 POST /api/v1/threads/thread-002/messages
-{
-  "body": "Suraksha, you are taking over from Arjun.
-           Please review earlier messages and continue."
-}
-→ msg-005 → notification → Suraksha only
-```
-Arjun is removed — he gets nothing.
-
-**Thread final state:**
-```
-thread-002: "Agent coordination — Q1 tasks"
-participants: Sanjaya ✅   Arjun ❌ removed   Suraksha ✅ added
-
-msg-003  Sanjaya → "Arjun, take ownership of the onboarding pipeline."
-  └── msg-004  Arjun → "Understood. Starting now."
-
-msg-005  Sanjaya → "Suraksha, you are taking over from Arjun..."
+{ "body": "Suraksha, you are taking over from Arjun. Please review earlier messages." }
+→ msg-007 → notification → SURAKSHA only
+            (ARJUN removed — gets nothing)
 ```
 
----
+**Raw thread_messages:**
+```
+msg-003  SANJAYA   message  "Arjun, take ownership of the onboarding pipeline."
+  └── msg-004  ARJUN     message  "Understood. Starting now."
+msg-005  SANJAYA   event    "ARJUN was removed by SANJAYA"
+msg-006  SANJAYA   event    "SURAKSHA was added by SANJAYA"
+msg-007  SANJAYA   message  "Suraksha, you are taking over from Arjun..."
+```
 
-## 9. Migration Strategy
-
-### Phase 1 — Add new tables (non-breaking)
-Create `threads`, `thread_participants`, `thread_messages`, `notifications` alongside existing `agent_inbox`. New endpoints go live. Old endpoints continue working unchanged.
-
-### Phase 2 — Migrate existing data
-- Backfill `agent_inbox` A2A rows into `thread_messages` + `notifications`
-- Map `corr_id/reply_to_corr_id` chains to `reply_to` FK
-- Map `thread_id` strings to proper `threads` rows
-- Populate `thread_participants` from historical `from_agent_id` / `agent_id` pairs
-
-### Phase 3 — Deprecate `agent_inbox`
-- Switch extension and heartbeat scripts to new endpoints
-- Remove old A2A endpoints
-- Keep `agent_inbox` for system events only (ping, task_assigned, welcome) until those are handled separately
-- Eventually drop `agent_inbox`
+No joins. No UUID lookups. The thread reads clearly as plain text.
 
 ---
 
-## 10. Open Questions
+## 11. What is NOT in this spec
 
-### Q1 — Who can add or remove participants?
-**Options:**
-- a) Only the thread creator
-- b) Any active participant
-- c) Creator can add/remove anyone. Participants can only add, never remove.
-
-*Leaning toward (c) — creator has full control, participants can invite but not evict.*
-
----
-
-### Q2 — Does a removed participant retain read access to history?
-Arjun is removed. Can he still call `GET /threads/thread-002/messages` and read the conversation?
-
-**Options:**
-- a) Yes — he was a participant, history is his
-- b) No — removal means no access at all
-
-*Leaning toward (b) — removal should mean removal. If history access is needed, export it before removing.*
+| Concern | Where it lives |
+|---|---|
+| Agent pings and liveness checks | Separate `agent_pings` table — own spec |
+| Task assignments and status | Existing `tasks` table — unchanged |
+| Real-time WS delivery mechanism | Existing WS layer — unchanged |
+| Org / project access control | Existing auth middleware — unchanged |
 
 ---
 
-### Q3 — Should participant changes generate a system message in the thread?
-When Arjun is removed or Suraksha is added, should a message like *"Arjun was removed by Sanjaya"* appear in the thread?
+## 12. Open Questions
 
-**Options:**
-- a) Yes — full audit trail visible in-thread
-- b) No — participant changes are admin actions, not conversation messages
-- c) Yes, but as a separate `event` type on `thread_messages`, not a real message
+### Q1 — Fan-out on event messages
+Should participant-change events (`type=event`) generate notifications, or appear silently in the thread timeline only?
 
-*Leaning toward (c) — useful for context but should be distinguishable from real messages.*
+*Decision: silently — event messages do not trigger notifications. Rationale: participants are not actioning an event, just observing it.*
 
 ---
 
-### Q4 — System events (ping, task_assigned, welcome)
-These are currently in `agent_inbox` but have no thread. Should they:
+### Q2 — Can a participant message themselves?
+If a thread has only one active participant (all others removed), can that participant still post?
 
-- a) Stay in `agent_inbox` permanently (system events are separate from conversations)
-- b) Get their own lightweight thread (every ping creates a thread — too noisy)
-- c) Go into `notifications` with `message_id = null` (break the NOT NULL constraint we set)
-
-*Leaning toward (a) — keep system events in `agent_inbox`, use `notifications` only for thread-based messaging. Two channels, two purposes.*
+*No decision yet.*
 
 ---
 
-### Q5 — Can a removed participant be re-added?
-If Arjun is removed and later re-added:
+### Q3 — Search scope
+`GET /api/v1/threads?search=` — should search cover:
+- Subject only
+- Subject + participant slugs
+- Subject + slugs + message body (full text)
 
-- a) Update existing row — set `removed_at = null`, update `joined_at`
-- b) Soft-insert a new row — keep the old removed row for audit, add a new active row (breaks PRIMARY KEY on `thread_id, participant_id`)
-
-*Leaning toward (a) — update the row, but log the re-add in a separate `thread_events` audit log.*
-
----
-
-### Q6 — Retention policy
-Unlike `agent_inbox` (ephemeral), `thread_messages` is meant to be permanent. Questions:
-
-- How long do threads persist?
-- Who can delete a thread or a message?
-- Is there a soft-delete on `thread_messages` (e.g. `deleted_at`)?
-
-*No decision yet — needs product input.*
+*No decision yet — full text search has indexing implications.*
 
 ---
 
-### Q7 — Notification fan-out: all participants or only tagged?
-When a message is sent to a thread with 10 participants, should all 10 get a notification, or should the sender be able to tag specific participants?
+### Q4 — Thread delete behaviour
+When the creator deletes a thread:
+- Hard delete: all messages and notifications gone permanently
+- Soft delete: `deleted_at` set, data retained for a grace period
 
-**Options:**
-- a) Always fan-out to all active participants
-- b) Sender can optionally specify `notify: ["mithran-id"]` to limit notifications
-- c) Fan-out to all, but add `@mention` support later
-
-*Leaning toward (a) for now, (c) as a future enhancement.*
+*No decision yet.*
 
 ---
 
-## 11. Summary
+## 13. Summary
 
 | | Before | After |
 |---|---|---|
-| Message storage | Duplicated per recipient in `agent_inbox.payload` | Once in `thread_messages` |
-| Notification | Mixed with message content | Separate `notifications` table |
-| Reply structure | `corr_id` string chain — no FK | `reply_to` FK — enforced by DB |
+| Message storage | Duplicated per recipient in payload | Once in `thread_messages` |
+| Notifications | Mixed with content | Separate `notifications` table |
+| Pings | Mixed into `agent_inbox` | Own `agent_pings` table |
+| Tasks | Mixed into `agent_inbox` | Existing `tasks` table — no change |
+| Reply structure | `corr_id` strings — no FK | `reply_to` FK — DB enforced |
 | Read receipts | None | `delivered_at` → `read_at` → `processed_at` |
-| Participant control | None | `thread_participants` with soft-delete |
-| Human support | No | Yes — `sender_id` / `recipient_id` resolve to agent or user |
-| History on inbox clear | Lost | Preserved — messages independent of notifications |
+| Participant control | None | `thread_participants` — creator controls |
+| Human support | No | Yes — slug + UUID pattern, no type column |
+| Raw readability | UUID everywhere | Slug snapshots on every row |
+| History on inbox clear | Lost | Preserved — messages separate from notifications |
+| Thread retention | Ephemeral (inbox) | Indefinite until creator deletes |
 | N recipients | N copies of content | 1 message + N notification rows |
-| Participant swap | Not possible | Remove + add, history preserved, audit trail kept |
