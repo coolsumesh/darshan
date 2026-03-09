@@ -1113,4 +1113,43 @@ ACK_URL: ${ackUrl}
     return { ok: true, agent_id: agent.id, callback_token: token, inbox_url, ack_url, org: { name: inv.org_name } };
   });
 
+  // ── List agents in a project — agent-token auth ────────────────────────────
+  // Allows AI agents to enumerate their project team via callback token.
+  // GET /api/v1/projects/:id/agents   Authorization: Bearer <callback_token>
+  server.get<{ Params: { id: string } }>(
+    "/api/v1/projects/:id/agents",
+    async (req, reply) => {
+      const token = req.headers.authorization?.replace(/^Bearer\s+/i, "") ?? "";
+      if (!token) return reply.status(401).send({ ok: false, error: "agent token required" });
+
+      // Validate the calling agent
+      const { rows: callers } = await db.query(
+        `SELECT id, name FROM agents WHERE callback_token = $1 LIMIT 1`,
+        [token]
+      );
+      if (!callers[0]) return reply.status(401).send({ ok: false, error: "invalid token" });
+
+      // Resolve project
+      const { rows: projects } = await db.query(
+        `SELECT id FROM projects WHERE id::text = $1 OR lower(slug) = lower($1)`,
+        [req.params.id]
+      );
+      if (!projects[0]) return reply.status(404).send({ ok: false, error: "project not found" });
+
+      // List all agents in the project
+      const { rows } = await db.query(
+        `SELECT a.id, a.name, a.slug, a.status, a.description,
+                a.agent_type, a.model, a.provider, a.ping_status, a.last_seen_at,
+                pa.joined_at
+         FROM project_agents pa
+         JOIN agents a ON a.id = pa.agent_id
+         WHERE pa.project_id = $1
+         ORDER BY pa.joined_at ASC`,
+        [projects[0].id]
+      );
+
+      return { ok: true, agents: rows, count: rows.length };
+    }
+  );
+
 }
