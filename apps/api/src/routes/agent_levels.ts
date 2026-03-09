@@ -123,7 +123,7 @@ export async function registerAgentLevels(server: FastifyInstance, db: pg.Pool) 
            (project_id, agent_id, from_level, to_level, changed_by, changed_by_type, reason)
          VALUES ($1, $2, $3, $4, $5, $6, $7)
          RETURNING id`,
-        [projectId, agentId, fromLevel, level, user.id, changed_by_type, reason ?? null]
+        [projectId, agentId, fromLevel, level, user.userId, changed_by_type, reason ?? null]
       );
 
       // Insert proofs
