@@ -9,9 +9,9 @@ import { cn } from "@/lib/cn";
 import { Button } from "@/components/ui/button";
 import {
   fetchLevelDefinitions, fetchProjectAgentLevels, fetchAgentLevelDetail, setAgentLevel,
+  fetchProjects,
   type LevelDefinition, type AgentProjectLevel, type LevelEvent, type LevelProof,
 } from "@/lib/api";
-import { apiFetch } from "@/lib/api";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -279,9 +279,7 @@ export default function AgentLevelsPage() {
 
   React.useEffect(() => {
     fetchLevelDefinitions().then(setDefinitions);
-    apiFetch<{ ok: boolean; projects: any[] }>("/api/v1/projects").then(d => {
-      if (d?.ok) setProjects(d.projects.map((p: any) => ({ id: p.id, name: p.name })));
-    });
+    fetchProjects().then(list => setProjects(list.map(p => ({ id: p.id, name: p.name }))));
   }, []);
 
   React.useEffect(() => {
