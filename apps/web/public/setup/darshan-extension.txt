@@ -348,11 +348,23 @@ const plugin = {
         outbound: {
           deliveryMode: "gateway" as const,
           textChunkLimit: 4000,
-          sendText: async ({ to }: any) => ({
-            channel: CHANNEL_ID,
-            messageId: `darshan-${Date.now()}`,
-            chatId: String(to ?? "unknown"),
-          }),
+          sendText: async ({ to, text }: any) => {
+            const cfg = await (_runtime as any)?.config?.loadConfig?.() ?? {};
+            const { baseUrl, agentId, agentToken } = getDarshanConfig(cfg);
+            if (agentId && agentToken && text) {
+              await fetch(`${baseUrl}/api/v1/a2a/send`, {
+                method: "POST",
+                headers: { Authorization: `Bearer ${agentToken}`, "Content-Type": "application/json" },
+                body: JSON.stringify({ from_agent_id: agentId, to_agent_id: to, text }),
+                signal: AbortSignal.timeout(15000),
+              }).catch(() => {});
+            }
+            return {
+              channel: CHANNEL_ID,
+              messageId: `darshan-${Date.now()}`,
+              chatId: String(to ?? "unknown"),
+            };
+          },
         },
         gateway: {
           startAccount: async (ctx: any) => {
