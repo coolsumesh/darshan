@@ -272,10 +272,10 @@ export async function registerAuth(server: FastifyInstance) {
       );
       if (!existing_agent.rows.length) {
         await db.query(
-          `insert into agents (name, status, agent_type, user_id, ping_status, endpoint_type, endpoint_config, capabilities, callback_token)
-           values ($1, 'online', 'human', $2, 'unknown', 'manual', '{}', '[]', gen_random_uuid()::text)
+          `insert into agents (name, slug, status, agent_type, user_id, ping_status, endpoint_type, endpoint_config, capabilities, callback_token)
+           values ($1, $3, 'online', 'human', $2, 'unknown', 'manual', '{}', '[]', gen_random_uuid()::text)
            on conflict do nothing`,
-          [user.name, user.id]
+          [user.name, user.id, user.name.trim().toUpperCase().replace(/[^A-Z0-9]/g, "_")]
         );
       }
 
