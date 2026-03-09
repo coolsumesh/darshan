@@ -18,6 +18,7 @@ import {
   ChevronLeft,
   ChevronRight,
   ClipboardList,
+  Code2,
   FileText,
   FolderKanban,
   HelpCircle,
@@ -54,8 +55,9 @@ const AGENTS_NAV = [
   { href: "/agents/tasks",    label: "Tasks",     icon: ClipboardList  },
   { href: "/agents/chat",     label: "Chat",      icon: MessageSquareText },
   { href: "/agents/levels",   label: "Levels",    icon: Award          },
-  { href: "/agents/activity", label: "Activity",  icon: Zap            },
-  { href: "/agents/invites",  label: "Invites",   icon: Link2          },
+  { href: "/agents/activity",      label: "Activity",  icon: Zap   },
+  { href: "/agents/invites",       label: "Invites",   icon: Link2 },
+  { href: "/agents/api-reference", label: "API Ref",   icon: Code2 },
 ] as const;
 
 const TOOL_NAV = [
