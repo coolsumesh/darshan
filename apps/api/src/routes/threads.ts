@@ -1,59 +1,191 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyRequest } from "fastify";
 import type pg from "pg";
+import { getRequestUser } from "./auth.js";
+import { pushToAgent } from "../broadcast.js";
 
-function getUserId(req: { headers: Record<string, string | string[] | undefined> }): string {
-  const h = req.headers["x-user-id"];
-  return (Array.isArray(h) ? h[0] : h) ?? "sumesh";
+// ── Caller resolution ─────────────────────────────────────────────────────────
+// Resolves the calling identity from either JWT cookie (user) or agent
+// callback_token (Bearer header). Returns id + display slug, or null.
+
+interface Caller {
+  id:   string;
+  slug: string;
+  type: "user" | "agent";
 }
 
-export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
-  // List threads for the current user
-  server.get("/api/v1/threads", async (req) => {
-    const userId = getUserId(req);
-    const { rows } = await db.query(
-      `select t.*
-       from threads t
-       join thread_participants tp on tp.thread_id = t.id
-       where tp.participant_type = 'human'
-         and tp.user_id = $1
-         and tp.can_read = true
-         and t.archived_at is null
-       order by t.updated_at desc`,
-      [userId]
-    );
-    return { ok: true, threads: rows };
-  });
+async function resolveCaller(req: FastifyRequest, db: pg.Pool): Promise<Caller | null> {
+  // 1. JWT user session
+  const jwtUser = getRequestUser(req);
+  if (jwtUser) {
+    const slug = jwtUser.name?.trim().toUpperCase().replace(/[^A-Z0-9]/g, "_") ?? "USER";
+    return { id: jwtUser.userId, slug, type: "user" };
+  }
 
-  // Create a thread
-  server.post<{ Body: { title?: string; visibility?: string } }>(
+  // 2. Agent callback token
+  const bearer = (req.headers.authorization ?? "").replace(/^Bearer\s+/i, "").trim();
+  if (!bearer) return null;
+  const { rows } = await db.query(
+    `SELECT id, slug FROM agents WHERE callback_token = $1 LIMIT 1`,
+    [bearer]
+  );
+  if (!rows[0]) return null;
+  return { id: rows[0].id, slug: rows[0].slug ?? rows[0].id.slice(0, 8).toUpperCase(), type: "agent" };
+}
+
+// ── Thread access check ───────────────────────────────────────────────────────
+// Returns the caller's role in this thread, or null if no access.
+
+type ThreadRole = "creator" | "owner" | "participant" | "removed";
+
+interface ThreadAccess {
+  thread: Record<string, unknown>;
+  role:   ThreadRole;
+}
+
+async function checkThreadAccess(
+  threadId: string,
+  caller: Caller,
+  db: pg.Pool
+): Promise<ThreadAccess | null> {
+  const { rows: threads } = await db.query(
+    `SELECT * FROM threads WHERE thread_id = $1`,
+    [threadId]
+  );
+  if (!threads[0]) return null;
+  const thread = threads[0];
+
+  // Creator
+  if (thread.created_by === caller.id) return { thread, role: "creator" };
+
+  // Agent owner — user who owns an agent that is/was a participant
+  if (caller.type === "user") {
+    const { rows: owned } = await db.query(
+      `SELECT 1 FROM thread_participants tp
+       JOIN agents a ON a.id = tp.participant_id
+       WHERE tp.thread_id = $1 AND a.owner_user_id = $2
+       LIMIT 1`,
+      [threadId, caller.id]
+    );
+    if (owned.length) return { thread, role: "owner" };
+  }
+
+  // Direct participant (active or removed)
+  const { rows: parts } = await db.query(
+    `SELECT removed_at FROM thread_participants
+     WHERE thread_id = $1 AND participant_id = $2`,
+    [threadId, caller.id]
+  );
+  if (!parts[0]) return null;
+  return { thread, role: parts[0].removed_at ? "removed" : "participant" };
+}
+
+// ── Fan-out helpers ───────────────────────────────────────────────────────────
+
+async function fanOutNotifications(
+  db: pg.Pool,
+  messageId: string,
+  threadId: string,
+  senderId: string,
+  priority: string = "normal"
+) {
+  // All active participants except sender
+  const { rows: recipients } = await db.query(
+    `SELECT participant_id, participant_slug FROM thread_participants
+     WHERE thread_id = $1 AND participant_id != $2 AND removed_at IS NULL`,
+    [threadId, senderId]
+  );
+
+  for (const r of recipients) {
+    const { rows: [notif] } = await db.query(
+      `INSERT INTO notifications
+         (recipient_id, recipient_slug, message_id, priority)
+       VALUES ($1, $2, $3, $4) RETURNING notification_id`,
+      [r.participant_id, r.participant_slug, messageId, priority]
+    );
+
+    // Real-time push if recipient is an agent connected via WS
+    pushToAgent(r.participant_id, "notification", {
+      notification_id: notif.notification_id,
+      message_id:      messageId,
+      thread_id:       threadId,
+      type:            "a2a_message",
+      priority,
+    });
+  }
+}
+
+async function insertEventMessage(
+  db: pg.Pool,
+  threadId: string,
+  senderId: string,
+  senderSlug: string,
+  body: string
+) {
+  await db.query(
+    `INSERT INTO thread_messages (thread_id, sender_id, sender_slug, type, body)
+     VALUES ($1, $2, $3, 'event', $4)`,
+    [threadId, senderId, senderSlug, body]
+  );
+  // Event messages do not generate notifications
+}
+
+// ── Routes ────────────────────────────────────────────────────────────────────
+
+export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
+
+  // ── POST /api/v1/threads — create thread ───────────────────────────────────
+  server.post<{ Body: { subject: string; participants?: string[]; project_id?: string } }>(
     "/api/v1/threads",
-    async (req) => {
-      const userId = getUserId(req);
-      const title = req.body?.title ?? null;
-      const visibility = req.body?.visibility ?? "private";
+    async (req, reply) => {
+      const caller = await resolveCaller(req, db);
+      if (!caller) return reply.status(401).send({ ok: false, error: "not authenticated" });
+
+      const { subject, participants = [], project_id } = req.body ?? {};
+      if (!subject?.trim()) return reply.status(400).send({ ok: false, error: "subject is required" });
 
       const client = await db.connect();
       try {
-        await client.query("begin");
+        await client.query("BEGIN");
 
-        const { rows } = await client.query(
-          `insert into threads (title, visibility, created_by_user_id)
-           values ($1, $2, $3)
-           returning *`,
-          [title, visibility, userId]
+        // Create thread
+        const { rows: [thread] } = await client.query(
+          `INSERT INTO threads (subject, project_id, created_by, created_slug)
+           VALUES ($1, $2, $3, $4) RETURNING *`,
+          [subject.trim(), project_id ?? null, caller.id, caller.slug]
         );
-        const thread = rows[0];
 
+        // Auto-add creator as participant
         await client.query(
-          `insert into thread_participants (thread_id, participant_type, user_id, can_read, can_write)
-           values ($1, 'human', $2, true, true)`,
-          [thread.id, userId]
+          `INSERT INTO thread_participants
+             (thread_id, participant_id, participant_slug, added_by, added_by_slug)
+           VALUES ($1, $2, $3, $4, $5)`,
+          [thread.thread_id, caller.id, caller.slug, caller.id, caller.slug]
         );
 
-        await client.query("commit");
-        return { ok: true, thread };
+        // Add initial participants
+        for (const pid of participants) {
+          if (pid === caller.id) continue;
+          const { rows: [resolved] } = await client.query(
+            `SELECT id, COALESCE(slug, name) AS slug FROM agents WHERE id::text = $1
+             UNION ALL
+             SELECT id, upper(regexp_replace(name, '[^A-Za-z0-9]', '_', 'g')) FROM users WHERE id::text = $1
+             LIMIT 1`,
+            [pid]
+          );
+          if (!resolved) continue;
+          await client.query(
+            `INSERT INTO thread_participants
+               (thread_id, participant_id, participant_slug, added_by, added_by_slug)
+             VALUES ($1, $2, $3, $4, $5)
+             ON CONFLICT (thread_id, participant_id) DO NOTHING`,
+            [thread.thread_id, resolved.id, resolved.slug, caller.id, caller.slug]
+          );
+        }
+
+        await client.query("COMMIT");
+        return { ok: true, thread_id: thread.thread_id, thread };
       } catch (err) {
-        await client.query("rollback");
+        await client.query("ROLLBACK");
         throw err;
       } finally {
         client.release();
@@ -61,34 +193,314 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
     }
   );
 
-  // Get a single thread
-  server.get<{ Params: { id: string } }>(
-    "/api/v1/threads/:id",
+  // ── GET /api/v1/threads — list threads ─────────────────────────────────────
+  server.get<{ Querystring: { search?: string; limit?: string; offset?: string; include_deleted?: string } }>(
+    "/api/v1/threads",
     async (req, reply) => {
-      const { rows } = await db.query(
-        `select * from threads where id = $1`,
-        [req.params.id]
-      );
-      if (rows.length === 0) {
-        return reply.status(404).send({ ok: false, error: "thread not found" });
+      const caller = await resolveCaller(req, db);
+      if (!caller) return reply.status(401).send({ ok: false, error: "not authenticated" });
+
+      const { search, limit = "10", offset = "0", include_deleted } = req.query;
+      const lim = Math.min(Number(limit), 100);
+      const off = Number(offset);
+      const showDeleted = include_deleted === "true";
+
+      let query: string;
+      let params: unknown[];
+
+      if (search?.trim()) {
+        // Full-text search across subject + message body
+        query = `
+          SELECT DISTINCT t.*, tp.removed_at AS my_removed_at
+          FROM threads t
+          JOIN thread_participants tp ON tp.thread_id = t.thread_id
+          LEFT JOIN thread_messages tm ON tm.thread_id = t.thread_id
+          WHERE tp.participant_id = $1
+            AND ($2 = false OR t.deleted_at IS NULL)
+            AND (
+              to_tsvector('english', t.subject) @@ plainto_tsquery('english', $3)
+              OR to_tsvector('english', COALESCE(tm.body, '')) @@ plainto_tsquery('english', $3)
+            )
+          ORDER BY t.created_at DESC
+          LIMIT $4 OFFSET $5`;
+        params = [caller.id, !showDeleted, search.trim(), lim, off];
+      } else {
+        query = `
+          SELECT t.*, tp.removed_at AS my_removed_at
+          FROM threads t
+          JOIN thread_participants tp ON tp.thread_id = t.thread_id
+          WHERE tp.participant_id = $1
+            AND ($2 = false OR t.deleted_at IS NULL)
+          ORDER BY t.created_at DESC
+          LIMIT $3 OFFSET $4`;
+        params = [caller.id, !showDeleted, lim, off];
       }
-      return { ok: true, thread: rows[0] };
+
+      const { rows } = await db.query(query, params);
+      return { ok: true, threads: rows, limit: lim, offset: off };
     }
   );
 
-  // Archive a thread
-  server.post<{ Params: { id: string } }>(
-    "/api/v1/threads/:id/archive",
+  // ── GET /api/v1/threads/:thread_id — get thread ────────────────────────────
+  server.get<{ Params: { thread_id: string } }>(
+    "/api/v1/threads/:thread_id",
     async (req, reply) => {
-      const { rowCount } = await db.query(
-        `update threads set archived_at = now(), updated_at = now()
-         where id = $1 and archived_at is null`,
-        [req.params.id]
+      const caller = await resolveCaller(req, db);
+      if (!caller) return reply.status(401).send({ ok: false, error: "not authenticated" });
+
+      const access = await checkThreadAccess(req.params.thread_id, caller, db);
+      if (!access) return reply.status(404).send({ ok: false, error: "thread not found or no access" });
+
+      const { rows: participants } = await db.query(
+        `SELECT * FROM thread_participants WHERE thread_id = $1 ORDER BY joined_at ASC`,
+        [req.params.thread_id]
       );
-      if (!rowCount) {
-        return reply.status(404).send({ ok: false, error: "thread not found or already archived" });
+
+      return { ok: true, thread: access.thread, participants, role: access.role };
+    }
+  );
+
+  // ── DELETE /api/v1/threads/:thread_id — soft delete ────────────────────────
+  server.delete<{ Params: { thread_id: string } }>(
+    "/api/v1/threads/:thread_id",
+    async (req, reply) => {
+      const caller = await resolveCaller(req, db);
+      if (!caller) return reply.status(401).send({ ok: false, error: "not authenticated" });
+
+      const access = await checkThreadAccess(req.params.thread_id, caller, db);
+      if (!access) return reply.status(404).send({ ok: false, error: "thread not found" });
+      if (access.role !== "creator" && access.role !== "owner") {
+        return reply.status(403).send({ ok: false, error: "only the thread creator or agent owner can delete" });
       }
+
+      await db.query(
+        `UPDATE threads SET deleted_at = now() WHERE thread_id = $1`,
+        [req.params.thread_id]
+      );
       return { ok: true };
+    }
+  );
+
+  // ── GET /api/v1/threads/:thread_id/participants ─────────────────────────────
+  server.get<{ Params: { thread_id: string } }>(
+    "/api/v1/threads/:thread_id/participants",
+    async (req, reply) => {
+      const caller = await resolveCaller(req, db);
+      if (!caller) return reply.status(401).send({ ok: false, error: "not authenticated" });
+
+      const access = await checkThreadAccess(req.params.thread_id, caller, db);
+      if (!access) return reply.status(404).send({ ok: false, error: "thread not found or no access" });
+
+      const { rows } = await db.query(
+        `SELECT * FROM thread_participants WHERE thread_id = $1 ORDER BY joined_at ASC`,
+        [req.params.thread_id]
+      );
+      return { ok: true, participants: rows };
+    }
+  );
+
+  // ── POST /api/v1/threads/:thread_id/participants — add ─────────────────────
+  server.post<{ Params: { thread_id: string }; Body: { participant_id: string } }>(
+    "/api/v1/threads/:thread_id/participants",
+    async (req, reply) => {
+      const caller = await resolveCaller(req, db);
+      if (!caller) return reply.status(401).send({ ok: false, error: "not authenticated" });
+
+      const access = await checkThreadAccess(req.params.thread_id, caller, db);
+      if (!access) return reply.status(404).send({ ok: false, error: "thread not found" });
+      if (access.role !== "creator" && access.role !== "owner") {
+        return reply.status(403).send({ ok: false, error: "only the thread creator or agent owner can add participants" });
+      }
+
+      const { participant_id } = req.body ?? {};
+      if (!participant_id) return reply.status(400).send({ ok: false, error: "participant_id required" });
+
+      // Resolve slug
+      const { rows: [resolved] } = await db.query(
+        `SELECT id, COALESCE(slug, name) AS slug FROM agents WHERE id::text = $1
+         UNION ALL
+         SELECT id, upper(regexp_replace(name, '[^A-Za-z0-9]', '_', 'g')) FROM users WHERE id::text = $1
+         LIMIT 1`,
+        [participant_id]
+      );
+      if (!resolved) return reply.status(404).send({ ok: false, error: "participant not found" });
+
+      // Upsert — handles re-adding removed participants
+      await db.query(
+        `INSERT INTO thread_participants
+           (thread_id, participant_id, participant_slug, added_by, added_by_slug, joined_at, removed_at)
+         VALUES ($1, $2, $3, $4, $5, now(), null)
+         ON CONFLICT (thread_id, participant_id)
+         DO UPDATE SET removed_at = null, joined_at = now(),
+                       added_by = $4, added_by_slug = $5`,
+        [req.params.thread_id, resolved.id, resolved.slug, caller.id, caller.slug]
+      );
+
+      // Auto event message
+      await insertEventMessage(db, req.params.thread_id, caller.id, caller.slug,
+        `${resolved.slug} was added by ${caller.slug}`);
+
+      return { ok: true, participant_id: resolved.id, participant_slug: resolved.slug };
+    }
+  );
+
+  // ── DELETE /api/v1/threads/:thread_id/participants/:pid — remove ───────────
+  server.delete<{ Params: { thread_id: string; pid: string } }>(
+    "/api/v1/threads/:thread_id/participants/:pid",
+    async (req, reply) => {
+      const caller = await resolveCaller(req, db);
+      if (!caller) return reply.status(401).send({ ok: false, error: "not authenticated" });
+
+      const access = await checkThreadAccess(req.params.thread_id, caller, db);
+      if (!access) return reply.status(404).send({ ok: false, error: "thread not found" });
+      if (access.role !== "creator" && access.role !== "owner") {
+        return reply.status(403).send({ ok: false, error: "only the thread creator or agent owner can remove participants" });
+      }
+
+      const { rows: [part] } = await db.query(
+        `SELECT participant_slug FROM thread_participants
+         WHERE thread_id = $1 AND participant_id = $2`,
+        [req.params.thread_id, req.params.pid]
+      );
+      if (!part) return reply.status(404).send({ ok: false, error: "participant not found" });
+
+      await db.query(
+        `UPDATE thread_participants SET removed_at = now()
+         WHERE thread_id = $1 AND participant_id = $2`,
+        [req.params.thread_id, req.params.pid]
+      );
+
+      // Auto event message
+      await insertEventMessage(db, req.params.thread_id, caller.id, caller.slug,
+        `${part.participant_slug} was removed by ${caller.slug}`);
+
+      return { ok: true };
+    }
+  );
+
+  // ── POST /api/v1/threads/:thread_id/messages — send message ───────────────
+  server.post<{
+    Params: { thread_id: string };
+    Body: { body: string; reply_to?: string; priority?: string };
+  }>(
+    "/api/v1/threads/:thread_id/messages",
+    async (req, reply) => {
+      const caller = await resolveCaller(req, db);
+      if (!caller) return reply.status(401).send({ ok: false, error: "not authenticated" });
+
+      const access = await checkThreadAccess(req.params.thread_id, caller, db);
+      if (!access) return reply.status(404).send({ ok: false, error: "thread not found or no access" });
+      if (access.role === "removed") {
+        return reply.status(403).send({ ok: false, error: "removed participants cannot send messages" });
+      }
+      if ((access.thread as any).deleted_at) {
+        return reply.status(410).send({ ok: false, error: "thread has been deleted" });
+      }
+
+      const { body, reply_to, priority = "normal" } = req.body ?? {};
+      if (!body?.trim()) return reply.status(400).send({ ok: false, error: "body is required" });
+
+      // Validate reply_to belongs to same thread
+      if (reply_to) {
+        const { rows: [parent] } = await db.query(
+          `SELECT message_id FROM thread_messages WHERE message_id = $1 AND thread_id = $2`,
+          [reply_to, req.params.thread_id]
+        );
+        if (!parent) return reply.status(400).send({ ok: false, error: "reply_to message not in this thread" });
+      }
+
+      const { rows: [msg] } = await db.query(
+        `INSERT INTO thread_messages (thread_id, reply_to, sender_id, sender_slug, body)
+         VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+        [req.params.thread_id, reply_to ?? null, caller.id, caller.slug, body.trim()]
+      );
+
+      // Fan out notifications to all active participants except sender
+      await fanOutNotifications(db, msg.message_id, req.params.thread_id, caller.id, priority);
+
+      return { ok: true, message_id: msg.message_id, message: msg };
+    }
+  );
+
+  // ── GET /api/v1/threads/:thread_id/messages — list messages ───────────────
+  server.get<{
+    Params: { thread_id: string };
+    Querystring: { limit?: string; before?: string; types?: string };
+  }>(
+    "/api/v1/threads/:thread_id/messages",
+    async (req, reply) => {
+      const caller = await resolveCaller(req, db);
+      if (!caller) return reply.status(401).send({ ok: false, error: "not authenticated" });
+
+      const access = await checkThreadAccess(req.params.thread_id, caller, db);
+      if (!access) return reply.status(404).send({ ok: false, error: "thread not found or no access" });
+
+      const lim = Math.min(Number(req.query.limit ?? 50), 200);
+      const before = req.query.before; // ISO timestamp
+      const types = req.query.types?.split(",") ?? ["message", "event"];
+
+      const { rows } = await db.query(
+        `SELECT * FROM thread_messages
+         WHERE thread_id = $1
+           AND type = ANY($2)
+           AND ($3::timestamptz IS NULL OR sent_at < $3)
+         ORDER BY sent_at ASC
+         LIMIT $4`,
+        [req.params.thread_id, types, before ?? null, lim]
+      );
+
+      return { ok: true, messages: rows, count: rows.length };
+    }
+  );
+
+  // ── GET /api/v1/threads/:thread_id/messages/:message_id ───────────────────
+  server.get<{ Params: { thread_id: string; message_id: string } }>(
+    "/api/v1/threads/:thread_id/messages/:message_id",
+    async (req, reply) => {
+      const caller = await resolveCaller(req, db);
+      if (!caller) return reply.status(401).send({ ok: false, error: "not authenticated" });
+
+      const access = await checkThreadAccess(req.params.thread_id, caller, db);
+      if (!access) return reply.status(404).send({ ok: false, error: "thread not found or no access" });
+
+      const { rows: [msg] } = await db.query(
+        `SELECT * FROM thread_messages WHERE message_id = $1 AND thread_id = $2`,
+        [req.params.message_id, req.params.thread_id]
+      );
+      if (!msg) return reply.status(404).send({ ok: false, error: "message not found" });
+
+      // Mark as read — set read_at on the caller's notification for this message
+      await db.query(
+        `UPDATE notifications
+         SET status = 'read', read_at = now()
+         WHERE message_id = $1 AND recipient_id = $2 AND read_at IS NULL`,
+        [req.params.message_id, caller.id]
+      );
+
+      return { ok: true, message: msg };
+    }
+  );
+
+  // ── GET receipts ───────────────────────────────────────────────────────────
+  server.get<{ Params: { thread_id: string; message_id: string } }>(
+    "/api/v1/threads/:thread_id/messages/:message_id/receipts",
+    async (req, reply) => {
+      const caller = await resolveCaller(req, db);
+      if (!caller) return reply.status(401).send({ ok: false, error: "not authenticated" });
+
+      const access = await checkThreadAccess(req.params.thread_id, caller, db);
+      if (!access) return reply.status(404).send({ ok: false, error: "thread not found or no access" });
+
+      const { rows } = await db.query(
+        `SELECT recipient_id, recipient_slug, status,
+                delivered_at, read_at, processed_at, expires_at
+         FROM notifications
+         WHERE message_id = $1
+         ORDER BY recipient_slug ASC`,
+        [req.params.message_id]
+      );
+
+      return { ok: true, message_id: req.params.message_id, receipts: rows };
     }
   );
 }

@@ -612,40 +612,6 @@ ACK_URL: ${ackUrl}
     return { ok: true, items: rows };
   });
 
-  // ── Agent sent inbox messages (outgoing a2a/task events authored by this agent) ──
-  server.get<{
-    Params: { id: string };
-    Querystring: { token?: string; status?: string };
-  }>("/api/v1/agents/:id/inbox/sent", async (req, reply) => {
-    const { status = "all" } = req.query;
-    const token = (req.headers.authorization?.replace(/^Bearer\s+/i, "") || req.query.token) ?? "";
-
-    const { rows: agents } = await db.query(
-      `select id from agents where id::text = $1 and callback_token = $2`,
-      [req.params.id, token]
-    );
-    if (!agents.length) return reply.status(401).send({ ok: false, error: "invalid token" });
-
-    const { rows } = await db.query(
-      status === "all"
-        ? `select i.*, to_a.name as to_agent_name
-             from agent_inbox i
-             left join agents to_a on to_a.id = i.agent_id
-            where i.from_agent_id = $1
-            order by i.created_at desc
-            limit 200`
-        : `select i.*, to_a.name as to_agent_name
-             from agent_inbox i
-             left join agents to_a on to_a.id = i.agent_id
-            where i.from_agent_id = $1 and i.status = $2
-            order by i.created_at desc
-            limit 200`,
-      status === "all" ? [agents[0].id] : [agents[0].id, status]
-    );
-
-    return { ok: true, items: rows };
-  });
-
   // ── Upload org logo ────────────────────────────────────────────────────────
   server.post<{ Params: { id: string } }>("/api/v1/orgs/:id/logo", async (req, reply) => {
     const { rows } = await db.query(

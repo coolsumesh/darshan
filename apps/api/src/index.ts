@@ -16,10 +16,9 @@ import { runMigrations } from "./migrations.js";
 import { registerOpsRateLimits } from "./routes/opsRateLimits.js";
 import { registerAgents } from "./routes/agents.js";
 import { registerThreads } from "./routes/threads.js";
-import { registerMessages } from "./routes/messages.js";
+import { registerNotifications } from "./routes/notifications.js";
 import { registerRuns } from "./routes/runs.js";
 import { registerAgentChat } from "./routes/agentChat.js";
-import { registerA2A } from "./routes/a2a.js";
 import { registerAgentLevels } from "./routes/agent_levels.js";
 import { registerAuditRoute } from "./routes/auditRoute.js";
 import { registerWs } from "./routes/ws.js";
@@ -70,15 +69,16 @@ server.addHook("preHandler", async (req, reply) => {
   const url = req.url.split("?")[0];
   if (!url.startsWith("/api/v1/")) return;
   if (url.startsWith("/api/v1/auth/")) return;
-  // Allow internal A2A callback token routes (they use their own auth)
+  // Agent callback-token routes — handle their own auth internally
   if (url.includes("/inbox")) return;
-  // Allow A2A send/thread routes (they handle auth internally via callback token or API key)
-  if (url.startsWith("/api/v1/a2a/")) return;
-  // Allow agent callback-token task polling route (agent auth handled in route)
   if (/^\/api\/v1\/agents\/[^/]+\/tasks$/.test(url)) return;
-  // Allow task status patch route for agent callback-token flow (auth handled in route)
   if (req.method === "PATCH" && /^\/api\/v1\/projects\/[^/]+\/tasks\/[^/]+$/.test(url)) return;
-  // Allow public invite routes (view + accept — no auth needed)
+  // Thread + notification routes support callback-token auth — handled in route
+  if (url.startsWith("/api/v1/threads")) return;
+  if (url.startsWith("/api/v1/notifications")) return;
+  // Project agents listing — callback-token auth handled in route
+  if (/^\/api\/v1\/projects\/[^/]+\/agents$/.test(url)) return;
+  // Public invite routes
   if (url.startsWith("/api/v1/invites/")) return;
 
   // 1. Try Bearer API key (for internal/agent calls)
@@ -102,10 +102,9 @@ server.addHook("preHandler", async (req, reply) => {
 
 await registerAgents(server, db);
 await registerThreads(server, db);
-await registerMessages(server, db);
+await registerNotifications(server, db);
 await registerRuns(server, db);
 await registerAgentChat(server, db);
-await registerA2A(server, db);
 await registerAgentLevels(server, db);
 await registerAuditRoute(server, db);
 await registerOpsRateLimits(server, db);
