@@ -1,5 +1,5 @@
-# Remove Organisations Spec
-**Status:** Draft  
+# Remove Organisations → Introduce Workspaces
+**Status:** Final  
 **Author:** Sanjaya  
 **Date:** 2026-03-09
 
@@ -7,142 +7,209 @@
 
 ## 1. Decision
 
-The concept of Organisations is removed. Projects become the sole top-level grouping entity. Users own projects. Other users and agents are invited directly into projects.
+Organisations are removed. A lightweight **Workspace** concept replaces them — an optional grouping of related projects. Projects can exist standalone without a workspace. Workspaces carry no members, no roles, no agent management, and no invite system. They are purely organisational containers.
 
 ---
 
-## 2. Current Model (being removed)
+## 2. Model Comparison
 
+**Before:**
 ```
 User
- └── creates → Organisation
-                 ├── has members (org_users)
-                 ├── has agents (org_agents / org_agent_contributions)
-                 ├── owns Projects  ←  projects.org_id
-                 └── generates Agent invite links (org_invites)
+ └── Organisation  (members, roles, agents, invites, logo)
+       └── Projects
 ```
 
-Users accessed projects through org membership. Agents were contributed to orgs and inherited project access from there.
-
----
-
-## 3. New Model
-
+**After:**
 ```
 User
- └── creates → Project
-                 ├── invites Users directly  (project_users)
-                 └── assigns Agents directly (project_agents)
+ ├── Workspace (optional label/folder for projects)
+ │     └── Projects
+ └── Projects (standalone — no workspace required)
 ```
 
-No intermediate layer. Projects are standalone. Access is always per-project.
+**Key difference:** Workspace is just a named container. All access control, agent assignment, and invites remain at the project level.
 
 ---
 
-## 4. What Gets Removed
+## 3. Workspace — What It Is
 
-### DB Tables (drop)
-| Table | Reason |
+| Property | Value |
 |---|---|
-| `organisations` | Core entity being removed |
-| `org_users` | Org membership — no longer needed |
-| `org_agents` | Org agent contributions — no longer needed |
-| `org_user_invites` | Org user invite links — replaced by project invites |
+| Purpose | Group related projects together |
+| Required? | No — projects are standalone by default |
+| Has members? | No |
+| Has roles? | No |
+| Has agents? | No |
+| Has invites? | No |
+| Owned by | The user who created it |
+| Project access | Unchanged — managed per project |
 
-### DB Columns (drop)
-| Table | Column | Reason |
+A workspace is just a name and a list of projects. Nothing more.
+
+---
+
+## 4. DB Changes
+
+### 4.1 Drop org tables
+```sql
+DROP TABLE IF EXISTS org_user_invites  CASCADE;
+DROP TABLE IF EXISTS org_users         CASCADE;
+DROP TABLE IF EXISTS org_agents        CASCADE;
+DROP TABLE IF EXISTS organisations     CASCADE;
+```
+
+### 4.2 Create `workspaces` table
+```sql
+CREATE TABLE workspaces (
+  workspace_id uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+  name         text        NOT NULL,
+  description  text,
+  created_by   uuid        NOT NULL,  -- user UUID
+  created_slug text        NOT NULL,  -- snapshot for readability
+  created_at   timestamptz NOT NULL DEFAULT now()
+);
+```
+
+| Column | Description |
+|---|---|
+| `workspace_id` | Unique identifier |
+| `name` | e.g. "MithranLabs Internal", "Client Work" |
+| `description` | Optional longer description |
+| `created_by` | User who created it — only they can rename or delete |
+| `created_slug` | Slug snapshot for raw readability |
+| `created_at` | When it was created |
+
+### 4.3 Update `projects` table
+```sql
+-- Remove org reference, add workspace reference (nullable)
+ALTER TABLE projects DROP COLUMN IF EXISTS org_id;
+ALTER TABLE projects ADD COLUMN workspace_id uuid
+  REFERENCES workspaces(workspace_id) ON DELETE SET NULL;
+```
+
+`workspace_id` is **nullable** — projects that don't belong to a workspace are perfectly valid.
+
+### 4.4 Update `agent_invites` table
+```sql
+-- Invites are now platform-level (no org, no project scope)
+ALTER TABLE agent_invites DROP COLUMN IF EXISTS org_id;
+```
+
+Agent invites no longer reference an org. An invited agent registers on the platform and is then assigned to projects manually by the project owner.
+
+---
+
+## 5. API Changes
+
+### 5.1 Remove — all org endpoints (21 total)
+
+All `/api/v1/orgs/*` endpoints are removed:
+
+| Removed |
+|---|
+| `GET/POST /api/v1/orgs` |
+| `GET/PATCH/DELETE /api/v1/orgs/:id` |
+| `GET /api/v1/orgs/:id/projects` |
+| `GET /api/v1/orgs/:id/agents` |
+| `POST/DELETE /api/v1/orgs/:id/agent-contributions` |
+| `POST/DELETE /api/v1/orgs/:id/logo` |
+| `GET/POST/DELETE /api/v1/orgs/:id/members` |
+| `GET/POST/DELETE /api/v1/orgs/:id/users` |
+| `GET/POST/DELETE /api/v1/orgs/:id/user-invites` |
+| `POST /api/v1/orgs/:id/invites` (agent onboarding) |
+
+### 5.2 Add — workspace endpoints
+
+Simple CRUD. No members, roles, or agent management.
+
+| Method | Endpoint | Description |
 |---|---|---|
-| `projects` | `org_id` | Projects no longer belong to orgs |
-| `agent_invites` | `org_id` | Invites become project-scoped |
+| `POST` | `/api/v1/workspaces` | Create a workspace |
+| `GET` | `/api/v1/workspaces` | List workspaces owned by caller |
+| `GET` | `/api/v1/workspaces/:id` | Get workspace + its projects |
+| `PATCH` | `/api/v1/workspaces/:id` | Rename or update description |
+| `DELETE` | `/api/v1/workspaces/:id` | Delete workspace — projects become standalone |
 
-### API Endpoints (remove — all in `agents.ts`)
-| Method | Endpoint |
+### 5.3 Update — project endpoints
+
+| Endpoint | Change |
 |---|---|
-| `GET` | `/api/v1/orgs` |
-| `POST` | `/api/v1/orgs` |
-| `GET` | `/api/v1/orgs/:id` |
-| `PATCH` | `/api/v1/orgs/:id` |
-| `DELETE` | `/api/v1/orgs/:id` |
-| `GET` | `/api/v1/orgs/:id/projects` |
-| `GET` | `/api/v1/orgs/:id/agents` |
-| `POST` | `/api/v1/orgs/:id/agent-contributions` |
-| `DELETE` | `/api/v1/orgs/:id/agent-contributions/:agentId` |
-| `POST` | `/api/v1/orgs/:id/logo` |
-| `DELETE` | `/api/v1/orgs/:id/logo` |
-| `GET` | `/api/v1/orgs/:id/members` |
-| `POST` | `/api/v1/orgs/:id/members` |
-| `DELETE` | `/api/v1/orgs/:id/members/:agentId` |
-| `GET` | `/api/v1/orgs/:id/users` |
-| `POST` | `/api/v1/orgs/:id/users` |
-| `DELETE` | `/api/v1/orgs/:id/users/:userId` |
-| `GET` | `/api/v1/orgs/:id/user-invites` |
-| `POST` | `/api/v1/orgs/:id/user-invites` |
-| `DELETE` | `/api/v1/orgs/:id/user-invites/:inviteId` |
-| `POST` | `/api/v1/orgs/:id/invites` (agent onboarding invite) |
+| `POST /api/v1/projects` | Accept optional `workspace_id` in body |
+| `PATCH /api/v1/projects/:id` | Accept `workspace_id` to move project in/out of workspace |
+| `GET /api/v1/projects` | Return `workspace_id` and `workspace_name` per project |
 
-### Frontend Pages (remove)
-| Path | Description |
-|---|---|
-| `/organisations` | Org list page |
-| `/organisations/[id]` | Org detail page |
+### 5.4 Update — agent invite endpoints
 
-### Frontend Nav (remove)
+Remove org scope. Invites become platform-level:
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `POST` | `/api/v1/agent-invites` | Generate a platform invite link |
+| `GET` | `/api/v1/agent-invites` | List your invite links |
+| `DELETE` | `/api/v1/agent-invites/:id` | Cancel an invite |
+| `GET` | `/api/v1/invites/:token` | Agent follows link (already exists, update to handle no org) |
+
+### 5.5 Update — access control
+
+Remove org membership path from `checkAccess()` in `projects.ts`:
+
 ```
-{ href: "/organisations", label: "Organisations", icon: Building2 }
+Before:
+  1. Project owner
+  2. Direct project invite (project_users)
+  3. Org membership (org_users where org_id = project.org_id)  ← remove
+
+After:
+  1. Project owner
+  2. Direct project invite (project_users)
 ```
 
-### Frontend Logic (update)
-- `app-shell.tsx` — remove org invite handling (`invite_type === "org"`)
-- `api.ts` — remove org API functions (`fetchOrgs`, `createOrg`, `acceptOrgInvite`, etc.)
+Workspace membership grants no access to projects. Access is always per-project.
 
 ---
 
-## 5. What Changes
+## 6. Frontend Changes
 
-### 5.1 Project Ownership
+### 6.1 Remove
+- `/organisations` page
+- `/organisations/[id]` page
+- Org invite handling in `app-shell.tsx`
+- Org functions in `api.ts`
 
-Projects are now owned directly by a user. `projects.owner_user_id` already exists and is unchanged. `projects.org_id` is dropped.
+### 6.2 Add
+- `/workspaces` page — list of workspaces with project counts
+- `/workspaces/[id]` page — workspace detail, shows grouped projects
+- Workspace selector when creating a project (optional dropdown)
+- Sidebar nav item: `{ href: "/workspaces", label: "Workspaces", icon: Folders }`
 
-**Before:** User → Org → Project  
-**After:** User → Project
-
-### 5.2 Project Access Control
-
-`checkAccess()` in `projects.ts` currently has three paths:
-1. Project owner (via `owner_user_id`)
-2. Direct project invite (via `project_users`)
-3. Org membership (via `org_users` where `org_id = project.org_id`)
-
-Path 3 is removed. Access is now only through 1 (ownership) or 2 (direct invite).
-
-### 5.3 Agent Invites
-
-Currently agents are onboarded via an org-scoped invite link:
-```
-POST /api/v1/orgs/:id/invites
-→ invite_url: /invite/<token>
-→ agent follows link → joins org
-```
-
-Without orgs, invites become **project-scoped**:
-```
-POST /api/v1/projects/:id/agent-invites
-→ invite_url: /invite/<token>
-→ agent follows link → joins project directly
-```
-
-The `agent_invites` table gets `project_id` instead of `org_id`.
-
-### 5.4 Agent Registry
-
-Currently `GET /api/v1/orgs/:id/agents` lists all agents in an org.  
-Replaced by the existing `GET /api/v1/projects/:id/agents` (already built).
-
-Agents are assigned per-project via `project_agents`. No change needed here.
+### 6.3 Update
+- `app-shell.tsx` — replace `Organisations` nav with `Workspaces`
+- `api.ts` — replace org functions with workspace functions
+- Project cards/list — optionally show workspace badge
 
 ---
 
-## 6. What Stays Unchanged
+## 7. Invite Flow (updated)
+
+**Before:**
+```
+User creates Org → generates org-scoped invite
+Agent follows invite → registered → joins Org → inherits Org projects
+```
+
+**After:**
+```
+User generates platform invite (no scope)
+Agent follows invite → registered on platform
+User manually assigns agent to projects via project team page
+```
+
+Registration and project assignment are explicit, separate steps. One invite, any number of project assignments after.
+
+---
+
+## 8. What Stays Unchanged
 
 | | Status |
 |---|---|
@@ -151,74 +218,43 @@ Agents are assigned per-project via `project_agents`. No change needed here.
 | `GET/POST /api/v1/projects/:id/team` | ✅ unchanged |
 | `GET/POST /api/v1/projects/:id/user-members` | ✅ unchanged |
 | `GET/POST /api/v1/projects/:id/invites` (user invites) | ✅ unchanged |
-| Agent callback token, heartbeat, inbox, tasks | ✅ unchanged |
+| Agent heartbeat, inbox, tasks, levels | ✅ unchanged |
+| Thread / notification system | ✅ unchanged |
 
 ---
 
-## 7. Migration Strategy
+## 9. Migration Strategy
 
-### Phase 1 — Drop org DB objects
-```sql
--- Remove org_id from projects (nullify first, then drop)
-ALTER TABLE projects DROP COLUMN IF EXISTS org_id;
+### Phase 1 — DB (migration 049)
+1. Drop `org_user_invites`, `org_users`, `org_agents`, `organisations`
+2. Create `workspaces` table
+3. Drop `projects.org_id`, add `projects.workspace_id` (nullable)
+4. Drop `agent_invites.org_id`
 
--- Remove org_id from agent_invites, add project_id
-ALTER TABLE agent_invites DROP COLUMN IF EXISTS org_id;
-ALTER TABLE agent_invites ADD COLUMN project_id uuid REFERENCES projects(id) ON DELETE CASCADE;
+### Phase 2 — API
+1. Remove all `/orgs/*` endpoints from `agents.ts`
+2. Add workspace CRUD to a new `workspaces.ts` route file
+3. Update `projects.ts` — add `workspace_id` support, remove `checkAccess` org path
+4. Update agent invite endpoints — remove org scope
 
--- Drop org tables
-DROP TABLE IF EXISTS org_user_invites  CASCADE;
-DROP TABLE IF EXISTS org_users         CASCADE;
-DROP TABLE IF EXISTS org_agents        CASCADE;
-DROP TABLE IF EXISTS organisations     CASCADE;
-```
-
-### Phase 2 — Update API
-- Remove all `/api/v1/orgs/*` endpoints from `agents.ts`
-- Add `POST /api/v1/projects/:id/agent-invites` to `projects.ts`
-- Update `GET /api/v1/invites/:token` to handle project-scoped agent invites
-- Update `checkAccess()` to remove org membership path
-
-### Phase 3 — Update Frontend
-- Remove `/organisations` nav item and pages
-- Remove org invite handling from `app-shell.tsx`
-- Remove org functions from `api.ts`
-- Update invite UI to only show project invites
+### Phase 3 — Frontend
+1. Remove org pages and nav
+2. Add workspace pages and nav
+3. Update project create/edit form with optional workspace selector
+4. Clean up `api.ts` and `app-shell.tsx`
 
 ---
 
-## 8. Open Questions
+## 10. Summary
 
-### Q1 — Existing org data
-Some projects may currently have `org_id` set. When we drop the column, those projects become standalone owned by their `owner_user_id`. Is that correct, or do we need to do anything with org members before dropping?
-
-*My lean: yes — drop the column. `owner_user_id` is already set on every project. Org members who need project access should be re-invited directly. Existing data is minimal enough to not warrant a complex migration.*
-
-### Q2 — Agent invite scope
-Currently agent onboarding invite links are org-scoped. After this change, they become project-scoped. An agent invited via a project link joins that project's `project_agents`.
-
-Should an agent invite be able to target **multiple projects** at once, or strictly one project?
-
-*My lean: one project per invite — keeps it simple and explicit.*
-
-### Q3 — Agent invite in `agents.ts` vs `projects.ts`
-The new `POST /api/v1/projects/:id/agent-invites` endpoint — should it live in `agents.ts` (alongside existing agent invite logic) or `projects.ts` (since it's project-scoped)?
-
-*My lean: `projects.ts` — it's a project action, not an agent action.*
-
-### Q4 — `Building2` icon and "Organisations" label
-The sidebar currently has `{ href: "/organisations", label: "Organisations", icon: Building2 }`. Simply removed. Confirm?
-
----
-
-## 9. Summary
-
-| | Before | After |
+| | Organisations (removed) | Workspaces (new) |
 |---|---|---|
-| Top-level entity | Organisation | Project |
-| User accesses project via | Org membership OR direct invite | Direct invite only |
-| Agent joins via | Org invite link | Project invite link |
-| DB tables | `organisations`, `org_users`, `org_agents`, `org_user_invites` | All dropped |
-| API endpoints | 21 `/api/v1/orgs/*` endpoints | All removed |
-| Frontend | `/organisations` nav + pages | Removed |
-| Complexity | User → Org → Project → Agents | User → Project → Agents |
+| Purpose | Group users, agents, projects with roles | Group related projects only |
+| Members | Yes — with roles | No |
+| Agents | Yes — contributed, inherited | No |
+| Invites | Yes — org-scoped | No |
+| Access control | Yes — org membership → project access | No — projects manage own access |
+| Required? | Projects had to belong to an org | Completely optional |
+| DB tables | 4 tables, complex joins | 1 table |
+| API endpoints | 21 endpoints | 5 endpoints |
+| Complexity | High | Minimal |
