@@ -7,6 +7,7 @@ import { Suspense } from "react";
 import { authLogout, authMe, fetchMyInvites, fetchInviteByToken, acceptProjectInvite, declineProjectInvite, acceptOrgInvite, declineOrgInvite, type ProjectInvite, type AnyInvite, type AuthUser } from "@/lib/api";
 import {
   Activity,
+  Award,
   Bell,
   BookOpen,
   Bot,
@@ -52,6 +53,7 @@ const AGENTS_NAV = [
   { href: "/agents/inbox",    label: "Inbox",     icon: Mail           },
   { href: "/agents/tasks",    label: "Tasks",     icon: ClipboardList  },
   { href: "/agents/chat",     label: "Chat",      icon: MessageSquareText },
+  { href: "/agents/levels",   label: "Levels",    icon: Award          },
   { href: "/agents/activity", label: "Activity",  icon: Zap            },
   { href: "/agents/invites",  label: "Invites",   icon: Link2          },
 ] as const;

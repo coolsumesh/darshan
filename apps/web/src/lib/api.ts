@@ -790,3 +790,100 @@ export async function sendAgentChatMessage(agentId: string, content: string): Pr
   });
   return data?.ok ?? false;
 }
+
+// ── Agent Levels ──────────────────────────────────────────────────────────────
+
+export type LevelDefinition = {
+  level_id: number;
+  name: string;
+  label: string;
+  description: string;
+  can_receive_tasks: boolean;
+  max_parallel_tasks: number;
+  requires_approval: boolean;
+};
+
+export type AgentProjectLevel = {
+  id: string;
+  agent_id: string;
+  project_id: string;
+  current_level: number;
+  agent_name: string;
+  agent_slug: string;
+  level_name: string;
+  level_label: string;
+  level_description: string;
+  can_receive_tasks: boolean;
+  max_parallel_tasks: number;
+  requires_approval: boolean;
+  updated_at: string;
+};
+
+export type LevelEvent = {
+  id: string;
+  project_id: string;
+  agent_id: string;
+  from_level: number;
+  to_level: number;
+  from_label: string;
+  to_label: string;
+  changed_by: string;
+  changed_by_type: string;
+  reason: string | null;
+  created_at: string;
+};
+
+export type LevelProof = {
+  id: string;
+  event_id: string;
+  proof_type: "task" | "conversation" | "a2a_thread";
+  ref_id: string;
+  notes: string | null;
+  created_at: string;
+};
+
+export async function fetchLevelDefinitions(): Promise<LevelDefinition[]> {
+  const data = await apiFetch<{ ok: boolean; definitions: LevelDefinition[] }>(
+    `/api/v1/agent-levels/definitions`
+  );
+  return data?.ok ? data.definitions : [];
+}
+
+export async function fetchProjectAgentLevels(projectId: string): Promise<AgentProjectLevel[]> {
+  const data = await apiFetch<{ ok: boolean; levels: AgentProjectLevel[] }>(
+    `/api/v1/projects/${projectId}/agent-levels`
+  );
+  return data?.ok ? data.levels : [];
+}
+
+export async function fetchAgentLevelDetail(
+  projectId: string,
+  agentId: string
+): Promise<{ current: AgentProjectLevel | null; events: LevelEvent[]; proofs: LevelProof[] }> {
+  const data = await apiFetch<{
+    ok: boolean;
+    current: AgentProjectLevel | null;
+    events: LevelEvent[];
+    proofs: LevelProof[];
+  }>(`/api/v1/projects/${projectId}/agent-levels/${agentId}`);
+  return data?.ok
+    ? { current: data.current, events: data.events, proofs: data.proofs }
+    : { current: null, events: [], proofs: [] };
+}
+
+export async function setAgentLevel(
+  projectId: string,
+  agentId: string,
+  level: number,
+  reason: string,
+  proofs: Array<{ proof_type: "task" | "conversation" | "a2a_thread"; ref_id: string; notes?: string }>
+): Promise<{ ok: boolean; event_id?: string }> {
+  const data = await apiFetch<{ ok: boolean; event_id: string }>(
+    `/api/v1/projects/${projectId}/agent-levels/${agentId}`,
+    {
+      method: "POST",
+      body: JSON.stringify({ level, reason, proofs }),
+    }
+  );
+  return data ?? { ok: false };
+}
