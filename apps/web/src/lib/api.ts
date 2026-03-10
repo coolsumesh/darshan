@@ -871,7 +871,14 @@ export type LevelEvent = {
   created_at: string;
 };
 
-export type LevelProof = never;
+export type LevelProof = {
+  id: string;
+  event_id: string;
+  proof_type: string;
+  ref_id: string;
+  notes?: string | null;
+  created_at?: string;
+};
 
 export async function fetchLevelDefinitions(projectId: string): Promise<LevelDefinition[]> {
   const qs = new URLSearchParams({ project_id: projectId });
