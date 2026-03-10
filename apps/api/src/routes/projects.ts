@@ -514,7 +514,7 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
       // Re-notify when task is moved to approved and has an assignee.
       // This makes task pickup resilient even when prior assignment events were missed.
       if (newStatus === "approved" && !notifiedAssignee && rows[0].assignee) {
-        await notifyAgentInbox(rows[0].assignee as string, rows[0]);
+        await notifyAgentTaskAssigned(rows[0].assignee as string, rows[0]);
       }
 
       return { ok: true, task: rows[0] };

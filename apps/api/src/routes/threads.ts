@@ -273,16 +273,13 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
         await client.query("COMMIT");
 
         // Push real-time notification
-        pushToAgent(recipient.id, {
-          event: "notification",
-          data: {
-            notification_id: notif.notification_id,
-            thread_id,
-            message_id:  message.message_id,
-            from:        caller.slug,
-            priority,
-            body:        body.trim().slice(0, 100),
-          },
+        pushToAgent(recipient.id, "notification", {
+          notification_id: notif.notification_id,
+          thread_id,
+          message_id:  message.message_id,
+          from:        caller.slug,
+          priority,
+          body:        body.trim().slice(0, 100),
         });
 
         return { ok: true, thread_id, message_id: message.message_id, notification_id: notif.notification_id };
