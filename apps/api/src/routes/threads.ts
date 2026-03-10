@@ -120,9 +120,11 @@ async function fanOutNotifications(
     // Real-time push if recipient is an agent connected via WS
     // Enrich with message body/sender so the extension doesn't need a follow-up fetch
     db.query(
-      `SELECT tm.body, tm.sender_slug, t.subject
+      `SELECT tm.body, tm.sender_slug, t.subject,
+              (a.id IS NOT NULL) AS sender_is_agent
        FROM thread_messages tm
        JOIN threads t ON t.thread_id = tm.thread_id
+       LEFT JOIN agents a ON a.id = tm.sender_id
        WHERE tm.message_id = $1 LIMIT 1`,
       [messageId]
     ).then(({ rows: [msg] }) => {
@@ -135,6 +137,7 @@ async function fanOutNotifications(
         message_body:    msg?.body ?? "",
         message_from:    msg?.sender_slug ?? "",
         thread_subject:  msg?.subject ?? "",
+        sender_is_agent: msg?.sender_is_agent ?? false,
       });
     }).catch(() => {
       // Fallback: push without enrichment

@@ -53,10 +53,12 @@ export async function registerNotifications(server: FastifyInstance, db: pg.Pool
            tm.sender_slug AS message_from,
            tm.thread_id,
            tm.type        AS message_type,
-           t.subject      AS thread_subject
+           t.subject      AS thread_subject,
+           (a.id IS NOT NULL) AS sender_is_agent
          FROM notifications n
          JOIN thread_messages tm ON tm.message_id = n.message_id
          JOIN threads t ON t.thread_id = tm.thread_id
+         LEFT JOIN agents a ON a.id = tm.sender_id
          WHERE ${conditions.join(" AND ")}
          ORDER BY
            CASE n.priority WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END,
