@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import * as React from "react";
 import { Suspense } from "react";
-import { authLogout, authMe, fetchMyInvites, fetchInviteByToken, acceptProjectInvite, declineProjectInvite, acceptOrgInvite, declineOrgInvite, type ProjectInvite, type AnyInvite, type AuthUser } from "@/lib/api";
+import { authLogout, authMe, fetchMyInvites, fetchInviteByToken, acceptProjectInvite, declineProjectInvite, type ProjectInvite, type AnyInvite, type AuthUser } from "@/lib/api";
 import {
   Activity,
   Award,
@@ -43,7 +43,7 @@ import { applyPrefsToDom, loadPrefs, useUIPreferences } from "@/components/proto
 const PRIMARY_NAV = [
   { href: "/dashboard",     label: "Dashboard",      icon: Activity          },
   { href: "/projects",      label: "Projects",       icon: FolderKanban      },
-  { href: "/organisations", label: "Organisations",  icon: Building2         },
+  { href: "/workspaces",    label: "Workspaces",     icon: Building2         },
   { href: "/threads",       label: "Threads",        icon: MessageSquareText  },
   { href: "/calendar",      label: "Calendar",       icon: CalendarDays      },
 ] as const;
@@ -259,7 +259,7 @@ function NotificationBellInner() {
   const [acting,     setActing]     = React.useState<string | null>(null);
   const panelRef = React.useRef<HTMLDivElement>(null);
 
-  // Fetch all pending invites (project + org)
+  // Fetch all pending project invites
   React.useEffect(() => {
     fetchMyInvites().then(setInvites);
   }, []);
@@ -292,31 +292,18 @@ function NotificationBellInner() {
 
   async function handleAccept(invite: AnyInvite) {
     setActing(invite.token);
-    if (invite.invite_type === "org") {
-      const result = await acceptOrgInvite(invite.token);
-      if (result) {
-        setInvites((prev) => prev.filter((i) => i.token !== invite.token));
-        setOpen(false);
-        router.push("/organisations");
-      }
-    } else {
-      const result = await acceptProjectInvite(invite.token);
-      if (result) {
-        setInvites((prev) => prev.filter((i) => i.token !== invite.token));
-        setOpen(false);
-        router.push(`/projects/${result.project_slug}`);
-      }
+    const result = await acceptProjectInvite(invite.token);
+    if (result) {
+      setInvites((prev) => prev.filter((i) => i.token !== invite.token));
+      setOpen(false);
+      router.push(`/projects/${result.project_slug}`);
     }
     setActing(null);
   }
 
   async function handleDecline(invite: AnyInvite) {
     setActing(invite.token);
-    if (invite.invite_type === "org") {
-      await declineOrgInvite(invite.token);
-    } else {
-      await declineProjectInvite(invite.token);
-    }
+    await declineProjectInvite(invite.token);
     setInvites((prev) => prev.filter((i) => i.token !== invite.token));
     setActing(null);
   }
@@ -364,29 +351,22 @@ function NotificationBellInner() {
             ) : (
               invites.map((inv) => {
                 const isActing = acting === inv.token;
-                const isOrg = inv.invite_type === "org";
                 return (
                   <div key={inv.token} className="border-b border-white/5 px-4 py-4 last:border-0">
                     {/* Icon + text */}
                     <div className="flex items-start gap-3">
-                      <div className={cn(
-                        "grid h-9 w-9 shrink-0 place-items-center rounded-xl",
-                        isOrg ? "bg-sky-500/15" : "bg-brand-500/15"
-                      )}>
-                        {isOrg
-                          ? <Building2 className="h-4 w-4 text-sky-400" />
-                          : <FolderKanban className="h-4 w-4 text-brand-400" />
-                        }
+                      <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-brand-500/15">
+                        <FolderKanban className="h-4 w-4 text-brand-400" />
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-semibold text-white leading-snug">
-                          {isOrg ? "Organisation invitation" : "Project invitation"}
+                          Project invitation
                         </p>
                         <p className="mt-0.5 text-xs text-white/50 leading-snug">
                           <span className="text-white/70">{inv.invited_by_name ?? "Someone"}</span>
                           {" "}invited you to join{" "}
                           <span className="text-white/70">
-                            {isOrg ? inv.org_name : (inv as ProjectInvite).project_name}
+                            {(inv as ProjectInvite).project_name}
                           </span>
                           {" "}as{" "}
                           <span className={cn(

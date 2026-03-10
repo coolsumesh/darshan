@@ -20,7 +20,7 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
     minRole: ProjectRole = "viewer"
   ): Promise<{ projectId: string; role: ProjectRole } | { deny: 404 | 403 }> {
     const { rows } = await db.query(
-      `select id, owner_user_id, org_id from projects where id::text = $1 or lower(slug) = lower($1)`,
+      `select id, owner_user_id from projects where id::text = $1 or lower(slug) = lower($1)`,
       [idOrSlug]
     );
     if (!rows[0]) return { deny: 404 };
@@ -48,14 +48,6 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
       );
       if (pr[0]) {
         role = pr[0].role as ProjectRole;
-      } else if (rows[0].org_id) {
-        // 3. Org membership — user belongs to the org that owns this project
-        const { rows: or } = await db.query(
-          `select role from org_users where org_id = $1 and user_id = $2`,
-          [rows[0].org_id, userId]
-        );
-        if (!or[0]) return { deny: 403 };
-        role = or[0].role as ProjectRole;
       } else {
         return { deny: 403 };
       }
@@ -75,14 +67,6 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
               case
                 when $1::uuid is null     then null
                 when p.owner_user_id = $1 then 'owner'
-                when exists (
-                  select 1 from org_users oum
-                  where oum.org_id = p.org_id and oum.user_id = $1::uuid
-                )                         then (
-                  select oum.role from org_users oum
-                  where oum.org_id = p.org_id and oum.user_id = $1::uuid
-                  limit 1
-                )
                 else                           'viewer'
               end as my_role
        from projects p
@@ -95,10 +79,6 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
            or exists (
              select 1 from project_users pum
              where pum.project_id = p.id and pum.user_id = $1::uuid
-           )
-           or exists (
-             select 1 from org_users oum
-             where oum.org_id = p.org_id and oum.user_id = $1::uuid
            )
          )
        group by p.id
@@ -130,16 +110,16 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
   );
 
   // ── Create project ─────────────────────────────────────────────────────────
-  server.post<{ Body: { slug: string; name: string; description?: string; status?: string } }>(
+  server.post<{ Body: { slug: string; name: string; description?: string; status?: string; workspace_id?: string } }>(
     "/api/v1/projects",
     async (req, reply) => {
-      const { slug, name, description = "", status = "active" } = req.body;
+      const { slug, name, description = "", status = "active", workspace_id } = req.body;
       if (!slug || !name) return reply.status(400).send({ ok: false, error: "slug and name required" });
       const userId = getRequestUser(req)?.userId ?? null;
       const { rows } = await db.query(
-        `insert into projects (slug, name, description, status, owner_user_id)
-         values ($1, $2, $3, $4, $5) returning *`,
-        [slug, name, description, status, userId]
+        `insert into projects (slug, name, description, status, owner_user_id, workspace_id)
+         values ($1, $2, $3, $4, $5, $6) returning *`,
+        [slug, name, description, status, userId, workspace_id ?? null]
       );
       return reply.status(201).send({ ok: true, project: rows[0] });
     }
@@ -152,7 +132,7 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
       const access = await checkAccess(req.params.id, req, "admin");
       if ("deny" in access) return reply.status(access.deny).send({ ok: false, error: access.deny === 404 ? "project not found" : "forbidden" });
 
-      const allowed = ["name", "description", "status", "progress", "agent_briefing"];
+      const allowed = ["name", "description", "status", "progress", "agent_briefing", "workspace_id"];
       const sets: string[] = [];
       const vals: unknown[] = [];
       for (const key of allowed) {
@@ -302,14 +282,7 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
       const authUser    = getRequestUser(req);
       const requestorName = authUser?.name ?? req.body.proposer ?? null;
       const actorName   = authUser?.name ?? "System";
-      let requestorOrg: string | null = null;
-      if (authUser?.userId) {
-        const orgRes = await db.query(
-          `select name from organisations where owner_user_id = $1 order by created_at limit 1`,
-          [authUser.userId]
-        );
-        requestorOrg = orgRes.rows[0]?.name ?? null;
-      }
+      const requestorOrg: string | null = null;
 
       const { rows } = await db.query(
         `insert into tasks (project_id, title, description, proposer, requestor_org, assignee, status, priority, type, due_date)
@@ -462,13 +435,6 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
                    from project_users pu
                    join users u on u.id = pu.user_id
                    where pu.project_id = p.id
-                     and lower(u.name) = lower($3)
-                 )
-                 or exists (
-                   select 1
-                   from org_users ou
-                   join users u on u.id = ou.user_id
-                   where ou.org_id = p.org_id
                      and lower(u.name) = lower($3)
                  )
                  or exists (

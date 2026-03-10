@@ -26,6 +26,7 @@ import { startConnector } from "./connector.js";
 import { registerProjects } from "./routes/projects.js";
 import { registerProjectChat } from "./routes/projectChat.js";
 import { registerInvites } from "./routes/invites.js";
+import { registerWorkspaces } from "./routes/workspaces.js";
 import { registerAuth, verifyToken } from "./routes/auth.js";
 
 const PORT = Number(process.env.PORT ?? 4000);
@@ -111,6 +112,7 @@ await registerOpsRateLimits(server, db);
 await registerProjects(server, db);
 await registerProjectChat(server, db);
 await registerInvites(server, db);
+await registerWorkspaces(server, db);
 await registerWs(server, db);
 
 startConnector(db);
