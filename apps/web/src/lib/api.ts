@@ -871,8 +871,8 @@ export type LevelEvent = {
   agent_id: string;
   from_level: number;
   to_level: number;
-  from_label?: string | null;
-  to_label?: string | null;
+  from_label: string;
+  to_label: string;
   from_name?: string | null;
   to_name?: string | null;
   changed_by: string;
