@@ -73,8 +73,8 @@ server.addHook("preHandler", async (req, reply) => {
   if (url.startsWith("/api/v1/auth/")) return;
 
   // Agent callback-token routes — handle auth internally
-  if (url.includes("/inbox"))                                       return;
   if (/^\/api\/v1\/agents\/[^/]+\/tasks$/.test(url))               return;
+  if (/^\/api\/v1\/agents\/[^/]+\/pong$/.test(url))                return;
   if (req.method === "PATCH" && /^\/api\/v1\/projects\/[^/]+\/tasks\/[^/]+$/.test(url)) return;
 
   // Threads + notifications — dual-auth handled in route

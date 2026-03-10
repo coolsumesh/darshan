@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import type pg from "pg";
-import { broadcast } from "../broadcast.js";
+import { broadcast, pushToAgent } from "../broadcast.js";
 import { getRequestUser } from "./auth.js";
 
 // ── Role hierarchy ─────────────────────────────────────────────────────────────
@@ -232,8 +232,8 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
     }
   );
 
-  // ── Helper: write task_assigned to agent inbox ─────────────────────────────
-  async function notifyAgentInbox(agentName: string, task: Record<string, unknown>) {
+  // ── Helper: push task_assigned to agent via WS ────────────────────────────
+  async function notifyAgentTaskAssigned(agentName: string, task: Record<string, unknown>) {
     if (!agentName) return;
     const { rows: agents } = await db.query(
       `select id from agents where name ILIKE $1 limit 1`,
@@ -241,32 +241,25 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
     );
     if (!agents[0]) return;
 
-    // Fetch project slug + briefing so agent has full context
     const { rows: projects } = await db.query(
       `select slug, name, agent_briefing from projects where id = $1 limit 1`,
       [task.project_id]
     );
     const project = projects[0] ?? {};
 
-    await db.query(
-      `insert into agent_inbox (agent_id, type, payload) values ($1, 'task_assigned', $2)`,
-      [
-        agents[0].id,
-        JSON.stringify({
-          task_id:         task.id,
-          project_id:      task.project_id,
-          project_slug:    project.slug    ?? null,
-          project_name:    project.name    ?? null,
-          agent_briefing:  project.agent_briefing ?? null,
-          title:           task.title,
-          description:     task.description,
-          priority:        task.priority,
-          status:          task.status,
-          due_date:        task.due_date ?? null,
-          assigned_to:     agentName,
-        }),
-      ]
-    );
+    pushToAgent(agents[0].id, "task_assigned", {
+      task_id:        task.id,
+      project_id:     task.project_id,
+      project_slug:   project.slug    ?? null,
+      project_name:   project.name    ?? null,
+      agent_briefing: project.agent_briefing ?? null,
+      title:          task.title,
+      description:    task.description,
+      priority:       task.priority,
+      status:         task.status,
+      due_date:       task.due_date ?? null,
+      assigned_to:    agentName,
+    });
   }
 
   // ── Create task — member+ ──────────────────────────────────────────────────
@@ -299,7 +292,7 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
         [rows[0].id, access.projectId, actorName, actorType, status]
       );
 
-      if (assignee) await notifyAgentInbox(assignee, rows[0]);
+      if (assignee) await notifyAgentTaskAssigned(assignee, rows[0]);
       return reply.status(201).send({ ok: true, task: rows[0] });
     }
   );
@@ -316,10 +309,6 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
         [req.params.taskId, access.projectId]
       );
       if (!rowCount) return reply.status(404).send({ ok: false, error: "task not found" });
-      await db.query(
-        `delete from agent_inbox where type = 'task_assigned' and payload->>'task_id' = $1`,
-        [req.params.taskId]
-      );
       broadcast("task:deleted", { taskId: req.params.taskId });
       return { ok: true };
     }
@@ -513,20 +502,11 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
       }
       if (activityOps.length > 0) await Promise.all(activityOps);
 
-      // ── Agent inbox notifications ───────────────────────────────────────────
+      // ── WS task notifications ──────────────────────────────────────────────
       let notifiedAssignee = false;
       if (newAssignee !== undefined) {
-        if (oldAssignee) {
-          await db.query(
-            `delete from agent_inbox
-             where type = 'task_assigned'
-               and payload->>'task_id' = $1
-               and agent_id = (select id from agents where name ILIKE $2 limit 1)`,
-            [req.params.taskId, oldAssignee]
-          );
-        }
         if (newAssignee) {
-          await notifyAgentInbox(newAssignee, rows[0]);
+          await notifyAgentTaskAssigned(newAssignee, rows[0]);
           notifiedAssignee = true;
         }
       }
@@ -632,26 +612,20 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
         [access.projectId, agent_id, agentRole, userId]
       );
 
-      // Send project_onboarded inbox item so agent learns about this project
+      // Push project_onboarded to agent via WS
       const { rows: projects } = await db.query(
         `select id, slug, name, description, agent_briefing from projects where id = $1`,
         [access.projectId]
       );
       if (projects[0]) {
         const p = projects[0];
-        await db.query(
-          `insert into agent_inbox (agent_id, type, payload) values ($1, 'project_onboarded', $2)`,
-          [
-            agent_id,
-            JSON.stringify({
-              project_id:     p.id,
-              project_slug:   p.slug,
-              project_name:   p.name,
-              description:    p.description,
-              agent_briefing: p.agent_briefing,
-            }),
-          ]
-        );
+        pushToAgent(agent_id, "project_onboarded", {
+          project_id:     p.id,
+          project_slug:   p.slug,
+          project_name:   p.name,
+          description:    p.description,
+          agent_briefing: p.agent_briefing,
+        });
       }
 
       return reply.status(201).send({ ok: true, member: rows[0] });

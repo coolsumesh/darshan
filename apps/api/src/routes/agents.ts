@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import type pg from "pg";
 import { getRequestUser } from "./auth.js";
-import { broadcast } from "../broadcast.js";
+import { broadcast, pushToAgent } from "../broadcast.js";
 import { writeFileSync, unlinkSync, existsSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join, extname } from "path";
@@ -68,17 +68,20 @@ POST ACK_URL: { inbox_id, callback_token: "${token}", response: "setup complete 
 **any other type**
 POST ACK_URL: { inbox_id, callback_token: "${token}", response: "ack" }`;
 
-      await db.query(
-        `insert into agent_inbox (agent_id, type, payload) values ($1, 'welcome', $2)`,
-        [agent.id, JSON.stringify({
-          message: `Welcome to Darshan, ${name}! Paste the heartbeat_config block into your OpenClaw HEARTBEAT.md.`,
-          heartbeat_config: heartbeatBlock,
-          agent_id: agent.id, token, inbox_url: inboxUrl, ack_url: ackUrl,
-        })]
-      );
     }
 
-    return { ok: true, agent_id: agent.id, callback_token: token };
+    return {
+      ok: true,
+      agent_id: agent.id,
+      callback_token: token,
+      welcome: {
+        agent_id: agent.id, token,
+        message: `Welcome to Darshan, ${name}! Paste the heartbeat_config block into your OpenClaw HEARTBEAT.md.`,
+        heartbeat_config: endpoint_type === "openclaw_poll"
+          ? `## Darshan Agent — ${name}\nAGENT_ID: ${agent.id}\nTOKEN: ${token}\nBASE: https://darshan.caringgems.in/api/backend/api/v1\n\n### Heartbeat steps:\n1. GET /agents/${agent.id}/tasks?status=approved  (Authorization: Bearer ${token})\n2. GET /notifications                               (Authorization: Bearer ${token})\n3. Process each notification by type:\n   - type=ping  → POST /agents/${agent.id}/pong { token }\n   - type=message → read body, respond via POST /threads/direct { to, body }\n4. PATCH task status as you work`
+          : null,
+      },
+    };
   });
 
   // ── List agents ─────────────────────────────────────────────────────────────
@@ -171,7 +174,6 @@ POST ACK_URL: { inbox_id, callback_token: "${token}", response: "ack" }`;
 
     // Remove from project teams, inbox, invites, org membership, then delete agent
     await db.query(`delete from project_agents  where agent_id = $1`, [rows[0].id]);
-    await db.query(`delete from agent_inbox   where agent_id = $1`, [rows[0].id]);
     await db.query(`delete from agent_invites where agent_id = $1`, [rows[0].id]);
     await db.query(`delete from agents        where id = $1`,       [rows[0].id]);
 
@@ -179,117 +181,57 @@ POST ACK_URL: { inbox_id, callback_token: "${token}", response: "ack" }`;
     return { ok: true };
   });
 
-  // ── Ping an agent ───────────────────────────────────────────────────────────
+  // ── Ping an agent (WS push — no inbox) ────────────────────────────────────
+  // Pushes a ping event via WebSocket. Agent responds via POST /agents/:id/pong.
   server.post<{ Params: { id: string } }>("/agents/:id/ping", async (req, reply) => {
-    // Find agent
     const { rows: agents } = await db.query(
-      `select * from agents where id::text = $1`, [req.params.id]
+      `select id from agents where id::text = $1`, [req.params.id]
     );
     if (!agents.length) return reply.status(404).send({ ok: false, error: "agent not found" });
 
-    // Write ping to inbox
-    const { rows } = await db.query(
-      `insert into agent_inbox (agent_id, type, payload)
-       values ($1, 'ping', $2) returning *`,
-      [agents[0].id, JSON.stringify({ sent_at: new Date().toISOString(), from: "darshan" })]
+    const sentAt = new Date().toISOString();
+
+    await db.query(
+      `update agents set ping_status = 'pending', last_ping_sent_at = $2 where id = $1`,
+      [agents[0].id, sentAt]
     );
 
-    // Mark ping as pending on agent record
-    await db.query(
-      `update agents set ping_status = 'pending' where id = $1`, [agents[0].id]
-    );
+    // Push directly via WS — if agent is offline the ping is simply unanswered
+    pushToAgent(agents[0].id, "ping", { sent_at: sentAt });
 
     broadcast("agent:ping_sent", { agentId: agents[0].id });
-    return { ok: true, inbox_item: rows[0] };
+    return { ok: true, sent_at: sentAt };
   });
 
-  // ── Agent acknowledges inbox item (Mithran calls this) ─────────────────────
-  server.post<{
-    Params: { id: string };
-    Body: {
-      inbox_id: string; callback_token: string; response?: string;
-      status?: { model?: string; capabilities?: string[]; provider?: string; version?: string };
-    };
-  }>("/agents/:id/inbox/ack", async (req, reply) => {
-    const { inbox_id, callback_token, response, status } = req.body;
+  // ── Agent responds to ping ─────────────────────────────────────────────────
+  // Agent calls this immediately after receiving a WS ping event.
+  server.post<{ Params: { id: string }; Body: { token: string; sent_at?: string } }>(
+    "/agents/:id/pong",
+    async (req, reply) => {
+      const { token, sent_at } = req.body ?? {};
 
-    // Verify token
-    const { rows: agents } = await db.query(
-      `select * from agents where id::text = $1 and callback_token = $2`,
-      [req.params.id, callback_token]
-    );
-    if (!agents.length) return reply.status(401).send({ ok: false, error: "invalid token" });
+      const { rows: agents } = await db.query(
+        `select id, last_ping_sent_at from agents where id::text = $1 and callback_token = $2`,
+        [req.params.id, token]
+      );
+      if (!agents[0]) return reply.status(401).send({ ok: false, error: "invalid token" });
 
-    // Get inbox item created_at to compute latency
-    const { rows: inboxRows } = await db.query(
-      `update agent_inbox set status = 'ack', acked_at = now(),
-              payload = payload || $1::jsonb
-       where id = $2 and agent_id = $3 returning created_at`,
-      [JSON.stringify({ response: response ?? "ok" }), inbox_id, agents[0].id]
-    );
+      // Compute round-trip using sent_at from agent or stored last_ping_sent_at
+      const ref = sent_at ?? agents[0].last_ping_sent_at;
+      const pingMs = ref ? Math.round(Date.now() - new Date(ref).getTime()) : null;
 
-    // Compute round-trip latency in ms (time between ping write and ack)
-    const pingMs = inboxRows[0]?.created_at
-      ? Math.round(Date.now() - new Date(inboxRows[0].created_at).getTime())
-      : null;
-
-    // Update agent status with latency + self-reported model/capabilities if provided
-    if (status?.model || status?.capabilities || status?.provider) {
       await db.query(
         `update agents set
-          ping_status  = 'ok',  last_ping_at = now(), last_seen_at = now(),
-          status       = 'online', last_ping_ms = $2,
-          model        = coalesce($3, model),
-          capabilities = coalesce($4::jsonb, capabilities),
-          provider     = coalesce($5, provider)
-         where id = $1`,
-        [
-          agents[0].id, pingMs,
-          status.model        ?? null,
-          status.capabilities ? JSON.stringify(status.capabilities) : null,
-          status.provider     ?? null,
-        ]
-      );
-    } else {
-      await db.query(
-        `update agents set ping_status = 'ok', last_ping_at = now(), last_seen_at = now(),
-                status = 'online', last_ping_ms = $2
+           ping_status = 'ok', last_ping_at = now(), last_seen_at = now(),
+           status = 'online', last_ping_ms = $2
          where id = $1`,
         [agents[0].id, pingMs]
       );
+
+      broadcast("agent:ping_ack", { agentId: agents[0].id, pingMs });
+      return { ok: true, ping_ms: pingMs };
     }
-
-    broadcast("agent:ping_ack", { agentId: agents[0].id, response, pingMs, status });
-    return { ok: true, ping_ms: pingMs };
-  });
-
-  // ── Agent polls its inbox ───────────────────────────────────────────────────
-  server.get<{
-    Params: { id: string };
-    Querystring: { token?: string; status?: string };
-  }>("/agents/:id/inbox", async (req, reply) => {
-    const { status = "pending" } = req.query;
-    // Accept token from Authorization header (preferred) or query string (legacy)
-    const token = (req.headers.authorization?.replace(/^Bearer\s+/i, "") || req.query.token) ?? "";
-
-    // Verify token
-    const { rows: agents } = await db.query(
-      `select id from agents where id::text = $1 and callback_token = $2`,
-      [req.params.id, token]
-    );
-    if (!agents.length) return reply.status(401).send({ ok: false, error: "invalid token" });
-
-    // Update last_seen
-    await db.query(`update agents set last_seen_at = now() where id = $1`, [agents[0].id]);
-
-    const { rows } = await db.query(
-      status === "all"
-        ? `select * from agent_inbox where agent_id = $1 order by created_at desc limit 200`
-        : `select * from agent_inbox where agent_id = $1 and status = $2 order by created_at desc limit 200`,
-      status === "all" ? [agents[0].id] : [agents[0].id, status]
-    );
-    return { ok: true, items: rows };
-  });
+  );
 
   // ── Projects assigned to an agent ──────────────────────────────────────────
   server.get<{ Params: { id: string } }>("/agents/:id/projects", async (req, reply) => {
