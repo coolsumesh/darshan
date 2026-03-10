@@ -148,7 +148,7 @@ async function insertEventMessage(
 export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
 
   // ── POST /api/v1/threads — create thread ───────────────────────────────────
-  server.post<{ Body: { subject: string; participants?: string[]; project_id?: string } }>(
+  server.post<{ Body: { subject: string; participants?: string[]; project_id: string } }>(
     "/threads",
     async (req, reply) => {
       const caller = await resolveCaller(req, db);
@@ -156,6 +156,7 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
 
       const { subject, participants = [], project_id } = req.body ?? {};
       if (!subject?.trim()) return reply.status(400).send({ ok: false, error: "subject is required" });
+      if (!project_id?.trim()) return reply.status(400).send({ ok: false, error: "project_id is required" });
 
       const client = await db.connect();
       try {
@@ -210,15 +211,16 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
   // ── POST /threads/direct — one-call A2A send ─────────────────────────────
   // Finds or creates a direct thread between caller and `to`, then posts body.
   // Replaces the old POST /a2a/send flow.
-  server.post<{ Body: { to: string; body: string; subject?: string; priority?: string } }>(
+  server.post<{ Body: { to: string; body: string; subject?: string; priority?: string; project_id: string } }>(
     "/threads/direct",
     async (req, reply) => {
       const caller = await resolveCaller(req, db);
       if (!caller) return reply.status(401).send({ ok: false, error: "not authenticated" });
 
-      const { to, body, subject, priority = "normal" } = req.body ?? {};
-      if (!to?.trim())   return reply.status(400).send({ ok: false, error: "to (recipient id) is required" });
-      if (!body?.trim()) return reply.status(400).send({ ok: false, error: "body is required" });
+      const { to, body, subject, priority = "normal", project_id } = req.body ?? {};
+      if (!to?.trim())         return reply.status(400).send({ ok: false, error: "to (recipient id) is required" });
+      if (!body?.trim())       return reply.status(400).send({ ok: false, error: "body is required" });
+      if (!project_id?.trim()) return reply.status(400).send({ ok: false, error: "project_id is required" });
 
       // Resolve recipient
       const { rows: [recipient] } = await db.query(
@@ -236,14 +238,14 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
       try {
         await client.query("BEGIN");
 
-        // Find existing direct thread between caller and recipient (both active participants)
+        // Find existing direct thread between caller and recipient within the same project
         const { rows: [existing] } = await client.query(
           `SELECT t.thread_id FROM threads t
            JOIN thread_participants pa ON pa.thread_id = t.thread_id AND pa.participant_id = $1 AND pa.removed_at IS NULL
            JOIN thread_participants pb ON pb.thread_id = t.thread_id AND pb.participant_id = $2 AND pb.removed_at IS NULL
-           WHERE t.deleted_at IS NULL AND t.project_id IS NULL
+           WHERE t.deleted_at IS NULL AND t.project_id = $3 AND t.status = 'open'
            ORDER BY t.created_at DESC LIMIT 1`,
-          [caller.id, recipient.id]
+          [caller.id, recipient.id, project_id]
         );
 
         let thread_id: string;
@@ -254,9 +256,9 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
           // Create new direct thread
           const autoSubject = subject?.trim() || `${caller.slug} ↔ ${recipient.slug}`;
           const { rows: [thread] } = await client.query(
-            `INSERT INTO threads (subject, created_by, created_slug)
-             VALUES ($1, $2, $3) RETURNING thread_id`,
-            [autoSubject, caller.id, caller.slug]
+            `INSERT INTO threads (subject, project_id, created_by, created_slug)
+             VALUES ($1, $2, $3, $4) RETURNING thread_id`,
+            [autoSubject, project_id, caller.id, caller.slug]
           );
           thread_id = thread.thread_id;
 
