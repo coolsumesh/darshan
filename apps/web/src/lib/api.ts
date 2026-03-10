@@ -86,6 +86,50 @@ export async function updateProject(id: string, patch: Partial<{
   return data?.ok ?? false;
 }
 
+// ── Threads ───────────────────────────────────────────────────────────────────
+
+export type Thread = {
+  thread_id: string;
+  subject: string;
+  project_id: string | null;
+  created_by: string;
+  created_slug: string;
+  created_at: string;
+  deleted_at: string | null;
+  my_removed_at: string | null;
+};
+
+export type ThreadMessage = {
+  message_id: string;
+  thread_id: string;
+  reply_to: string | null;
+  sender_id: string;
+  sender_slug: string;
+  type: string;
+  body: string;
+  sent_at: string;
+};
+
+export async function fetchThreads(): Promise<Thread[]> {
+  const data = await apiFetch<{ ok: boolean; threads: Thread[] }>("/api/v1/threads?limit=50");
+  return data?.ok ? (data.threads ?? []) : [];
+}
+
+export async function fetchThreadMessages(threadId: string): Promise<ThreadMessage[]> {
+  const data = await apiFetch<{ ok: boolean; messages: ThreadMessage[] }>(
+    `/api/v1/threads/${threadId}/messages?limit=100`
+  );
+  return data?.ok ? (data.messages ?? []) : [];
+}
+
+export async function sendThreadMessage(threadId: string, body: string): Promise<ThreadMessage | null> {
+  const data = await apiFetch<{ ok: boolean; message: ThreadMessage }>(
+    `/api/v1/threads/${threadId}/messages`,
+    { method: "POST", body: JSON.stringify({ body }) }
+  );
+  return data?.ok ? data.message ?? null : null;
+}
+
 // ── Docs (Architecture + Tech Spec) ──────────────────────────────────────────
 
 export async function fetchArchitecture(projectId: string): Promise<string | null> {

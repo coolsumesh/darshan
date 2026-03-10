@@ -1,59 +1,315 @@
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { ButtonLink } from "@/components/ui/button-link";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+"use client";
+
+import * as React from "react";
+import {
+  fetchThreads,
+  fetchThreadMessages,
+  sendThreadMessage,
+  type Thread,
+  type ThreadMessage,
+} from "@/lib/api";
+import { Inbox, Send, RefreshCw } from "lucide-react";
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function relativeTime(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const m = Math.floor(diff / 60000);
+  if (m < 1)  return "just now";
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.floor(h / 24);
+  if (d < 7)  return `${d}d ago`;
+  return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+const SLUG_COLORS: Record<string, string> = {};
+const PALETTE = [
+  "bg-violet-500", "bg-sky-500", "bg-emerald-500",
+  "bg-amber-500",  "bg-rose-500", "bg-indigo-500",
+  "bg-teal-500",   "bg-fuchsia-500",
+];
+function slugColor(slug: string): string {
+  if (!SLUG_COLORS[slug]) {
+    SLUG_COLORS[slug] = PALETTE[Object.keys(SLUG_COLORS).length % PALETTE.length];
+  }
+  return SLUG_COLORS[slug];
+}
+
+function Avatar({ slug, size = "md" }: { slug: string; size?: "sm" | "md" }) {
+  const dim = size === "sm" ? "h-7 w-7 text-[10px]" : "h-9 w-9 text-xs";
+  return (
+    <div className={`${dim} ${slugColor(slug)} flex shrink-0 items-center justify-center rounded-full font-bold text-white`}>
+      {slug.slice(0, 2).toUpperCase()}
+    </div>
+  );
+}
+
+// ── Thread list row ───────────────────────────────────────────────────────────
+
+function ThreadRow({
+  thread,
+  preview,
+  previewTime,
+  selected,
+  onClick,
+}: {
+  thread: Thread;
+  preview: string;
+  previewTime: string;
+  selected: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`w-full px-4 py-3 text-left transition-colors hover:bg-slate-100 dark:hover:bg-slate-800 ${
+        selected
+          ? "border-l-2 border-violet-500 bg-violet-50 dark:bg-violet-950/30"
+          : "border-l-2 border-transparent"
+      }`}
+    >
+      <div className="flex items-start gap-3">
+        <Avatar slug={thread.created_slug} />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-baseline justify-between gap-2">
+            <span className="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">
+              {thread.created_slug}
+            </span>
+            <span className="shrink-0 text-[11px] text-slate-400">{previewTime}</span>
+          </div>
+          <div className="truncate text-sm font-medium text-slate-700 dark:text-slate-300">
+            {thread.subject}
+          </div>
+          <div className="truncate text-xs text-slate-400 dark:text-slate-500">
+            {preview || "No messages yet"}
+          </div>
+        </div>
+      </div>
+    </button>
+  );
+}
+
+// ── Message bubble ────────────────────────────────────────────────────────────
+
+function MessageBubble({ msg, isMe }: { msg: ThreadMessage; isMe: boolean }) {
+  return (
+    <div className={`flex items-start gap-3 ${isMe ? "flex-row-reverse" : ""}`}>
+      <Avatar slug={msg.sender_slug} size="sm" />
+      <div className={`max-w-[75%] ${isMe ? "items-end" : "items-start"} flex flex-col gap-1`}>
+        <div className="flex items-baseline gap-2">
+          {!isMe && (
+            <span className="text-xs font-semibold text-slate-600 dark:text-slate-400">
+              {msg.sender_slug}
+            </span>
+          )}
+          <span className="text-[10px] text-slate-400">{relativeTime(msg.sent_at)}</span>
+        </div>
+        <div
+          className={`rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
+            isMe
+              ? "rounded-tr-sm bg-violet-600 text-white"
+              : msg.type === "event"
+              ? "bg-transparent text-xs italic text-slate-400"
+              : "rounded-tl-sm bg-white text-slate-800 ring-1 ring-slate-200 dark:bg-slate-800 dark:text-slate-100 dark:ring-slate-700"
+          }`}
+        >
+          {msg.body}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function ThreadsPage() {
+  const [threads, setThreads] = React.useState<Thread[]>([]);
+  const [messages, setMessages] = React.useState<ThreadMessage[]>([]);
+  const [selected, setSelected] = React.useState<Thread | null>(null);
+  const [previews, setPreviews] = React.useState<Record<string, { text: string; time: string }>>({});
+  const [loading, setLoading] = React.useState(true);
+  const [sending, setSending] = React.useState(false);
+  const [draft, setDraft] = React.useState("");
+  const bottomRef = React.useRef<HTMLDivElement>(null);
+
+  // Load thread list
+  const loadThreads = React.useCallback(async () => {
+    setLoading(true);
+    const data = await fetchThreads();
+    setThreads(data);
+    // Load last message preview for each thread
+    const previewMap: Record<string, { text: string; time: string }> = {};
+    await Promise.all(
+      data.map(async (t) => {
+        const msgs = await fetchThreadMessages(t.thread_id);
+        const last = msgs.filter((m) => m.type === "message").at(-1);
+        previewMap[t.thread_id] = {
+          text: last ? last.body.slice(0, 80) : "",
+          time: last ? relativeTime(last.sent_at) : relativeTime(t.created_at),
+        };
+      })
+    );
+    setPreviews(previewMap);
+    setLoading(false);
+  }, []);
+
+  React.useEffect(() => { loadThreads(); }, [loadThreads]);
+
+  // Load messages when thread selected
+  const selectThread = React.useCallback(async (thread: Thread) => {
+    setSelected(thread);
+    setMessages([]);
+    const msgs = await fetchThreadMessages(thread.thread_id);
+    setMessages(msgs);
+  }, []);
+
+  // Scroll to bottom when messages load
+  React.useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  const handleSend = async () => {
+    if (!selected || !draft.trim() || sending) return;
+    setSending(true);
+    const msg = await sendThreadMessage(selected.thread_id, draft.trim());
+    if (msg) {
+      setMessages((prev) => [...prev, msg]);
+      setDraft("");
+    }
+    setSending(false);
+  };
+
+  const handleKey = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) handleSend();
+  };
+
+  // Sort threads: most recent preview first
+  const sortedThreads = [...threads].sort((a, b) => {
+    const ta = previews[a.thread_id]?.time ?? a.created_at;
+    const tb = previews[b.thread_id]?.time ?? b.created_at;
+    return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+  });
+
   return (
-    <div className="grid grid-cols-12 gap-4">
-      <div className="col-span-12">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
-            <div>
-              <CardTitle>Threads</CardTitle>
-              <div className="mt-1 text-xs text-muted">
-                Recent activity (prototype)
-              </div>
-            </div>
-            <Button size="sm" variant="secondary">
-              Filter
-            </Button>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-2">
-              {[
-                { id: "#1842", title: "Attendance export mismatch", tone: "warning" },
-                { id: "#1841", title: "Webhook retries spiking", tone: "brand" },
-                { id: "#1839", title: "Agent memory pressure", tone: "neutral" },
-                { id: "#1837", title: "SSO login errors", tone: "warning" },
-              ].map((t) => (
-                <div
-                  key={t.id}
-                  className="flex items-center justify-between rounded-2xl bg-white p-4 ring-1 ring-line hover:bg-slate-50 dark:bg-slate-950 dark:ring-slate-800 dark:hover:bg-slate-900/40"
-                >
-                  <div>
-                    <div className="text-sm font-semibold">
-                      {t.id} — {t.title}
-                    </div>
-                    <div className="mt-1 text-xs text-muted">
-                      Updated 4m ago • Owner: Mira
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Badge tone={t.tone as any}>{t.tone}</Badge>
-                    <ButtonLink
-                      href={`/inspect/${t.id.replace("#", "")}`}
-                      size="sm"
-                      variant="ghost"
-                    >
-                      Inspect
-                    </ButtonLink>
+    <div className="flex h-[calc(100vh-5rem)] overflow-hidden rounded-2xl ring-1 ring-line dark:ring-slate-800">
+
+      {/* ── Left: thread list ─────────────────────────────────────────────── */}
+      <div className="flex w-80 shrink-0 flex-col border-r border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
+        {/* Header */}
+        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-slate-800">
+          <div className="flex items-center gap-2">
+            <Inbox className="h-4 w-4 text-violet-500" />
+            <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">Threads</span>
+            {threads.length > 0 && (
+              <span className="rounded-full bg-violet-100 px-1.5 py-0.5 text-[10px] font-bold text-violet-600 dark:bg-violet-900/40 dark:text-violet-400">
+                {threads.length}
+              </span>
+            )}
+          </div>
+          <button
+            onClick={loadThreads}
+            className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
+          </button>
+        </div>
+
+        {/* List */}
+        <div className="flex-1 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800/60">
+          {loading ? (
+            <div className="flex flex-col gap-3 p-4">
+              {[1, 2, 3].map((i) => (
+                <div key={i} className="flex gap-3 animate-pulse">
+                  <div className="h-9 w-9 rounded-full bg-slate-200 dark:bg-slate-700" />
+                  <div className="flex-1 space-y-2">
+                    <div className="h-3 w-24 rounded bg-slate-200 dark:bg-slate-700" />
+                    <div className="h-2.5 w-40 rounded bg-slate-100 dark:bg-slate-800" />
+                    <div className="h-2 w-32 rounded bg-slate-100 dark:bg-slate-800" />
                   </div>
                 </div>
               ))}
             </div>
-          </CardContent>
-        </Card>
+          ) : threads.length === 0 ? (
+            <div className="flex flex-col items-center justify-center gap-2 py-16 text-slate-400">
+              <Inbox className="h-8 w-8 opacity-40" />
+              <span className="text-sm">No threads yet</span>
+            </div>
+          ) : (
+            sortedThreads.map((t) => (
+              <ThreadRow
+                key={t.thread_id}
+                thread={t}
+                preview={previews[t.thread_id]?.text ?? ""}
+                previewTime={previews[t.thread_id]?.time ?? relativeTime(t.created_at)}
+                selected={selected?.thread_id === t.thread_id}
+                onClick={() => selectThread(t)}
+              />
+            ))
+          )}
+        </div>
+      </div>
+
+      {/* ── Right: conversation ───────────────────────────────────────────── */}
+      <div className="flex flex-1 flex-col bg-slate-50 dark:bg-slate-900">
+        {selected ? (
+          <>
+            {/* Thread header */}
+            <div className="border-b border-slate-200 bg-white px-6 py-3 dark:border-slate-800 dark:bg-slate-950">
+              <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                {selected.subject}
+              </div>
+              <div className="mt-0.5 text-xs text-slate-400">
+                Started by {selected.created_slug} · {relativeTime(selected.created_at)}
+              </div>
+            </div>
+
+            {/* Messages */}
+            <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
+              {messages.length === 0 ? (
+                <div className="flex h-full items-center justify-center text-sm text-slate-400">
+                  Loading messages…
+                </div>
+              ) : (
+                messages.map((msg) => (
+                  <MessageBubble
+                    key={msg.message_id}
+                    msg={msg}
+                    isMe={msg.sender_slug === "SANJAYA"}
+                  />
+                ))
+              )}
+              <div ref={bottomRef} />
+            </div>
+
+            {/* Reply input */}
+            <div className="border-t border-slate-200 bg-white px-4 py-3 dark:border-slate-800 dark:bg-slate-950">
+              <div className="flex items-end gap-2">
+                <textarea
+                  rows={2}
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  onKeyDown={handleKey}
+                  placeholder="Reply… (⌘Enter to send)"
+                  className="flex-1 resize-none rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800 placeholder-slate-400 outline-none focus:border-violet-400 focus:ring-1 focus:ring-violet-400 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:placeholder-slate-500"
+                />
+                <button
+                  onClick={handleSend}
+                  disabled={!draft.trim() || sending}
+                  className="flex h-10 w-10 items-center justify-center rounded-xl bg-violet-600 text-white transition hover:bg-violet-700 disabled:opacity-40"
+                >
+                  <Send className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+          </>
+        ) : (
+          <div className="flex h-full flex-col items-center justify-center gap-3 text-slate-400">
+            <Inbox className="h-10 w-10 opacity-30" />
+            <span className="text-sm">Select a thread to read</span>
+          </div>
+        )}
       </div>
     </div>
   );
