@@ -14,7 +14,7 @@ import {
   type ThreadMessage,
   type Project,
 } from "@/lib/api";
-import { ChevronDown, Inbox, Send, RefreshCw, CheckCircle, ArchiveIcon, Plus, X } from "lucide-react";
+import { ChevronDown, Inbox, Send, RefreshCw, CheckCircle, ArchiveIcon, Plus, X, Mic, Square } from "lucide-react";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -301,6 +301,8 @@ export default function ThreadsPage() {
   const [loading, setLoading] = React.useState(true);
   const [sending, setSending] = React.useState(false);
   const [draft, setDraft] = React.useState("");
+  const [isListening, setIsListening] = React.useState(false);
+  const [voiceSupported, setVoiceSupported] = React.useState(false);
   const [projects, setProjects] = React.useState<Project[]>([]);
   const [projectId, setProjectId] = React.useState<string | null>(null);
   const [dropdownOpen, setDropdownOpen] = React.useState(false);
@@ -312,6 +314,7 @@ export default function ThreadsPage() {
   const [mentionIndex, setMentionIndex] = React.useState(0);
   const [mentionCtx, setMentionCtx] = React.useState<{ query: string; start: number; end: number } | null>(null);
   const bottomRef = React.useRef<HTMLDivElement>(null);
+  const recognitionRef = React.useRef<any>(null);
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
 
   // Load projects once
@@ -491,6 +494,47 @@ export default function ThreadsPage() {
       if (e.key === "Escape") { e.preventDefault(); setMentionOpen(false); return; }
     }
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); }
+  };
+
+  React.useEffect(() => {
+    const supported = typeof window !== "undefined" && ("webkitSpeechRecognition" in window || "SpeechRecognition" in window);
+    setVoiceSupported(supported);
+
+    return () => {
+      try { recognitionRef.current?.stop?.(); } catch {}
+    };
+  }, []);
+
+  const handleVoiceInput = () => {
+    if (!voiceSupported || isListening) return;
+
+    const SpeechRecognitionCtor = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognitionCtor) return;
+
+    const recognition = new SpeechRecognitionCtor();
+    recognitionRef.current = recognition;
+    recognition.lang = "en-US";
+    recognition.interimResults = true;
+    recognition.continuous = false;
+
+    recognition.onstart = () => setIsListening(true);
+    recognition.onend = () => setIsListening(false);
+    recognition.onerror = () => setIsListening(false);
+
+    recognition.onresult = (event: any) => {
+      let transcript = "";
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        transcript += event.results[i][0].transcript;
+      }
+      setDraft((prev) => `${prev}${prev ? " " : ""}${transcript.trim()}`.trim());
+    };
+
+    recognition.start();
+  };
+
+  const stopVoiceInput = () => {
+    try { recognitionRef.current?.stop?.(); } catch {}
+    setIsListening(false);
   };
 
   const handleSetStatus = async (newStatus: "open" | "closed" | "archived") => {
@@ -777,6 +821,16 @@ export default function ThreadsPage() {
                       </button>
                     ))}
                   </div>
+                )}
+                {voiceSupported && (
+                  <button
+                    type="button"
+                    onClick={isListening ? stopVoiceInput : handleVoiceInput}
+                    className={`flex h-10 w-10 items-center justify-center rounded-xl border transition ${isListening ? "border-red-300 bg-red-50 text-red-600 hover:bg-red-100 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300" : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300"}`}
+                    title={isListening ? "Stop voice input" : "Start voice input"}
+                  >
+                    {isListening ? <Square className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
+                  </button>
                 )}
                 <button
                   onClick={handleSend}
