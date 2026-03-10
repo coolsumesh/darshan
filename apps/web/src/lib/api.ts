@@ -145,6 +145,18 @@ export async function setThreadStatus(
   return data?.ok ?? false;
 }
 
+export async function createThread(
+  subject: string,
+  projectId: string,
+  participantIds: string[]
+): Promise<Thread | null> {
+  const data = await apiFetch<{ ok: boolean; thread: Thread }>(
+    `/api/v1/threads`,
+    { method: "POST", body: JSON.stringify({ subject, project_id: projectId, participants: participantIds }) }
+  );
+  return data?.ok ? data.thread ?? null : null;
+}
+
 // ── Docs (Architecture + Tech Spec) ──────────────────────────────────────────
 
 export async function fetchArchitecture(projectId: string): Promise<string | null> {

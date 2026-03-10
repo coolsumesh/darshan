@@ -5,13 +5,15 @@ import {
   fetchThreads,
   fetchThreadMessages,
   fetchProjects,
+  fetchTeam,
   sendThreadMessage,
   setThreadStatus,
+  createThread,
   type Thread,
   type ThreadMessage,
   type Project,
 } from "@/lib/api";
-import { ChevronDown, Inbox, Send, RefreshCw, CheckCircle, ArchiveIcon } from "lucide-react";
+import { ChevronDown, Inbox, Send, RefreshCw, CheckCircle, ArchiveIcon, Plus, X } from "lucide-react";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -125,6 +127,134 @@ function MessageBubble({ msg, isMe }: { msg: ThreadMessage; isMe: boolean }) {
   );
 }
 
+// ── New Thread Modal ──────────────────────────────────────────────────────────
+
+function NewThreadModal({
+  projects,
+  defaultProjectId,
+  onClose,
+  onCreate,
+}: {
+  projects: Project[];
+  defaultProjectId: string | null;
+  onClose: () => void;
+  onCreate: (thread: Thread) => void;
+}) {
+  const [subject, setSubject] = React.useState("");
+  const [projectId, setProjectId] = React.useState(defaultProjectId ?? projects[0]?.id ?? "");
+  const [agents, setAgents] = React.useState<{ agent_id: string; agent_name: string }[]>([]);
+  const [selected, setSelected] = React.useState<Set<string>>(new Set());
+  const [saving, setSaving] = React.useState(false);
+  const [error, setError] = React.useState("");
+
+  // Load agents when project changes
+  React.useEffect(() => {
+    if (!projectId) return;
+    fetchTeam(projectId).then((team) => {
+      setAgents(team.map((m) => ({ agent_id: m.agent_id, agent_name: m.agent_name })));
+    });
+  }, [projectId]);
+
+  const toggle = (id: string) =>
+    setSelected((prev) => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s; });
+
+  const handleCreate = async () => {
+    if (!subject.trim()) { setError("Subject is required"); return; }
+    if (!projectId)       { setError("Select a project");    return; }
+    setSaving(true); setError("");
+    const thread = await createThread(subject.trim(), projectId, Array.from(selected));
+    setSaving(false);
+    if (!thread) { setError("Failed to create thread"); return; }
+    onCreate(thread);
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+      <div className="w-full max-w-md rounded-2xl bg-white shadow-2xl dark:bg-slate-900 ring-1 ring-slate-200 dark:ring-slate-700">
+        {/* Header */}
+        <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 px-5 py-4">
+          <span className="text-sm font-semibold text-slate-800 dark:text-slate-100">New Thread</span>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="space-y-4 px-5 py-4">
+          {/* Subject */}
+          <div>
+            <label className="mb-1 block text-xs font-medium text-slate-500 dark:text-slate-400">Subject</label>
+            <input
+              autoFocus
+              value={subject}
+              onChange={(e) => setSubject(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleCreate()}
+              placeholder="What is this thread about?"
+              className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800 placeholder-slate-400 outline-none focus:border-violet-400 focus:ring-1 focus:ring-violet-400 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+            />
+          </div>
+
+          {/* Project */}
+          <div>
+            <label className="mb-1 block text-xs font-medium text-slate-500 dark:text-slate-400">Project</label>
+            <select
+              value={projectId}
+              onChange={(e) => setProjectId(e.target.value)}
+              className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800 outline-none focus:border-violet-400 focus:ring-1 focus:ring-violet-400 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+            >
+              {projects.map((p) => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Participants */}
+          {agents.length > 0 && (
+            <div>
+              <label className="mb-1.5 block text-xs font-medium text-slate-500 dark:text-slate-400">
+                Participants <span className="text-slate-400">(optional)</span>
+              </label>
+              <div className="space-y-1.5 max-h-40 overflow-y-auto">
+                {agents.map((a) => (
+                  <label key={a.agent_id} className="flex items-center gap-2.5 cursor-pointer rounded-lg px-2 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800">
+                    <input
+                      type="checkbox"
+                      checked={selected.has(a.agent_id)}
+                      onChange={() => toggle(a.agent_id)}
+                      className="accent-violet-600"
+                    />
+                    <Avatar slug={a.agent_name?.toUpperCase().slice(0, 8) ?? "?"} size="sm" />
+                    <span className="text-sm text-slate-700 dark:text-slate-300">{a.agent_name}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {error && <p className="text-xs text-rose-500">{error}</p>}
+        </div>
+
+        {/* Footer */}
+        <div className="flex justify-end gap-2 border-t border-slate-200 dark:border-slate-800 px-5 py-3">
+          <button
+            onClick={onClose}
+            className="rounded-lg px-3 py-1.5 text-sm text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleCreate}
+            disabled={saving || !subject.trim()}
+            className="rounded-lg bg-violet-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-violet-700 disabled:opacity-40"
+          >
+            {saving ? "Creating…" : "Create Thread"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function ThreadsPage() {
@@ -140,6 +270,7 @@ export default function ThreadsPage() {
   const [dropdownOpen, setDropdownOpen] = React.useState(false);
   const [threadStatusFilter, setThreadStatusFilter] = React.useState<"open" | "closed">("open");
   const [closing, setClosing] = React.useState(false);
+  const [composeOpen, setComposeOpen] = React.useState(false);
   const bottomRef = React.useRef<HTMLDivElement>(null);
 
   // Load projects once
@@ -223,7 +354,25 @@ export default function ThreadsPage() {
     return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
   });
 
+  const handleThreadCreated = async (thread: Thread) => {
+    setComposeOpen(false);
+    // Reload list then open the new thread
+    await loadThreads(thread.project_id, threadStatusFilter);
+    setSelected(thread);
+    const msgs = await fetchThreadMessages(thread.thread_id);
+    setMessages(msgs);
+  };
+
   return (
+    <>
+    {composeOpen && (
+      <NewThreadModal
+        projects={projects}
+        defaultProjectId={projectId}
+        onClose={() => setComposeOpen(false)}
+        onCreate={handleThreadCreated}
+      />
+    )}
     <div className="flex h-[calc(100vh-5rem)] overflow-hidden rounded-2xl ring-1 ring-line dark:ring-slate-800">
 
       {/* ── Left: thread list ─────────────────────────────────────────────── */}
@@ -240,12 +389,21 @@ export default function ThreadsPage() {
                 </span>
               )}
             </div>
-            <button
-              onClick={() => loadThreads(projectId)}
-              className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800"
-            >
-              <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
-            </button>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setComposeOpen(true)}
+                title="New thread"
+                className="rounded-lg p-1 text-slate-400 hover:bg-violet-50 hover:text-violet-600 dark:hover:bg-violet-950/30"
+              >
+                <Plus className="h-3.5 w-3.5" />
+              </button>
+              <button
+                onClick={() => loadThreads(projectId)}
+                className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800"
+              >
+                <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
+              </button>
+            </div>
           </div>
 
           {/* Project filter */}
@@ -435,5 +593,6 @@ export default function ThreadsPage() {
         )}
       </div>
     </div>
+    </>
   );
 }
