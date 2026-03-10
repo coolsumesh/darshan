@@ -192,6 +192,7 @@ const API_GROUPS: ApiGroup[] = [
           { name: "limit",           in: "query", required: false, type: "number",  description: "Max results (1–100, default 10)" },
           { name: "offset",          in: "query", required: false, type: "number",  description: "Pagination offset" },
           { name: "include_deleted", in: "query", required: false, type: "boolean", description: "Include soft-deleted threads" },
+          { name: "project_id",      in: "query", required: false, type: "uuid",    description: "Filter to one project" },
         ],
         responseExample: `{
   "ok": true,
@@ -478,24 +479,27 @@ const API_GROUPS: ApiGroup[] = [
     id: "levels",
     label: "Agent Levels",
     color: "bg-purple-500",
-    note: "L0 unregistered → L1 onboarding → L2 trial → L3 active → L4 senior → L5 lead. Levels are project-scoped.",
+    note: "Minimal model: project_level_definitions (project_id, level, name) + agent_project_levels (current state) + agent_level_events (history).",
     endpoints: [
       {
         id: "levels-definitions",
         method: "GET",
         path: "/agent-levels/definitions",
-        summary: "List level definitions",
-        description: "Returns all L0–L5 definitions including task limits and approval requirements.",
+        summary: "List level definitions (project-scoped)",
+        description: "Returns definitions from project_level_definitions. If project_id is omitted, returns a distinct cross-project compatibility list.",
         auth: "JWT cookie OR internal API key",
+        params: [
+          { name: "project_id", in: "query", required: false, type: "uuid", description: "Project ID (recommended)" },
+        ],
         responseExample: `{
   "ok": true,
   "definitions": [
     {
-      "level_id": 2, "name": "trial", "label": "Trial",
-      "description": "Agent has demonstrated basic capability.",
-      "can_receive_tasks": true,
-      "max_parallel_tasks": 2,
-      "requires_approval": false
+      "project_id": "uuid",
+      "level_id": 2,
+      "name": "trial",
+      "label": "trial",
+      "description": "trial"
     }
   ]
 }`,
@@ -505,14 +509,14 @@ const API_GROUPS: ApiGroup[] = [
         method: "GET",
         path: "/projects/:id/agent-levels",
         summary: "List agent levels for a project",
-        description: "Returns current level for every agent in the project, with their last level event.",
+        description: "Returns current level for every agent in the project (from agent_project_levels), joined with project_level_definitions.",
         auth: "JWT cookie OR internal API key",
         params: [
           { name: "id", in: "path", required: true, type: "uuid", description: "Project ID" },
         ],
         responseExample: `{
   "ok": true,
-  "agent_levels": [
+  "levels": [
     {
       "agent_id": "uuid", "agent_name": "Mithran",
       "current_level": 2, "level_name": "trial",
@@ -526,7 +530,7 @@ const API_GROUPS: ApiGroup[] = [
         method: "GET",
         path: "/projects/:id/agent-levels/:agentId",
         summary: "Get agent's level in a project",
-        description: "Returns current level, full event history, and proofs for a specific agent.",
+        description: "Returns current level and full event history for a specific agent.",
         auth: "JWT cookie OR internal API key",
         params: [
           { name: "id",      in: "path", required: true, type: "uuid", description: "Project ID" },
@@ -543,10 +547,7 @@ const API_GROUPS: ApiGroup[] = [
       "id": "uuid", "from_level": 0, "to_level": 2,
       "reason": "Completed 3 tasks successfully",
       "changed_by_type": "coordinator",
-      "created_at": "ISO",
-      "proofs": [
-        { "proof_type": "task_id", "ref_id": "uuid", "notes": null }
-      ]
+      "created_at": "ISO"
     }
   ]
 }`,
@@ -556,23 +557,18 @@ const API_GROUPS: ApiGroup[] = [
         method: "POST",
         path: "/projects/:id/agent-levels/:agentId",
         summary: "Update agent level",
-        description: "Promote or demote an agent. Requires reason and at least one proof reference (task_id, thread_id, a2a_thread_id, or observation).",
+        description: "Promote or demote an agent. Writes current level and records an event.",
         auth: "JWT cookie OR internal API key",
         params: [
           { name: "id",      in: "path", required: true, type: "uuid", description: "Project ID" },
           { name: "agentId", in: "path", required: true, type: "uuid", description: "Agent ID" },
         ],
         bodyExample: `{
-  "new_level":    3,
-  "reason":       "Agent autonomously completed 5 approved tasks without errors.",
-  "changed_by":   "your-agent-uuid",
-  "changed_by_type": "coordinator",
-  "proofs": [
-    { "proof_type": "task_id",   "ref_id": "uuid", "notes": null },
-    { "proof_type": "thread_id", "ref_id": "uuid", "notes": "Roundtrip A2A verified" }
-  ]
+  "level": 3,
+  "reason": "Agent autonomously completed 5 approved tasks without errors.",
+  "changed_by_type": "user"
 }`,
-        responseExample: `{ "ok": true, "event_id": "uuid", "new_level": 3 }`,
+        responseExample: `{ "ok": true, "event_id": "uuid" }`,
       },
     ],
   },
