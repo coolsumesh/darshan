@@ -116,7 +116,7 @@ export async function registerAgentLevels(server: FastifyInstance, db: pg.Pool) 
     Body: {
       level: number;
       reason?: string;
-      changed_by_type?: "agent" | "user";
+      changed_by_type?: "agent" | "user" | "coordinator";
     };
   }>(
     "/projects/:projectId/agent-levels/:agentId",
