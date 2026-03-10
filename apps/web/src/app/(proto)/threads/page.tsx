@@ -310,17 +310,28 @@ export default function ThreadsPage() {
   };
 
   // Load messages when thread selected
-  // Real-time message polling for the open thread
+  // Real-time message polling for the open thread (every 3s)
   React.useEffect(() => {
     if (!selected) return;
     const interval = setInterval(async () => {
       const msgs = await fetchThreadMessages(selected.thread_id);
-      setMessages(msgs);
-      // Scroll to bottom if new messages arrived
-      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+      setMessages((prev) => {
+        // Only update if something changed (avoid unnecessary re-renders)
+        if (prev.length === msgs.length && prev.at(-1)?.message_id === msgs.at(-1)?.message_id) return prev;
+        bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+        return msgs;
+      });
     }, 3000);
     return () => clearInterval(interval);
   }, [selected?.thread_id]); // eslint-disable-line
+
+  // Real-time thread list refresh (every 10s — catches new threads + new preview messages)
+  React.useEffect(() => {
+    const interval = setInterval(() => {
+      loadThreads(projectId, threadStatusFilter);
+    }, 10000);
+    return () => clearInterval(interval);
+  }, [projectId, threadStatusFilter]); // eslint-disable-line
 
   const selectThread = React.useCallback(async (thread: Thread) => {
     setSelected(thread);
