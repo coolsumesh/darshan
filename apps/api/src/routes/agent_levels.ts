@@ -7,14 +7,33 @@ export async function registerAgentLevels(server: FastifyInstance, db: pg.Pool) 
   // ── GET level definitions for a project ───────────────────────────────────
   server.get<{ Querystring: { project_id?: string } }>("/agent-levels/definitions", async (req, reply) => {
     const projectId = req.query.project_id?.trim();
-    if (!projectId) return reply.send({ ok: true, definitions: [] });
 
+    if (projectId) {
+      const { rows } = await db.query(
+        `SELECT
+           project_id,
+           level AS level_id,
+           name,
+           name AS label,
+           name AS description
+         FROM project_level_definitions
+         WHERE project_id = $1
+         ORDER BY level`,
+        [projectId]
+      );
+      return reply.send({ ok: true, definitions: rows });
+    }
+
+    // Back-compat: when no project is provided, return distinct levels across all projects
     const { rows } = await db.query(
-      `SELECT project_id, level, name
+      `SELECT DISTINCT ON (level)
+         null::uuid AS project_id,
+         level AS level_id,
+         name,
+         name AS label,
+         name AS description
        FROM project_level_definitions
-       WHERE project_id = $1
-       ORDER BY level`,
-      [projectId]
+       ORDER BY level, name`
     );
     return reply.send({ ok: true, definitions: rows });
   });
@@ -30,7 +49,12 @@ export async function registerAgentLevels(server: FastifyInstance, db: pg.Pool) 
            apl.current_level, apl.created_at, apl.updated_at,
            a.name AS agent_name,
            a.slug AS agent_slug,
-           d.name AS level_name
+           d.name AS level_name,
+           d.name AS level_label,
+           d.name AS level_description,
+           null::boolean AS can_receive_tasks,
+           null::int AS max_parallel_tasks,
+           null::boolean AS requires_approval
          FROM agent_project_levels apl
          JOIN agents a ON a.id = apl.agent_id
          LEFT JOIN project_level_definitions d
@@ -50,7 +74,12 @@ export async function registerAgentLevels(server: FastifyInstance, db: pg.Pool) 
       const { projectId, agentId } = req.params;
 
       const { rows: [current] } = await db.query(
-        `SELECT apl.*, d.name AS level_name
+        `SELECT apl.*, d.name AS level_name,
+                d.name AS level_label,
+                d.name AS level_description,
+                null::boolean AS can_receive_tasks,
+                null::int AS max_parallel_tasks,
+                null::boolean AS requires_approval
          FROM agent_project_levels apl
          LEFT JOIN project_level_definitions d
            ON d.project_id = apl.project_id AND d.level = apl.current_level
@@ -60,6 +89,8 @@ export async function registerAgentLevels(server: FastifyInstance, db: pg.Pool) 
 
       const { rows: events } = await db.query(
         `SELECT e.*,
+                fd.name AS from_label,
+                td.name AS to_label,
                 fd.name AS from_name,
                 td.name AS to_name
          FROM agent_level_events e

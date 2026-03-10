@@ -841,9 +841,12 @@ export async function sendAgentChatMessage(agentId: string, content: string): Pr
 // ── Agent Levels ──────────────────────────────────────────────────────────────
 
 export type LevelDefinition = {
-  project_id: string;
-  level: number;
-  name: string;
+  project_id?: string | null;
+  level?: number;
+  level_id: number;
+  name?: string;
+  label: string;
+  description: string;
 };
 
 export type AgentProjectLevel = {
@@ -853,7 +856,12 @@ export type AgentProjectLevel = {
   current_level: number;
   agent_name: string;
   agent_slug: string;
-  level_name: string | null;
+  level_name?: string | null;
+  level_label?: string | null;
+  level_description?: string | null;
+  can_receive_tasks?: boolean | null;
+  max_parallel_tasks?: number | null;
+  requires_approval?: boolean | null;
   updated_at: string;
 };
 
@@ -863,6 +871,8 @@ export type LevelEvent = {
   agent_id: string;
   from_level: number;
   to_level: number;
+  from_label?: string | null;
+  to_label?: string | null;
   from_name?: string | null;
   to_name?: string | null;
   changed_by: string;
@@ -880,10 +890,12 @@ export type LevelProof = {
   created_at?: string;
 };
 
-export async function fetchLevelDefinitions(projectId: string): Promise<LevelDefinition[]> {
-  const qs = new URLSearchParams({ project_id: projectId });
+export async function fetchLevelDefinitions(projectId?: string): Promise<LevelDefinition[]> {
+  const qs = new URLSearchParams();
+  if (projectId) qs.set("project_id", projectId);
+  const suffix = qs.toString();
   const data = await apiFetch<{ ok: boolean; definitions: LevelDefinition[] }>(
-    `/api/v1/agent-levels/definitions?${qs}`
+    `/api/v1/agent-levels/definitions${suffix ? `?${suffix}` : ""}`
   );
   return data?.ok ? data.definitions : [];
 }
