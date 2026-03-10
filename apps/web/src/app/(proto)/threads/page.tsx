@@ -142,7 +142,7 @@ function NewThreadModal({
 }) {
   const [subject, setSubject] = React.useState("");
   const [projectId, setProjectId] = React.useState(defaultProjectId ?? projects[0]?.id ?? "");
-  const [agents, setAgents] = React.useState<{ agent_id: string; agent_name: string }[]>([]);
+  const [agents, setAgents] = React.useState<{ agentId: string; agentName: string }[]>([]);
   const [selected, setSelected] = React.useState<Set<string>>(new Set());
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState("");
@@ -151,7 +151,7 @@ function NewThreadModal({
   React.useEffect(() => {
     if (!projectId) return;
     fetchTeam(projectId).then((team) => {
-      setAgents(team.map((m) => ({ agent_id: m.agent_id, agent_name: m.agent_name })));
+      setAgents(team.map((m) => ({ agentId: m.agentId, agentName: m.agent?.name ?? m.agentId })));
     });
   }, [projectId]);
 
@@ -162,7 +162,7 @@ function NewThreadModal({
     if (!subject.trim()) { setError("Subject is required"); return; }
     if (!projectId)       { setError("Select a project");    return; }
     setSaving(true); setError("");
-    const thread = await createThread(subject.trim(), projectId, Array.from(selected));
+    const thread = await createThread(subject.trim(), projectId, Array.from(selected).map(String));
     setSaving(false);
     if (!thread) { setError("Failed to create thread"); return; }
     onCreate(thread);
@@ -216,15 +216,15 @@ function NewThreadModal({
               </label>
               <div className="space-y-1.5 max-h-40 overflow-y-auto">
                 {agents.map((a) => (
-                  <label key={a.agent_id} className="flex items-center gap-2.5 cursor-pointer rounded-lg px-2 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800">
+                  <label key={a.agentId} className="flex items-center gap-2.5 cursor-pointer rounded-lg px-2 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800">
                     <input
                       type="checkbox"
-                      checked={selected.has(a.agent_id)}
-                      onChange={() => toggle(a.agent_id)}
+                      checked={selected.has(a.agentId)}
+                      onChange={() => toggle(a.agentId)}
                       className="accent-violet-600"
                     />
-                    <Avatar slug={a.agent_name?.toUpperCase().slice(0, 8) ?? "?"} size="sm" />
-                    <span className="text-sm text-slate-700 dark:text-slate-300">{a.agent_name}</span>
+                    <Avatar slug={a.agentName.toUpperCase().slice(0, 8)} size="sm" />
+                    <span className="text-sm text-slate-700 dark:text-slate-300">{a.agentName}</span>
                   </label>
                 ))}
               </div>
