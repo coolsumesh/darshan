@@ -98,6 +98,7 @@ export type Thread = {
   created_at: string;
   deleted_at: string | null;
   my_removed_at: string | null;
+  status: "open" | "closed" | "archived";
 };
 
 export type ThreadMessage = {
@@ -111,8 +112,8 @@ export type ThreadMessage = {
   sent_at: string;
 };
 
-export async function fetchThreads(projectId?: string | null): Promise<Thread[]> {
-  const qs = new URLSearchParams({ limit: "50" });
+export async function fetchThreads(projectId?: string | null, status: "open" | "closed" | "archived" | "all" = "open"): Promise<Thread[]> {
+  const qs = new URLSearchParams({ limit: "50", status });
   if (projectId) qs.set("project_id", projectId);
   const data = await apiFetch<{ ok: boolean; threads: Thread[] }>(`/api/v1/threads?${qs}`);
   return data?.ok ? (data.threads ?? []) : [];
@@ -131,6 +132,17 @@ export async function sendThreadMessage(threadId: string, body: string): Promise
     { method: "POST", body: JSON.stringify({ body }) }
   );
   return data?.ok ? data.message ?? null : null;
+}
+
+export async function setThreadStatus(
+  threadId: string,
+  status: "open" | "closed" | "archived"
+): Promise<boolean> {
+  const data = await apiFetch<{ ok: boolean }>(
+    `/api/v1/threads/${threadId}/status`,
+    { method: "PATCH", body: JSON.stringify({ status }) }
+  );
+  return data?.ok ?? false;
 }
 
 // ── Docs (Architecture + Tech Spec) ──────────────────────────────────────────

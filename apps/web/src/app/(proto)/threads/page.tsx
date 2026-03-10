@@ -6,11 +6,12 @@ import {
   fetchThreadMessages,
   fetchProjects,
   sendThreadMessage,
+  setThreadStatus,
   type Thread,
   type ThreadMessage,
   type Project,
 } from "@/lib/api";
-import { ChevronDown, Inbox, Send, RefreshCw } from "lucide-react";
+import { ChevronDown, Inbox, Send, RefreshCw, CheckCircle, ArchiveIcon } from "lucide-react";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -137,6 +138,8 @@ export default function ThreadsPage() {
   const [projects, setProjects] = React.useState<Project[]>([]);
   const [projectId, setProjectId] = React.useState<string | null>(null);
   const [dropdownOpen, setDropdownOpen] = React.useState(false);
+  const [threadStatusFilter, setThreadStatusFilter] = React.useState<"open" | "closed">("open");
+  const [closing, setClosing] = React.useState(false);
   const bottomRef = React.useRef<HTMLDivElement>(null);
 
   // Load projects once
@@ -145,9 +148,10 @@ export default function ThreadsPage() {
   }, []);
 
   // Load thread list
-  const loadThreads = React.useCallback(async (pid?: string | null) => {
+  const loadThreads = React.useCallback(async (pid?: string | null, statusFilter?: "open" | "closed") => {
     setLoading(true);
-    const data = await fetchThreads(pid ?? projectId);
+    const s = statusFilter ?? threadStatusFilter;
+    const data = await fetchThreads(pid ?? projectId, s);
     setThreads(data);
     // Load last message preview for each thread
     const previewMap: Record<string, { text: string; time: string }> = {};
@@ -165,7 +169,7 @@ export default function ThreadsPage() {
     setLoading(false);
   }, []);
 
-  React.useEffect(() => { loadThreads(projectId); }, [projectId]); // eslint-disable-line
+  React.useEffect(() => { loadThreads(projectId, threadStatusFilter); }, [projectId, threadStatusFilter]); // eslint-disable-line
 
   const handleProjectChange = (pid: string | null) => {
     setProjectId(pid);
@@ -200,6 +204,16 @@ export default function ThreadsPage() {
 
   const handleKey = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) handleSend();
+  };
+
+  const handleSetStatus = async (newStatus: "open" | "closed" | "archived") => {
+    if (!selected) return;
+    setClosing(true);
+    await setThreadStatus(selected.thread_id, newStatus);
+    setClosing(false);
+    // Remove from current list and clear selection
+    setThreads((prev) => prev.filter((t) => t.thread_id !== selected.thread_id));
+    setSelected(null);
   };
 
   // Sort threads: most recent preview first
@@ -271,6 +285,23 @@ export default function ThreadsPage() {
           )}
         </div>
 
+        {/* Status tabs */}
+        <div className="flex border-b border-slate-200 dark:border-slate-800">
+          {(["open", "closed"] as const).map((s) => (
+            <button
+              key={s}
+              onClick={() => setThreadStatusFilter(s)}
+              className={`flex-1 py-1.5 text-xs font-medium capitalize transition ${
+                threadStatusFilter === s
+                  ? "border-b-2 border-violet-500 text-violet-600 dark:text-violet-400"
+                  : "text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+              }`}
+            >
+              {s}
+            </button>
+          ))}
+        </div>
+
         {/* List */}
         <div className="flex-1 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800/60">
           {loading ? (
@@ -312,11 +343,48 @@ export default function ThreadsPage() {
           <>
             {/* Thread header */}
             <div className="border-b border-slate-200 bg-white px-6 py-3 dark:border-slate-800 dark:bg-slate-950">
-              <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-                {selected.subject}
-              </div>
-              <div className="mt-0.5 text-xs text-slate-400">
-                Started by {selected.created_slug} · {relativeTime(selected.created_at)}
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                    {selected.subject}
+                  </div>
+                  <div className="mt-0.5 text-xs text-slate-400">
+                    Started by {selected.created_slug} · {relativeTime(selected.created_at)}
+                  </div>
+                </div>
+                <div className="flex shrink-0 items-center gap-1.5">
+                  {selected.status !== "closed" && (
+                    <button
+                      onClick={() => handleSetStatus("closed")}
+                      disabled={closing}
+                      title="Close thread"
+                      className="flex items-center gap-1 rounded-lg border border-slate-200 px-2 py-1 text-xs text-slate-500 hover:border-emerald-400 hover:text-emerald-600 disabled:opacity-40 dark:border-slate-700 dark:text-slate-400"
+                    >
+                      <CheckCircle className="h-3.5 w-3.5" />
+                      Close
+                    </button>
+                  )}
+                  {selected.status === "closed" && (
+                    <button
+                      onClick={() => handleSetStatus("open")}
+                      disabled={closing}
+                      title="Reopen thread"
+                      className="flex items-center gap-1 rounded-lg border border-slate-200 px-2 py-1 text-xs text-slate-500 hover:border-violet-400 hover:text-violet-600 disabled:opacity-40 dark:border-slate-700 dark:text-slate-400"
+                    >
+                      <RefreshCw className="h-3.5 w-3.5" />
+                      Reopen
+                    </button>
+                  )}
+                  <button
+                    onClick={() => handleSetStatus("archived")}
+                    disabled={closing}
+                    title="Archive thread"
+                    className="flex items-center gap-1 rounded-lg border border-slate-200 px-2 py-1 text-xs text-slate-500 hover:border-amber-400 hover:text-amber-600 disabled:opacity-40 dark:border-slate-700 dark:text-slate-400"
+                  >
+                    <ArchiveIcon className="h-3.5 w-3.5" />
+                    Archive
+                  </button>
+                </div>
               </div>
             </div>
 
