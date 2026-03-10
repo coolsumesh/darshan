@@ -2,6 +2,7 @@
 // Falls back to mock data if the API is unreachable (dev/offline mode).
 
 import { type Project, type Task, type TeamMember } from "./projects";
+export type { Project } from "./projects";
 import { type Agent } from "./agents";
 import { type ProjectChatMessage } from "@darshan/shared";
 
@@ -110,8 +111,10 @@ export type ThreadMessage = {
   sent_at: string;
 };
 
-export async function fetchThreads(): Promise<Thread[]> {
-  const data = await apiFetch<{ ok: boolean; threads: Thread[] }>("/api/v1/threads?limit=50");
+export async function fetchThreads(projectId?: string | null): Promise<Thread[]> {
+  const qs = new URLSearchParams({ limit: "50" });
+  if (projectId) qs.set("project_id", projectId);
+  const data = await apiFetch<{ ok: boolean; threads: Thread[] }>(`/api/v1/threads?${qs}`);
   return data?.ok ? (data.threads ?? []) : [];
 }
 

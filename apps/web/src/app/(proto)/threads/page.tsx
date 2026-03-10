@@ -4,11 +4,13 @@ import * as React from "react";
 import {
   fetchThreads,
   fetchThreadMessages,
+  fetchProjects,
   sendThreadMessage,
   type Thread,
   type ThreadMessage,
+  type Project,
 } from "@/lib/api";
-import { Inbox, Send, RefreshCw } from "lucide-react";
+import { ChevronDown, Inbox, Send, RefreshCw } from "lucide-react";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -132,12 +134,20 @@ export default function ThreadsPage() {
   const [loading, setLoading] = React.useState(true);
   const [sending, setSending] = React.useState(false);
   const [draft, setDraft] = React.useState("");
+  const [projects, setProjects] = React.useState<Project[]>([]);
+  const [projectId, setProjectId] = React.useState<string | null>(null);
+  const [dropdownOpen, setDropdownOpen] = React.useState(false);
   const bottomRef = React.useRef<HTMLDivElement>(null);
 
+  // Load projects once
+  React.useEffect(() => {
+    fetchProjects().then(setProjects);
+  }, []);
+
   // Load thread list
-  const loadThreads = React.useCallback(async () => {
+  const loadThreads = React.useCallback(async (pid?: string | null) => {
     setLoading(true);
-    const data = await fetchThreads();
+    const data = await fetchThreads(pid ?? projectId);
     setThreads(data);
     // Load last message preview for each thread
     const previewMap: Record<string, { text: string; time: string }> = {};
@@ -155,7 +165,14 @@ export default function ThreadsPage() {
     setLoading(false);
   }, []);
 
-  React.useEffect(() => { loadThreads(); }, [loadThreads]);
+  React.useEffect(() => { loadThreads(projectId); }, [projectId]); // eslint-disable-line
+
+  const handleProjectChange = (pid: string | null) => {
+    setProjectId(pid);
+    setSelected(null);
+    setMessages([]);
+    setDropdownOpen(false);
+  };
 
   // Load messages when thread selected
   const selectThread = React.useCallback(async (thread: Thread) => {
@@ -198,22 +215,60 @@ export default function ThreadsPage() {
       {/* ── Left: thread list ─────────────────────────────────────────────── */}
       <div className="flex w-80 shrink-0 flex-col border-r border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
         {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-slate-800">
-          <div className="flex items-center gap-2">
-            <Inbox className="h-4 w-4 text-violet-500" />
-            <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">Threads</span>
-            {threads.length > 0 && (
-              <span className="rounded-full bg-violet-100 px-1.5 py-0.5 text-[10px] font-bold text-violet-600 dark:bg-violet-900/40 dark:text-violet-400">
-                {threads.length}
-              </span>
-            )}
+        <div className="border-b border-slate-200 dark:border-slate-800">
+          <div className="flex items-center justify-between px-4 py-3">
+            <div className="flex items-center gap-2">
+              <Inbox className="h-4 w-4 text-violet-500" />
+              <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">Threads</span>
+              {threads.length > 0 && (
+                <span className="rounded-full bg-violet-100 px-1.5 py-0.5 text-[10px] font-bold text-violet-600 dark:bg-violet-900/40 dark:text-violet-400">
+                  {threads.length}
+                </span>
+              )}
+            </div>
+            <button
+              onClick={() => loadThreads(projectId)}
+              className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
+            </button>
           </div>
-          <button
-            onClick={loadThreads}
-            className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800"
-          >
-            <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
-          </button>
+
+          {/* Project filter */}
+          {projects.length > 0 && (
+            <div className="relative px-3 pb-2">
+              <button
+                onClick={() => setDropdownOpen((v) => !v)}
+                className="flex w-full items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs text-slate-600 hover:border-violet-300 hover:bg-white dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
+              >
+                <span className="truncate">
+                  {projectId
+                    ? (projects.find((p) => p.id === projectId)?.name ?? "Project")
+                    : "All threads"}
+                </span>
+                <ChevronDown className="ml-1 h-3 w-3 shrink-0 text-slate-400" />
+              </button>
+              {dropdownOpen && (
+                <div className="absolute left-3 right-3 top-full z-20 mt-1 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-900">
+                  <button
+                    onClick={() => handleProjectChange(null)}
+                    className={`w-full px-3 py-2 text-left text-xs hover:bg-slate-50 dark:hover:bg-slate-800 ${!projectId ? "font-semibold text-violet-600" : "text-slate-600 dark:text-slate-300"}`}
+                  >
+                    All threads
+                  </button>
+                  {projects.map((p) => (
+                    <button
+                      key={p.id}
+                      onClick={() => handleProjectChange(p.id)}
+                      className={`w-full px-3 py-2 text-left text-xs hover:bg-slate-50 dark:hover:bg-slate-800 ${projectId === p.id ? "font-semibold text-violet-600" : "text-slate-600 dark:text-slate-300"}`}
+                    >
+                      {p.name}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* List */}

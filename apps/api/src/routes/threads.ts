@@ -293,22 +293,22 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
   );
 
   // ── GET /threads — list threads ─────────────────────────────────────────
-  server.get<{ Querystring: { search?: string; limit?: string; offset?: string; include_deleted?: string } }>(
+  server.get<{ Querystring: { search?: string; limit?: string; offset?: string; include_deleted?: string; project_id?: string } }>(
     "/threads",
     async (req, reply) => {
       const caller = await resolveCaller(req, db);
       if (!caller) return reply.status(401).send({ ok: false, error: "not authenticated" });
 
-      const { search, limit = "10", offset = "0", include_deleted } = req.query;
+      const { search, limit = "10", offset = "0", include_deleted, project_id } = req.query;
       const lim = Math.min(Number(limit), 100);
       const off = Number(offset);
       const showDeleted = include_deleted === "true";
+      const pid = project_id?.trim() || null;
 
       let query: string;
       let params: unknown[];
 
       if (search?.trim()) {
-        // Full-text search across subject + message body
         query = `
           SELECT DISTINCT t.*, tp.removed_at AS my_removed_at
           FROM threads t
@@ -316,13 +316,14 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
           LEFT JOIN thread_messages tm ON tm.thread_id = t.thread_id
           WHERE tp.participant_id = $1
             AND ($2 = false OR t.deleted_at IS NULL)
+            AND ($3::uuid IS NULL OR t.project_id = $3)
             AND (
-              to_tsvector('english', t.subject) @@ plainto_tsquery('english', $3)
-              OR to_tsvector('english', COALESCE(tm.body, '')) @@ plainto_tsquery('english', $3)
+              to_tsvector('english', t.subject) @@ plainto_tsquery('english', $4)
+              OR to_tsvector('english', COALESCE(tm.body, '')) @@ plainto_tsquery('english', $4)
             )
           ORDER BY t.created_at DESC
-          LIMIT $4 OFFSET $5`;
-        params = [caller.id, !showDeleted, search.trim(), lim, off];
+          LIMIT $5 OFFSET $6`;
+        params = [caller.id, !showDeleted, pid, search.trim(), lim, off];
       } else {
         query = `
           SELECT t.*, tp.removed_at AS my_removed_at
@@ -330,9 +331,10 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
           JOIN thread_participants tp ON tp.thread_id = t.thread_id
           WHERE tp.participant_id = $1
             AND ($2 = false OR t.deleted_at IS NULL)
+            AND ($3::uuid IS NULL OR t.project_id = $3)
           ORDER BY t.created_at DESC
-          LIMIT $3 OFFSET $4`;
-        params = [caller.id, !showDeleted, lim, off];
+          LIMIT $4 OFFSET $5`;
+        params = [caller.id, !showDeleted, pid, lim, off];
       }
 
       const { rows } = await db.query(query, params);
