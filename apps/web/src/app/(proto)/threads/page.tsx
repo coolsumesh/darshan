@@ -310,6 +310,18 @@ export default function ThreadsPage() {
   };
 
   // Load messages when thread selected
+  // Real-time message polling for the open thread
+  React.useEffect(() => {
+    if (!selected) return;
+    const interval = setInterval(async () => {
+      const msgs = await fetchThreadMessages(selected.thread_id);
+      setMessages(msgs);
+      // Scroll to bottom if new messages arrived
+      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [selected?.thread_id]); // eslint-disable-line
+
   const selectThread = React.useCallback(async (thread: Thread) => {
     setSelected(thread);
     setMessages([]);
@@ -334,7 +346,7 @@ export default function ThreadsPage() {
   };
 
   const handleKey = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) handleSend();
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); }
   };
 
   const handleSetStatus = async (newStatus: "open" | "closed" | "archived") => {
@@ -572,7 +584,7 @@ export default function ThreadsPage() {
                   value={draft}
                   onChange={(e) => setDraft(e.target.value)}
                   onKeyDown={handleKey}
-                  placeholder="Reply… (⌘Enter to send)"
+                  placeholder="Reply… (Enter to send, Shift+Enter for new line)"
                   className="flex-1 resize-none rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800 placeholder-slate-400 outline-none focus:border-violet-400 focus:ring-1 focus:ring-violet-400 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:placeholder-slate-500"
                 />
                 <button
