@@ -322,29 +322,44 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
       let query: string;
       let params: unknown[];
 
+      // Shared visibility CTE: user sees a thread if:
+      // 1. Direct participant
+      // 2. Owns an agent that is a participant
+      // 3. Is owner/member of the thread's project
+      const visibilityCte = `
+        WITH visible AS (
+          SELECT DISTINCT t.thread_id
+          FROM threads t
+          LEFT JOIN thread_participants tp_self
+            ON tp_self.thread_id = t.thread_id AND tp_self.participant_id = $1
+          WHERE
+            tp_self.participant_id IS NOT NULL
+            OR (
+              $2 = true AND EXISTS (
+                SELECT 1 FROM thread_participants tp2
+                JOIN agents a ON a.id = tp2.participant_id
+                WHERE tp2.thread_id = t.thread_id AND a.owner_user_id = $1
+              )
+            )
+            OR (
+              $2 = true AND t.project_id IS NOT NULL AND EXISTS (
+                SELECT 1 FROM projects p
+                LEFT JOIN project_users pu ON pu.project_id = p.id
+                WHERE p.id = t.project_id AND (p.owner_user_id = $1 OR pu.user_id = $1)
+              )
+            )
+        )`;
+
       if (search?.trim()) {
-        query = `
+        query = `${visibilityCte}
           SELECT DISTINCT t.*, tp_self.removed_at AS my_removed_at
           FROM threads t
+          JOIN visible v ON v.thread_id = t.thread_id
           LEFT JOIN thread_participants tp_self
             ON tp_self.thread_id = t.thread_id AND tp_self.participant_id = $1
           LEFT JOIN thread_messages tm ON tm.thread_id = t.thread_id
           WHERE
-            (
-              tp_self.participant_id IS NOT NULL
-              OR (
-                $2 = true
-                AND t.project_id IS NOT NULL
-                AND EXISTS (
-                  SELECT 1
-                  FROM projects p
-                  LEFT JOIN project_users pu ON pu.project_id = p.id
-                  WHERE p.id = t.project_id
-                    AND (p.owner_user_id = $1 OR pu.user_id = $1)
-                )
-              )
-            )
-            AND ($3 = false OR t.deleted_at IS NULL)
+            ($3 = false OR t.deleted_at IS NULL)
             AND ($4::uuid IS NULL OR t.project_id = $4)
             AND (
               to_tsvector('english', t.subject) @@ plainto_tsquery('english', $5)
@@ -354,27 +369,14 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
           LIMIT $6 OFFSET $7`;
         params = [caller.id, caller.type === "user", !showDeleted, pid, search.trim(), lim, off];
       } else {
-        query = `
+        query = `${visibilityCte}
           SELECT t.*, tp_self.removed_at AS my_removed_at
           FROM threads t
+          JOIN visible v ON v.thread_id = t.thread_id
           LEFT JOIN thread_participants tp_self
             ON tp_self.thread_id = t.thread_id AND tp_self.participant_id = $1
           WHERE
-            (
-              tp_self.participant_id IS NOT NULL
-              OR (
-                $2 = true
-                AND t.project_id IS NOT NULL
-                AND EXISTS (
-                  SELECT 1
-                  FROM projects p
-                  LEFT JOIN project_users pu ON pu.project_id = p.id
-                  WHERE p.id = t.project_id
-                    AND (p.owner_user_id = $1 OR pu.user_id = $1)
-                )
-              )
-            )
-            AND ($3 = false OR t.deleted_at IS NULL)
+            ($3 = false OR t.deleted_at IS NULL)
             AND ($4::uuid IS NULL OR t.project_id = $4)
           ORDER BY t.created_at DESC
           LIMIT $5 OFFSET $6`;
