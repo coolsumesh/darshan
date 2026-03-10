@@ -319,30 +319,57 @@ export default function ThreadsPage() {
   };
 
   // Load messages when thread selected
-  // Real-time message polling for the open thread (every 3s)
   React.useEffect(() => {
     if (!selected) return;
-    const interval = setInterval(async () => {
-      const msgs = await fetchThreadMessages(selected.thread_id);
-      setMessages((prev) => {
-        // Guard against transient fetch failures that return [] and cause visible flicker.
-        if (msgs.length === 0 && prev.length > 0) return prev;
-        // Only update if something changed (avoid unnecessary re-renders)
-        if (prev.length === msgs.length && prev.at(-1)?.message_id === msgs.at(-1)?.message_id) return prev;
-        bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-        return msgs;
-      });
-    }, 3000);
-    return () => clearInterval(interval);
+    fetchThreadMessages(selected.thread_id).then(setMessages).catch(() => {});
   }, [selected?.thread_id]); // eslint-disable-line
 
-  // Real-time thread list refresh (every 10s — catches new threads + new preview messages)
+  // Push-based realtime updates (no polling fallback in UI)
   React.useEffect(() => {
-    const interval = setInterval(() => {
-      loadThreads(projectId, threadStatusFilter, { silent: true });
-    }, 10000);
-    return () => clearInterval(interval);
-  }, [projectId, threadStatusFilter]); // eslint-disable-line
+    let ws: WebSocket | null = null;
+    let retryTimeout: ReturnType<typeof setTimeout>;
+
+    const connect = () => {
+      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+      ws = new WebSocket(`${protocol}//${window.location.host}/api/backend/ws`);
+
+      ws.onmessage = (e) => {
+        try {
+          const evt = JSON.parse(String(e.data));
+          const type = evt?.type as string | undefined;
+          const data = evt?.data as any;
+
+          if (type === "thread.message_created") {
+            const threadId = data?.thread_id as string | undefined;
+            const msg = data?.message as ThreadMessage | undefined;
+            if (!threadId || !msg) return;
+
+            if (selected && selected.thread_id === threadId) {
+              setMessages((prev) => prev.some((m) => m.message_id === msg.message_id) ? prev : [...prev, msg]);
+            }
+            loadThreads(projectId, threadStatusFilter, { silent: true });
+            return;
+          }
+
+          if (type === "thread.created" || type === "thread.status_changed" || type === "thread.deleted") {
+            loadThreads(projectId, threadStatusFilter, { silent: true });
+          }
+        } catch {
+          // Ignore malformed websocket events
+        }
+      };
+
+      ws.onclose = () => {
+        retryTimeout = setTimeout(connect, 3000);
+      };
+    };
+
+    connect();
+    return () => {
+      clearTimeout(retryTimeout);
+      ws?.close();
+    };
+  }, [selected?.thread_id, projectId, threadStatusFilter, loadThreads]);
 
   const selectThread = React.useCallback(async (thread: Thread) => {
     setSelected(thread);

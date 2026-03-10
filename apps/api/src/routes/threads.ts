@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import type pg from "pg";
 import { getRequestUser } from "./auth.js";
-import { pushToAgent } from "../broadcast.js";
+import { broadcast, pushToAgent } from "../broadcast.js";
 
 // ── Caller resolution ─────────────────────────────────────────────────────────
 // Resolves the calling identity from either JWT cookie (user) or agent
@@ -219,6 +219,8 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
         }
 
         await client.query("COMMIT");
+
+        broadcast("thread.created", { thread });
         return { ok: true, thread_id: thread.thread_id, thread };
       } catch (err) {
         await client.query("ROLLBACK");
@@ -318,6 +320,8 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
           priority,
           body:        body.trim().slice(0, 100),
         });
+
+        broadcast("thread.message_created", { thread_id, message });
 
         return { ok: true, thread_id, message_id: message.message_id, notification_id: notif.notification_id };
       } catch (err) {
@@ -451,6 +455,7 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
         `UPDATE threads SET deleted_at = now() WHERE thread_id = $1`,
         [req.params.thread_id]
       );
+      broadcast("thread.deleted", { thread_id: req.params.thread_id });
       return { ok: true };
     }
   );
@@ -477,6 +482,7 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
         `UPDATE threads SET status = $1 WHERE thread_id = $2`,
         [status, req.params.thread_id]
       );
+      broadcast("thread.status_changed", { thread_id: req.params.thread_id, status });
       return { ok: true, status };
     }
   );
@@ -617,6 +623,8 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
 
       // Fan out notifications to all active participants except sender
       await fanOutNotifications(db, msg.message_id, req.params.thread_id, caller.id, priority);
+
+      broadcast("thread.message_created", { thread_id: req.params.thread_id, message: msg });
 
       return { ok: true, message_id: msg.message_id, message: msg };
     }
