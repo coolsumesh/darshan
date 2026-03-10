@@ -18,7 +18,7 @@ function parseSince(input: unknown): Date | null {
 
 export async function registerOpsRateLimits(server: FastifyInstance, db: pg.Pool) {
   server.get(
-    "/api/v1/ops/rate-limits",
+    "/ops/rate-limits",
     async (req): Promise<{ ok: true; events: unknown[] }> => {
       const q = req.query as { since?: string; limit?: string };
 

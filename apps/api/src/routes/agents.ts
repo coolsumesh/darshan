@@ -17,7 +17,7 @@ export async function registerAgents(server: FastifyInstance, db: pg.Pool) {
       name: string; desc?: string; model?: string; provider?: string;
       agent_type?: string; capabilities?: string[]; endpoint_type?: string; platform?: string;
     };
-  }>("/api/v1/agents", async (req, reply) => {
+  }>("/agents", async (req, reply) => {
     const user = getRequestUser(req);
     if (!user) return reply.status(401).send({ ok: false, error: "not authenticated" });
 
@@ -83,7 +83,7 @@ POST ACK_URL: { inbox_id, callback_token: "${token}", response: "ack" }`;
 
   // ── List agents ─────────────────────────────────────────────────────────────
   // ?all=true → returns all agents (for team pickers); default → personal only
-  server.get<{ Querystring: { all?: string } }>("/api/v1/agents", async (req) => {
+  server.get<{ Querystring: { all?: string } }>("/agents", async (req) => {
     const userId  = getRequestUser(req)?.userId ?? null;
     const showAll = req.query.all === "true" && userId !== null;
     const { rows } = await db.query(`
@@ -101,7 +101,7 @@ POST ACK_URL: { inbox_id, callback_token: "${token}", response: "ack" }`;
   });
 
   // ── Agent directory (all agents — for team pickers) ────────────────────────
-  server.get("/api/v1/agents/directory", async (req, reply) => {
+  server.get("/agents/directory", async (req, reply) => {
     const user = getRequestUser(req);
     if (!user) return reply.status(401).send({ ok: false, error: "not authenticated" });
     const { rows } = await db.query(`
@@ -114,7 +114,7 @@ POST ACK_URL: { inbox_id, callback_token: "${token}", response: "ack" }`;
   });
 
   // ── Get single agent ────────────────────────────────────────────────────────
-  server.get<{ Params: { id: string } }>("/api/v1/agents/:id", async (req, reply) => {
+  server.get<{ Params: { id: string } }>("/agents/:id", async (req, reply) => {
     const { rows } = await db.query(
       `select a.*,
               (select count(*)::int from tasks t
@@ -129,332 +129,12 @@ POST ACK_URL: { inbox_id, callback_token: "${token}", response: "ack" }`;
     return { ok: true, agent: rows[0] };
   });
 
-  // ── List organisations ──────────────────────────────────────────────────────
-  server.get("/api/v1/orgs", async (req) => {
-    const userId = getRequestUser(req)?.userId ?? null;
-    const { rows: orgs } = await db.query(
-      `select o.*,
-              count(distinct oa.agent_id)::int as agent_count,
-              count(distinct p.id)::int as project_count,
-              count(distinct oa.agent_id) filter (where a_ping.last_ping_at > now() - interval '1 hour')::int as online_count,
-              case
-                when $1::uuid is null           then 'member'
-                when o.owner_user_id = $1::uuid then 'owner'
-                else coalesce(
-                  (select oum.role from org_users oum
-                   where oum.org_id = o.id and oum.user_id = $1::uuid limit 1),
-                  'member'
-                )
-              end as my_role
-       from organisations o
-       left join org_agents oa     on oa.org_id = o.id and oa.status = 'active'
-       left join agents     a_ping on a_ping.id = oa.agent_id
-       left join projects   p      on p.org_id = o.id
-       where ($1::uuid is null
-          or o.owner_user_id = $1::uuid
-          or exists (select 1 from org_users oum where oum.org_id = o.id and oum.user_id = $1::uuid))
-       group by o.id
-       order by
-         case when o.owner_user_id = $1::uuid then 0 else 1 end,
-         o.name asc`,
-      [userId]
-    );
-    return { ok: true, orgs };
-  });
-
-  // ── Create org ──────────────────────────────────────────────────────────────
-  server.post<{ Body: { name: string; slug: string; description?: string } }>(
-    "/api/v1/orgs",
-    async (req, reply) => {
-      const { name, slug, description } = req.body;
-      if (!name || !slug) return reply.status(400).send({ ok: false, error: "name and slug required" });
-      const userId = getRequestUser(req)?.userId ?? null;
-      const { rows } = await db.query(
-        `insert into organisations (name, slug, description, owner_user_id)
-         values ($1, $2, $3, $4) returning *`,
-        [name, slug, description ?? null, userId]
-      );
-      return { ok: true, org: rows[0] };
-    }
-  );
-
-  // ── Get single org with agents + projects ──────────────────────────────────
-  server.get<{ Params: { id: string } }>("/api/v1/orgs/:id", async (req, reply) => {
-    const userId = getRequestUser(req)?.userId ?? null;
-    const { rows } = await db.query(
-      `select o.*,
-              count(distinct oa.agent_id)::int  as agent_count,
-              count(distinct p.id)::int          as project_count,
-              count(distinct oa.agent_id) filter (where a_ping.last_ping_at > now() - interval '1 hour')::int as online_count,
-              case
-                when $2::uuid is null            then 'member'
-                when o.owner_user_id = $2::uuid  then 'owner'
-                else coalesce(
-                  (select oum.role from org_users oum
-                   where oum.org_id = o.id and oum.user_id = $2::uuid
-                   limit 1),
-                  'member'
-                )
-              end as my_role
-       from organisations o
-       left join org_agents oa     on oa.org_id = o.id and oa.status = 'active'
-       left join agents     a_ping on a_ping.id = oa.agent_id
-       left join projects   p      on p.org_id = o.id
-       where o.id::text = $1 or o.slug = $1
-       group by o.id`,
-      [req.params.id, userId]
-    );
-    if (!rows.length) return reply.status(404).send({ ok: false, error: "org not found" });
-    return { ok: true, org: rows[0] };
-  });
-
-  // ── Update org ──────────────────────────────────────────────────────────────
-  server.patch<{
-    Params: { id: string };
-    Body: { name?: string; slug?: string; description?: string; status?: string; avatar_color?: string };
-  }>("/api/v1/orgs/:id", async (req, reply) => {
-    const { name, slug, description, status, avatar_color } = req.body;
-    const { rows } = await db.query(
-      `update organisations set
-         name         = coalesce($2, name),
-         slug         = coalesce($3, slug),
-         description  = coalesce($4, description),
-         status       = coalesce($5, status),
-         avatar_color = coalesce($6, avatar_color),
-         updated_at   = now()
-       where id::text = $1 or slug = $1
-       returning *`,
-      [req.params.id, name ?? null, slug ?? null, description ?? null, status ?? null, avatar_color ?? null]
-    );
-    if (!rows.length) return reply.status(404).send({ ok: false, error: "org not found" });
-    return { ok: true, org: rows[0] };
-  });
-
-  // ── Delete org (only if 0 agents) ──────────────────────────────────────────
-  server.delete<{ Params: { id: string } }>("/api/v1/orgs/:id", async (req, reply) => {
-    const { rows } = await db.query(
-      `select o.id, count(oa.agent_id)::int as agent_count
-       from organisations o left join org_agents oa on oa.org_id = o.id and oa.status = 'active'
-       where o.id::text = $1 or o.slug = $1 group by o.id`,
-      [req.params.id]
-    );
-    if (!rows.length) return reply.status(404).send({ ok: false, error: "org not found" });
-    if (rows[0].agent_count > 0) return reply.status(409).send({ ok: false, error: "Cannot delete org with contributed agents. Withdraw all agents first." });
-    await db.query(`delete from organisations where id = $1`, [rows[0].id]);
-    return { ok: true };
-  });
-
-  // ── Projects linked to an org (via agents in project_agents) ─────────────────
-  server.get<{ Params: { id: string } }>("/api/v1/orgs/:id/projects", async (req, reply) => {
-    const { rows: orgs } = await db.query(
-      `select id from organisations where id::text = $1 or slug = $1`, [req.params.id]
-    );
-    if (!orgs.length) return reply.status(404).send({ ok: false, error: "org not found" });
-    const { rows } = await db.query(
-      `select distinct p.id, p.name, p.slug, p.status, p.progress
-       from projects p
-       join project_agents pt on pt.project_id = p.id
-       join org_agents oa     on oa.agent_id = pt.agent_id and oa.org_id = $1 and oa.status = 'active'
-       order by p.name asc`,
-      [orgs[0].id]
-    );
-    return { ok: true, projects: rows };
-  });
-
-  // ── List agents for an org (via org_agents, ai_agent type only) ───────────
-  server.get<{ Params: { id: string } }>("/api/v1/orgs/:id/agents", async (req, reply) => {
-    const { rows: orgs } = await db.query(
-      `select id from organisations where id::text = $1 or slug = $1`, [req.params.id]
-    );
-    if (!orgs.length) return reply.status(404).send({ ok: false, error: "org not found" });
-    const orgId = orgs[0].id;
-    const { rows } = await db.query(
-      `select a.id, a.name, a.status, a.agent_type, a.model, a.provider,
-              a.capabilities, a.ping_status, a.last_seen_at,
-              oa.contributed_by as contributed_by_user_id,
-              u.name as contributed_by_name
-       from org_agents oa
-       join agents a on a.id = oa.agent_id
-       left join users u on u.id = oa.contributed_by
-       where oa.org_id = $1 and oa.status = 'active'
-       order by lower(a.name) asc`,
-      [orgId]
-    );
-    return { ok: true, agents: rows };
-  });
-
-  // ── Contribute an agent to an org ──────────────────────────────────────────
-  server.post<{ Params: { id: string }; Body: { agent_id: string } }>(
-    "/api/v1/orgs/:id/agent-contributions",
-    async (req, reply) => {
-      const user = getRequestUser(req);
-      if (!user) return reply.status(401).send({ ok: false, error: "unauthorized" });
-
-      const { rows: orgs } = await db.query(
-        `select id from organisations where id::text = $1 or slug = $1`, [req.params.id]
-      );
-      if (!orgs.length) return reply.status(404).send({ ok: false, error: "org not found" });
-      const orgId = orgs[0].id;
-
-      // Check user is a member of target org (any role)
-      const { rows: membership } = await db.query(`
-        select 1 from org_users where org_id = $1 and user_id = $2
-        union all
-        select 1 from organisations where id = $1 and owner_user_id = $2
-        limit 1
-      `, [orgId, user.userId]);
-      if (!membership.length) return reply.status(403).send({ ok: false, error: "not a member of this org" });
-
-      const agentId = (req.body as { agent_id: string }).agent_id;
-      if (!agentId) return reply.status(400).send({ ok: false, error: "agent_id required" });
-
-      // Check user has control over the agent (owns or admins the agent's org)
-      const { rows: agentRows } = await db.query(`
-        select id from agents where id::text = $1 and owner_user_id = $2
-      `, [agentId, user.userId]);
-      if (!agentRows.length) return reply.status(403).send({ ok: false, error: "agent not found or you don't own it" });
-
-      // Upsert — re-activate if previously withdrawn
-      const { rows } = await db.query(`
-        insert into org_agents (org_id, agent_id, contributed_by, status)
-        values ($1, $2, $3, 'active')
-        on conflict (org_id, agent_id) do update set status = 'active', contributed_by = $3
-        returning *
-      `, [orgId, agentId, user.userId]);
-
-      return { ok: true, contribution: rows[0] };
-    }
-  );
-
-  // ── Withdraw a contributed agent from an org ────────────────────────────────
-  server.delete<{ Params: { id: string; agentId: string } }>(
-    "/api/v1/orgs/:id/agent-contributions/:agentId",
-    async (req, reply) => {
-      const user = getRequestUser(req);
-      if (!user) return reply.status(401).send({ ok: false, error: "unauthorized" });
-
-      const { rows: orgs } = await db.query(
-        `select id from organisations where id::text = $1 or slug = $1`, [req.params.id]
-      );
-      if (!orgs.length) return reply.status(404).send({ ok: false, error: "org not found" });
-      const orgId = orgs[0].id;
-
-      const { rows: contributions } = await db.query(`
-        select contributed_by from org_agents
-        where org_id = $1 and agent_id::text = $2 and status = 'active'
-      `, [orgId, req.params.agentId]);
-      if (!contributions.length) return reply.status(404).send({ ok: false, error: "contribution not found" });
-
-      const isContributor = contributions[0].contributed_by === user.userId;
-
-      // Check if user is admin/owner of target org
-      const { rows: adminCheck } = await db.query(`
-        select 1 from org_users where org_id = $1 and user_id = $2 and role in ('owner', 'admin')
-        union all
-        select 1 from organisations where id = $1 and owner_user_id = $2
-        limit 1
-      `, [orgId, user.userId]);
-      const isOrgAdmin = adminCheck.length > 0;
-
-      if (!isContributor && !isOrgAdmin) {
-        return reply.status(403).send({ ok: false, error: "only the contributor or org admin can withdraw this agent" });
-      }
-
-      await db.query(`
-        update org_agents set status = 'withdrawn'
-        where org_id = $1 and agent_id::text = $2
-      `, [orgId, req.params.agentId]);
-
-      return { ok: true };
-    }
-  );
-
-  // ── Onboard a new agent under an org ───────────────────────────────────────
-  server.post<{
-    Params: { id: string };
-    Body: {
-      name: string; desc?: string; model?: string; provider?: string;
-      agent_type?: string; capabilities?: string[]; endpoint_type?: string; endpoint_config?: object;
-    };
-  }>("/api/v1/orgs/:id/agents", async (req, reply) => {
-    const { name, desc, model, provider, agent_type = "ai_agent", capabilities = [], endpoint_type = "openclaw_poll", endpoint_config = {} } = req.body;
-    if (!name) return reply.status(400).send({ ok: false, error: "name required" });
-
-    const userId = getRequestUser(req)?.userId ?? null;
-    const token = randomBytes(32).toString("hex");
-    const slug2 = (name as string).trim().toUpperCase().replace(/[^A-Z0-9]/g, "_");
-    const { rows } = await db.query(
-      `insert into agents (name, slug, description, status, owner_user_id, agent_type, model, provider, capabilities, endpoint_type, endpoint_config, callback_token, ping_status)
-       values ($1,$2,$3,'offline',$4,$5,$6,$7,$8,$9,$10,$11,'unknown') returning *`,
-      [name, slug2, desc ?? null, userId, agent_type, model ?? null, provider ?? null,
-       JSON.stringify(capabilities), endpoint_type, JSON.stringify(endpoint_config), token]
-    );
-
-    // Also contribute agent to the org
-    await db.query(
-      `insert into org_agents (org_id, agent_id, contributed_by, status)
-       values ($1, $2, $3, 'active')
-       on conflict (org_id, agent_id) do nothing`,
-      [req.params.id, rows[0].id, userId]
-    );
-
-    const agent = rows[0];
-
-    // Auto-send welcome inbox item with full setup instructions
-    if (agent_type === "ai_agent" && endpoint_type === "openclaw_poll") {
-      const baseUrl = "https://darshan.caringgems.in/api/backend/api/v1";
-      const inboxUrl = `${baseUrl}/agents/${agent.id}/inbox`;
-      const ackUrl   = `${baseUrl}/agents/${agent.id}/inbox/ack`;
-      const heartbeatBlock =
-`## Darshan Agent Inbox — ${name}
-AGENT_ID: ${agent.id}
-TOKEN: ${token}
-INBOX_URL: ${inboxUrl}
-ACK_URL: ${ackUrl}
-
-### Steps (run on every heartbeat):
-1. GET INBOX_URL with header: Authorization: Bearer ${token}
-2. GET https://darshan.caringgems.in/api/backend/api/v1/agents/${agent.id}/tasks?status=approved with header: Authorization: Bearer ${token}
-3. For each pending item, handle by type:
-
-**type = "ping"**
-- POST to ACK_URL: { inbox_id, callback_token: "${token}", response: "pong — ${name} online" }
-
-**type = "task_assigned"**
-- PATCH task to in-progress: PATCH https://darshan.caringgems.in/api/backend/api/v1/projects/{project_id}/tasks/{task_id} with body { "status": "in-progress" }
-- Execute the task
-- POST to ACK_URL: { inbox_id, callback_token: "${token}", response: "picked up — working on: {title}" }
-
-**type = "welcome"**
-- Read payload.heartbeat_config — this is the full HEARTBEAT.md block you need
-- Write it to your ~/.openclaw/workspace/HEARTBEAT.md (append the Darshan section)
-- POST to ACK_URL: { inbox_id, callback_token: "${token}", response: "setup complete — ${name} ready" }
-
-**Any other type**
-- POST to ACK_URL: { inbox_id, callback_token: "${token}", response: "ack" }`;
-
-      await db.query(
-        `insert into agent_inbox (agent_id, type, payload) values ($1, 'welcome', $2)`,
-        [agent.id, JSON.stringify({
-          message: `Welcome to Darshan, ${name}! You have been registered as an AI agent. Paste the heartbeat_config block below into your OpenClaw HEARTBEAT.md to start receiving tasks.`,
-          heartbeat_config: heartbeatBlock,
-          agent_id: agent.id,
-          token,
-          inbox_url: inboxUrl,
-          ack_url: ackUrl,
-        })]
-      );
-    }
-
-    return { ok: true, agent };
-  });
-
-  // ── Delete / remove an agent ───────────────────────────────────────────────
+  // ── [orgs removed — use /workspaces] ─────────────────────────────────────
   // ── Update agent ────────────────────────────────────────────────────────────
   server.patch<{ Params: { id: string }; Body: {
     name?: string; desc?: string; agent_type?: string;
     model?: string; provider?: string; capabilities?: string[]; endpoint_type?: string; platform?: string;
-  } }>("/api/v1/agents/:id", async (req, reply) => {
+  } }>("/agents/:id", async (req, reply) => {
     const { rows } = await db.query(
       `select id from agents where id::text = $1`, [req.params.id]
     );
@@ -483,7 +163,7 @@ ACK_URL: ${ackUrl}
     return { ok: true, agent: updated[0] };
   });
 
-  server.delete<{ Params: { id: string } }>("/api/v1/agents/:id", async (req, reply) => {
+  server.delete<{ Params: { id: string } }>("/agents/:id", async (req, reply) => {
     const { rows } = await db.query(
       `select id, name from agents where id::text = $1`, [req.params.id]
     );
@@ -493,7 +173,6 @@ ACK_URL: ${ackUrl}
     await db.query(`delete from project_agents  where agent_id = $1`, [rows[0].id]);
     await db.query(`delete from agent_inbox   where agent_id = $1`, [rows[0].id]);
     await db.query(`delete from agent_invites where agent_id = $1`, [rows[0].id]);
-    await db.query(`delete from org_agents   where agent_id = $1`, [rows[0].id]);
     await db.query(`delete from agents        where id = $1`,       [rows[0].id]);
 
     broadcast("agent:removed", { agentId: rows[0].id, name: rows[0].name });
@@ -501,7 +180,7 @@ ACK_URL: ${ackUrl}
   });
 
   // ── Ping an agent ───────────────────────────────────────────────────────────
-  server.post<{ Params: { id: string } }>("/api/v1/agents/:id/ping", async (req, reply) => {
+  server.post<{ Params: { id: string } }>("/agents/:id/ping", async (req, reply) => {
     // Find agent
     const { rows: agents } = await db.query(
       `select * from agents where id::text = $1`, [req.params.id]
@@ -531,7 +210,7 @@ ACK_URL: ${ackUrl}
       inbox_id: string; callback_token: string; response?: string;
       status?: { model?: string; capabilities?: string[]; provider?: string; version?: string };
     };
-  }>("/api/v1/agents/:id/inbox/ack", async (req, reply) => {
+  }>("/agents/:id/inbox/ack", async (req, reply) => {
     const { inbox_id, callback_token, response, status } = req.body;
 
     // Verify token
@@ -588,7 +267,7 @@ ACK_URL: ${ackUrl}
   server.get<{
     Params: { id: string };
     Querystring: { token?: string; status?: string };
-  }>("/api/v1/agents/:id/inbox", async (req, reply) => {
+  }>("/agents/:id/inbox", async (req, reply) => {
     const { status = "pending" } = req.query;
     // Accept token from Authorization header (preferred) or query string (legacy)
     const token = (req.headers.authorization?.replace(/^Bearer\s+/i, "") || req.query.token) ?? "";
@@ -612,290 +291,8 @@ ACK_URL: ${ackUrl}
     return { ok: true, items: rows };
   });
 
-  // ── Upload org logo ────────────────────────────────────────────────────────
-  server.post<{ Params: { id: string } }>("/api/v1/orgs/:id/logo", async (req, reply) => {
-    const { rows } = await db.query(
-      `select id, slug, avatar_url from organisations where id::text = $1 or slug = $1`, [req.params.id]
-    );
-    if (!rows.length) return reply.status(404).send({ ok: false, error: "org not found" });
-
-    const data = await req.file();
-    if (!data) return reply.status(400).send({ ok: false, error: "no file uploaded" });
-
-    const allowed = ["image/jpeg", "image/png", "image/svg+xml", "image/webp"];
-    if (!allowed.includes(data.mimetype)) {
-      return reply.status(400).send({ ok: false, error: "file must be PNG, JPG, SVG, or WEBP" });
-    }
-
-    const ext = data.mimetype === "image/svg+xml" ? ".svg"
-      : data.mimetype === "image/webp" ? ".webp"
-      : data.mimetype === "image/png"  ? ".png" : ".jpg";
-
-    const filename = `${rows[0].id}${ext}`;
-    const uploadsDir = join(__dirname, "..", "..", "uploads", "logos");
-    const filePath   = join(uploadsDir, filename);
-
-    const buf = await data.toBuffer();
-    writeFileSync(filePath, buf);
-
-    const avatar_url = `/uploads/logos/${filename}`;
-    await db.query(`update organisations set avatar_url = $1, updated_at = now() where id = $2`, [avatar_url, rows[0].id]);
-
-    return { ok: true, avatar_url };
-  });
-
-  // ── Delete org logo ─────────────────────────────────────────────────────────
-  server.delete<{ Params: { id: string } }>("/api/v1/orgs/:id/logo", async (req, reply) => {
-    const { rows } = await db.query(
-      `select id, avatar_url from organisations where id::text = $1 or slug = $1`, [req.params.id]
-    );
-    if (!rows.length) return reply.status(404).send({ ok: false, error: "org not found" });
-
-    if (rows[0].avatar_url) {
-      const filePath = join(__dirname, "..", "..", rows[0].avatar_url);
-      if (existsSync(filePath)) unlinkSync(filePath);
-    }
-    await db.query(`update organisations set avatar_url = null, updated_at = now() where id = $1`, [rows[0].id]);
-    return { ok: true };
-  });
-
-  // ── List org members ────────────────────────────────────────────────────────
-  server.get<{ Params: { id: string } }>("/api/v1/orgs/:id/members", async (req, reply) => {
-    const { rows: orgs } = await db.query(
-      `select id from organisations where id::text = $1 or slug = $1`, [req.params.id]
-    );
-    if (!orgs.length) return reply.status(404).send({ ok: false, error: "org not found" });
-    const { rows } = await db.query(
-      `select om.id, om.contributed_by, om.status, om.created_at,
-              a.id as agent_id, a.name, a.status as agent_status, a.agent_type, a.model,
-              u.name as contributed_by_name, u.avatar_url as contributed_by_avatar
-       from org_agents om
-       join agents a on a.id = om.agent_id
-       left join users u on u.id = om.contributed_by
-       where om.org_id = $1 and om.status = 'active'
-       order by lower(a.name) asc`,
-      [orgs[0].id]
-    );
-    return { ok: true, members: rows };
-  });
-
-  // ── Add / upsert member ─────────────────────────────────────────────────────
-  server.post<{
-    Params: { id: string };
-    Body: { agent_id: string; role?: string };
-  }>("/api/v1/orgs/:id/members", async (req, reply) => {
-    const { agent_id } = req.body;
-    const userId = getRequestUser(req)?.userId ?? null;
-    const { rows: orgs } = await db.query(
-      `select id from organisations where id::text = $1 or slug = $1`, [req.params.id]
-    );
-    if (!orgs.length) return reply.status(404).send({ ok: false, error: "org not found" });
-    try {
-      const { rows } = await db.query(
-        `insert into org_agents (org_id, agent_id, contributed_by, status)
-         values ($1, $2, $3, 'active')
-         on conflict (org_id, agent_id) do update set status = 'active', contributed_by = $3
-         returning *`,
-        [orgs[0].id, agent_id, userId]
-      );
-      return { ok: true, member: rows[0] };
-    } catch {
-      return reply.status(400).send({ ok: false, error: "failed to add member" });
-    }
-  });
-
-  // ── Update member (no-op — org_agents has no role; use withdraw/contribute instead) ─
-
-  // ── Remove member ───────────────────────────────────────────────────────────
-  server.delete<{ Params: { id: string; agentId: string } }>("/api/v1/orgs/:id/members/:agentId", async (req, reply) => {
-    const { rows: orgs } = await db.query(
-      `select id from organisations where id::text = $1 or slug = $1`, [req.params.id]
-    );
-    if (!orgs.length) return reply.status(404).send({ ok: false, error: "org not found" });
-    await db.query(
-      `delete from org_agents where org_id = $1 and agent_id::text = $2`,
-      [orgs[0].id, req.params.agentId]
-    );
-    return { ok: true };
-  });
-
-  // ── Org user members (humans by email) ──────────────────────────────────────
-
-  // GET /api/v1/orgs/:id/users — list user members
-  server.get<{ Params: { id: string } }>("/api/v1/orgs/:id/users", async (req, reply) => {
-    const { rows: orgs } = await db.query(
-      `select id from organisations where id::text = $1 or slug = $1`, [req.params.id]
-    );
-    if (!orgs.length) return reply.status(404).send({ ok: false, error: "org not found" });
-    const { rows } = await db.query(
-      `select * from (
-         -- org owner: gets their contributed agents
-         select u.id::text as id, 'owner'::text as role, o.created_at,
-                u.id as user_id, u.name, u.email, u.avatar_url,
-                (select json_agg(json_build_object(
-                   'id', a.id, 'name', a.name, 'status', a.status,
-                   'model', a.model, 'ping_status', a.ping_status
-                 ) order by lower(a.name))
-                 from org_agents oa
-                 join agents a on a.id = oa.agent_id
-                 where oa.org_id = o.id and oa.contributed_by = u.id and oa.status = 'active') as agents
-         from organisations o
-         join users u on u.id = o.owner_user_id
-         where o.id = $1
-         union all
-         -- members: get their contributed agents
-         select oum.id::text as id, oum.role, oum.created_at,
-                u.id as user_id, u.name, u.email, u.avatar_url,
-                (select json_agg(json_build_object(
-                   'id', a.id, 'name', a.name, 'status', a.status,
-                   'model', a.model, 'ping_status', a.ping_status
-                 ) order by lower(a.name))
-                 from org_agents oac
-                 join agents a on a.id = oac.agent_id
-                 where oac.org_id = $1 and oac.contributed_by = u.id and oac.status = 'active') as agents
-         from org_users oum
-         join users u on u.id = oum.user_id
-         where oum.org_id = $1
-           and oum.user_id != (select owner_user_id from organisations where id = $1)
-       ) t
-       order by
-         case t.role when 'owner' then 0 when 'admin' then 1 when 'contributor' then 2 else 3 end,
-         lower(t.name) asc`,
-      [orgs[0].id]
-    );
-    return { ok: true, users: rows };
-  });
-
-  // POST /api/v1/orgs/:id/users — add user by email
-  server.post<{
-    Params: { id: string };
-    Body: { email: string; role?: string };
-  }>("/api/v1/orgs/:id/users", async (req, reply) => {
-    const { email, role = "contributor" } = req.body;
-    if (!email) return reply.status(400).send({ ok: false, error: "email required" });
-    const { rows: orgs } = await db.query(
-      `select id from organisations where id::text = $1 or slug = $1`, [req.params.id]
-    );
-    if (!orgs.length) return reply.status(404).send({ ok: false, error: "org not found" });
-    const { rows: users } = await db.query(
-      `select id, name, email, avatar_url from users where lower(email) = lower($1)`, [email]
-    );
-    if (!users.length) return reply.status(404).send({ ok: false, error: "no user found with that email" });
-    try {
-      const { rows } = await db.query(
-        `insert into org_users (org_id, user_id, role)
-         values ($1, $2, $3)
-         on conflict (org_id, user_id) do update set role = excluded.role
-         returning *`,
-        [orgs[0].id, users[0].id, role]
-      );
-      return { ok: true, user: { ...rows[0], ...users[0] } };
-    } catch {
-      return reply.status(400).send({ ok: false, error: "failed to add user" });
-    }
-  });
-
-  // DELETE /api/v1/orgs/:id/users/:userId — remove user (+ auto-withdraw their contributed agents)
-  server.delete<{ Params: { id: string; userId: string } }>("/api/v1/orgs/:id/users/:userId", async (req, reply) => {
-    const { rows: orgs } = await db.query(
-      `select id from organisations where id::text = $1 or slug = $1`, [req.params.id]
-    );
-    if (!orgs.length) return reply.status(404).send({ ok: false, error: "org not found" });
-    const orgId = orgs[0].id;
-
-    // Auto-withdraw any agents this user contributed to the org
-    await db.query(
-      `update org_agents set status = 'withdrawn'
-       where org_id = $1 and contributed_by = $2::uuid and status = 'active'`,
-      [orgId, req.params.userId]
-    );
-
-    await db.query(
-      `delete from org_users where org_id = $1 and user_id::text = $2`,
-      [orgId, req.params.userId]
-    );
-    return { ok: true };
-  });
-
-  // ── Org user invites (email-based, with notification flow) ─────────────────
-
-  // GET /api/v1/orgs/:id/user-invites — list pending invites for admin view
-  server.get<{ Params: { id: string } }>("/api/v1/orgs/:id/user-invites", async (req, reply) => {
-    const { rows: orgs } = await db.query(
-      `select id from organisations where id::text = $1 or slug = $1`, [req.params.id]
-    );
-    if (!orgs.length) return reply.status(404).send({ ok: false, error: "org not found" });
-    const { rows } = await db.query(
-      `select oui.id, oui.token, oui.invitee_email, oui.role, oui.expires_at, oui.created_at,
-              u.name as invited_by_name
-       from org_user_invites oui
-       left join users u on u.id = oui.invited_by
-       where oui.org_id = $1
-         and oui.accepted_at is null
-         and oui.declined_at is null
-         and oui.expires_at > now()
-       order by oui.created_at desc`,
-      [orgs[0].id]
-    );
-    return { ok: true, invites: rows };
-  });
-
-  // POST /api/v1/orgs/:id/user-invites — create invite by email
-  server.post<{
-    Params: { id: string };
-    Body: { email: string; role?: string };
-  }>("/api/v1/orgs/:id/user-invites", async (req, reply) => {
-    const reqUser = getRequestUser(req);
-    const { email, role = "contributor" } = req.body;
-    if (!email) return reply.status(400).send({ ok: false, error: "email required" });
-
-    const { rows: orgs } = await db.query(
-      `select id from organisations where id::text = $1 or slug = $1`, [req.params.id]
-    );
-    if (!orgs.length) return reply.status(404).send({ ok: false, error: "org not found" });
-
-    // Check if the email belongs to a registered user (for UI hint only — invite is created either way)
-    const { rows: userRows } = await db.query(
-      `select id from users where lower(email) = lower($1) limit 1`,
-      [email.trim()]
-    );
-    const registered = userRows.length > 0;
-
-    try {
-      const { rows } = await db.query(
-        `insert into org_user_invites (org_id, invitee_email, invited_by, role)
-         values ($1, lower($2), $3, $4)
-         on conflict do nothing
-         returning *`,
-        [orgs[0].id, email.trim(), reqUser?.userId ?? null, role]
-      );
-      if (!rows[0]) {
-        // Conflict: already has a pending invite — return the existing one
-        const { rows: existing } = await db.query(
-          `select * from org_user_invites
-           where org_id = $1 and lower(invitee_email) = lower($2)
-             and accepted_at is null and declined_at is null and expires_at > now()`,
-          [orgs[0].id, email.trim()]
-        );
-        return { ok: true, invite: existing[0] ?? null, registered };
-      }
-      return { ok: true, invite: rows[0], registered };
-    } catch (err: unknown) {
-      return reply.status(500).send({ ok: false, error: String(err) });
-    }
-  });
-
-  // DELETE /api/v1/orgs/:id/user-invites/:inviteId — revoke invite
-  server.delete<{ Params: { id: string; inviteId: string } }>("/api/v1/orgs/:id/user-invites/:inviteId", async (req, reply) => {
-    await db.query(
-      `delete from org_user_invites where id::text = $1`,
-      [req.params.inviteId]
-    );
-    return { ok: true };
-  });
-
   // ── Projects assigned to an agent ──────────────────────────────────────────
-  server.get<{ Params: { id: string } }>("/api/v1/agents/:id/projects", async (req, reply) => {
+  server.get<{ Params: { id: string } }>("/agents/:id/projects", async (req, reply) => {
     const { rows: agents } = await db.query(
       `select id from agents where id::text = $1`, [req.params.id]
     );
@@ -915,7 +312,7 @@ ACK_URL: ${ackUrl}
 
   // ── Agent-scoped task feed (for heartbeat pickup loops) ───────────────────
   server.get<{ Params: { id: string }; Querystring: { token?: string; status?: string; project_id?: string; limit?: number } }>(
-    "/api/v1/agents/:id/tasks",
+    "/agents/:id/tasks",
     async (req, reply) => {
       // Support agent callback-token auth (same pattern as inbox polling)
       const token = (req.headers.authorization?.replace(/^Bearer\s+/i, "") || req.query.token) ?? "";
@@ -955,135 +352,11 @@ ACK_URL: ${ackUrl}
     }
   );
 
-  // ── Create invite link for an org ──────────────────────────────────────────
-  server.post<{
-    Params: { id: string };
-    Body: { label?: string; expires_hours?: number };
-  }>("/api/v1/orgs/:id/invites", async (req, reply) => {
-    const { label, expires_hours = 24 } = req.body ?? {};
-    const { rows: orgs } = await db.query(
-      `select id from organisations where id::text = $1 or slug = $1`, [req.params.id]
-    );
-    if (!orgs.length) return reply.status(404).send({ ok: false, error: "org not found" });
-
-    const { rows } = await db.query(
-      `insert into agent_invites (org_id, label, expires_at)
-       values ($1, $2, now() + ($3 || ' hours')::interval)
-       returning id, token, label, expires_at`,
-      [orgs[0].id, label ?? null, expires_hours]
-    );
-    const invite = rows[0];
-    return {
-      ok: true,
-      token:      invite.token,
-      invite_url: `https://darshan.caringgems.in/invite/${invite.token}`,
-      expires_at: invite.expires_at,
-      label:      invite.label,
-    };
-  });
-
-  // ── List all invites (auth required) ──────────────────────────────────────
-  server.get("/api/v1/invites", async () => {
-    const { rows } = await db.query(
-      `select ai.id, ai.token, ai.label, ai.expires_at, ai.accepted_at, ai.created_at,
-              o.id as org_id, o.name as org_name, o.slug as org_slug,
-              a.name as accepted_by
-       from agent_invites ai
-       join organisations o on o.id = ai.org_id
-       left join agents a on a.id = ai.agent_id
-       order by ai.created_at desc
-       limit 200`
-    );
-    return { ok: true, invites: rows };
-  });
-
-  // ── Get invite info (public — no auth) ─────────────────────────────────────
-  server.get<{ Params: { token: string } }>("/api/v1/invites/:token", async (req, reply) => {
-    const { rows } = await db.query(
-      `select ai.id, ai.label, ai.expires_at, ai.accepted_at,
-              o.name as org_name
-       from agent_invites ai
-       join organisations o on o.id = ai.org_id
-       where ai.token = $1`,
-      [req.params.token]
-    );
-    if (!rows.length) return reply.status(404).send({ ok: false, error: "invalid or expired invite" });
-    const inv = rows[0];
-    if (new Date(inv.expires_at) < new Date()) return reply.status(410).send({ ok: false, error: "invite has expired" });
-    if (inv.accepted_at) return reply.status(409).send({ ok: false, error: "invite already used" });
-    return {
-      ok: true,
-      org:       { name: inv.org_name },
-      label:     inv.label,
-      expires_at: inv.expires_at,
-    };
-  });
-
-  // ── Accept invite — self-register (public — no auth) ───────────────────────
-  server.post<{
-    Params: { token: string };
-    Body: {
-      name: string; desc?: string; agent_type?: string;
-      model?: string; provider?: string;
-      capabilities?: string[]; endpoint_type?: string;
-    };
-  }>("/api/v1/invites/:token/accept", async (req, reply) => {
-    const { name, desc, agent_type = "ai_agent", model, provider = "anthropic",
-            capabilities = [], endpoint_type = "openclaw_poll" } = req.body ?? {};
-    if (!name?.trim()) return reply.status(400).send({ ok: false, error: "name required" });
-
-    // Validate invite
-    const { rows: invites } = await db.query(
-      `select ai.id, ai.org_id, ai.expires_at, ai.accepted_at, o.name as org_name
-       from agent_invites ai join organisations o on o.id = ai.org_id
-       where ai.token = $1`,
-      [req.params.token]
-    );
-    if (!invites.length) return reply.status(404).send({ ok: false, error: "invalid invite" });
-    const inv = invites[0];
-    if (new Date(inv.expires_at) < new Date()) return reply.status(410).send({ ok: false, error: "invite expired" });
-    if (inv.accepted_at) return reply.status(409).send({ ok: false, error: "invite already used" });
-
-    // Create agent
-    const token = randomBytes(32).toString("hex");
-    const slug3 = name.trim().toUpperCase().replace(/[^A-Z0-9]/g, "_");
-    const { rows } = await db.query(
-      `insert into agents (name, slug, description, status, agent_type, model, provider,
-                           capabilities, endpoint_type, endpoint_config, callback_token, ping_status)
-       values ($1,$2,$3,'offline',$4,$5,$6,$7,$8,$9,$10,'unknown') returning *`,
-      [name.trim(), slug3, desc ?? null, agent_type, model ?? null, provider,
-       JSON.stringify(capabilities), endpoint_type, JSON.stringify({}), token]
-    );
-    const agent = rows[0];
-
-    // Mark invite accepted
-    await db.query(
-      `update agent_invites set accepted_at = now(), agent_id = $1 where id = $2`,
-      [agent.id, inv.id]
-    );
-
-    const baseUrl = "https://darshan.caringgems.in/api/backend/api/v1";
-    const inbox_url = `${baseUrl}/agents/${agent.id}/inbox`;
-    const ack_url   = `${baseUrl}/agents/${agent.id}/inbox/ack`;
-
-    // Send welcome inbox item
-    await db.query(
-      `insert into agent_inbox (agent_id, type, payload) values ($1, 'welcome', $2)`,
-      [agent.id, JSON.stringify({
-        agent_id: agent.id, token,
-        inbox_url, ack_url,
-        message: `Welcome to Darshan, ${name}! You joined ${inv.org_name} via invite.`,
-      })]
-    );
-
-    return { ok: true, agent_id: agent.id, callback_token: token, inbox_url, ack_url, org: { name: inv.org_name } };
-  });
-
   // ── List agents in a project — agent-token auth ────────────────────────────
   // Allows AI agents to enumerate their project team via callback token.
   // GET /api/v1/projects/:id/agents   Authorization: Bearer <callback_token>
   server.get<{ Params: { id: string } }>(
-    "/api/v1/projects/:id/agents",
+    "/projects/:id/agents",
     async (req, reply) => {
       const token = req.headers.authorization?.replace(/^Bearer\s+/i, "") ?? "";
       if (!token) return reply.status(401).send({ ok: false, error: "agent token required" });

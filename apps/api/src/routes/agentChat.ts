@@ -63,7 +63,7 @@ async function ensureChatThread(db: pg.Pool, userId: string, agentId: string): P
 }
 
 export async function registerAgentChat(server: FastifyInstance, db: pg.Pool) {
-  server.get("/api/v1/agents/online", async (req, reply) => {
+  server.get("/agents/online", async (req, reply) => {
     const user = getRequestUser(req);
     if (!user) return reply.status(401).send({ ok: false, error: "not authenticated" });
 
@@ -90,7 +90,7 @@ export async function registerAgentChat(server: FastifyInstance, db: pg.Pool) {
     return { ok: true, agents: rows };
   });
 
-  server.get<{ Params: { id: string } }>("/api/v1/agents/:id/chat", async (req, reply) => {
+  server.get<{ Params: { id: string } }>("/agents/:id/chat", async (req, reply) => {
     const user = getRequestUser(req);
     if (!user) return reply.status(401).send({ ok: false, error: "not authenticated" });
 
@@ -105,7 +105,7 @@ export async function registerAgentChat(server: FastifyInstance, db: pg.Pool) {
   });
 
   server.get<{ Params: { id: string }; Querystring: { limit?: string; beforeSeq?: string } }>(
-    "/api/v1/agents/:id/chat/messages",
+    "/agents/:id/chat/messages",
     async (req, reply) => {
       const user = getRequestUser(req);
       if (!user) return reply.status(401).send({ ok: false, error: "not authenticated" });
@@ -129,7 +129,7 @@ export async function registerAgentChat(server: FastifyInstance, db: pg.Pool) {
   );
 
   server.post<{ Params: { id: string }; Body: { content: string } }>(
-    "/api/v1/agents/:id/chat/messages",
+    "/agents/:id/chat/messages",
     async (req, reply) => {
       const user = getRequestUser(req);
       if (!user) return reply.status(401).send({ ok: false, error: "not authenticated" });

@@ -7,7 +7,7 @@ const APP_BASE_URL = process.env.APP_BASE_URL ?? "https://darshan.caringgems.in"
 export async function registerInvites(server: FastifyInstance, db: pg.Pool) {
 
   // ── GET /api/v1/me/invites ─────────────────────────────────────────────────
-  server.get("/api/v1/me/invites", async (req, reply) => {
+  server.get("/me/invites", async (req, reply) => {
     const user = getRequestUser(req);
     if (!user) return reply.status(401).send({ ok: false, error: "not authenticated" });
 
@@ -37,7 +37,7 @@ export async function registerInvites(server: FastifyInstance, db: pg.Pool) {
 
   // ── GET /api/v1/invites/project/:token ────────────────────────────────────
   server.get<{ Params: { token: string } }>(
-    "/api/v1/invites/project/:token",
+    "/invites/project/:token",
     async (req, reply) => {
       const { rows } = await db.query(
         `select pi.id, pi.token, pi.role, pi.invitee_email, pi.expires_at,
@@ -65,7 +65,7 @@ export async function registerInvites(server: FastifyInstance, db: pg.Pool) {
 
   // ── POST /api/v1/invites/project/:token/accept ────────────────────────────
   server.post<{ Params: { token: string } }>(
-    "/api/v1/invites/project/:token/accept",
+    "/invites/project/:token/accept",
     async (req, reply) => {
       const user = getRequestUser(req);
       if (!user) return reply.status(401).send({ ok: false, error: "not authenticated" });
@@ -108,7 +108,7 @@ export async function registerInvites(server: FastifyInstance, db: pg.Pool) {
 
   // ── POST /api/v1/invites/project/:token/decline ───────────────────────────
   server.post<{ Params: { token: string } }>(
-    "/api/v1/invites/project/:token/decline",
+    "/invites/project/:token/decline",
     async (req, reply) => {
       const user = getRequestUser(req);
       if (!user) return reply.status(401).send({ ok: false, error: "not authenticated" });

@@ -13,7 +13,7 @@ export async function registerRuns(server: FastifyInstance, db: pg.Pool) {
   server.get<{
     Params: { id: string };
     Querystring: { limit?: string; status?: string };
-  }>("/api/v1/threads/:id/runs", async (req, reply) => {
+  }>("/threads/:id/runs", async (req, reply) => {
     const { id } = req.params;
     const limit = Math.min(Number(req.query.limit ?? 50), 200);
 
@@ -45,7 +45,7 @@ export async function registerRuns(server: FastifyInstance, db: pg.Pool) {
 
   // Get a single run
   server.get<{ Params: { id: string } }>(
-    "/api/v1/runs/:id",
+    "/runs/:id",
     async (req, reply) => {
       const { rows } = await db.query(
         `select r.*, a.name as target_agent_name
@@ -63,7 +63,7 @@ export async function registerRuns(server: FastifyInstance, db: pg.Pool) {
 
   // Cancel a run
   server.post<{ Params: { id: string } }>(
-    "/api/v1/runs/:id/cancel",
+    "/runs/:id/cancel",
     async (req, reply) => {
       const userId = getUserId(req);
 

@@ -135,7 +135,7 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
 
   // ── POST /api/v1/threads — create thread ───────────────────────────────────
   server.post<{ Body: { subject: string; participants?: string[]; project_id?: string } }>(
-    "/api/v1/threads",
+    "/threads",
     async (req, reply) => {
       const caller = await resolveCaller(req, db);
       if (!caller) return reply.status(401).send({ ok: false, error: "not authenticated" });
@@ -193,9 +193,111 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
     }
   );
 
-  // ── GET /api/v1/threads — list threads ─────────────────────────────────────
+  // ── POST /threads/direct — one-call A2A send ─────────────────────────────
+  // Finds or creates a direct thread between caller and `to`, then posts body.
+  // Replaces the old POST /a2a/send flow.
+  server.post<{ Body: { to: string; body: string; subject?: string; priority?: string } }>(
+    "/threads/direct",
+    async (req, reply) => {
+      const caller = await resolveCaller(req, db);
+      if (!caller) return reply.status(401).send({ ok: false, error: "not authenticated" });
+
+      const { to, body, subject, priority = "normal" } = req.body ?? {};
+      if (!to?.trim())   return reply.status(400).send({ ok: false, error: "to (recipient id) is required" });
+      if (!body?.trim()) return reply.status(400).send({ ok: false, error: "body is required" });
+
+      // Resolve recipient
+      const { rows: [recipient] } = await db.query(
+        `SELECT id, COALESCE(slug, upper(regexp_replace(name,'[^A-Za-z0-9]','_','g'))) AS slug
+         FROM agents WHERE id::text = $1
+         UNION ALL
+         SELECT id, upper(regexp_replace(name,'[^A-Za-z0-9]','_','g'))
+         FROM users WHERE id::text = $1
+         LIMIT 1`,
+        [to]
+      );
+      if (!recipient) return reply.status(404).send({ ok: false, error: "recipient not found" });
+
+      const client = await db.connect();
+      try {
+        await client.query("BEGIN");
+
+        // Find existing direct thread between caller and recipient (both active participants)
+        const { rows: [existing] } = await client.query(
+          `SELECT t.thread_id FROM threads t
+           JOIN thread_participants pa ON pa.thread_id = t.thread_id AND pa.participant_id = $1 AND pa.removed_at IS NULL
+           JOIN thread_participants pb ON pb.thread_id = t.thread_id AND pb.participant_id = $2 AND pb.removed_at IS NULL
+           WHERE t.deleted_at IS NULL AND t.project_id IS NULL
+           ORDER BY t.created_at DESC LIMIT 1`,
+          [caller.id, recipient.id]
+        );
+
+        let thread_id: string;
+
+        if (existing) {
+          thread_id = existing.thread_id;
+        } else {
+          // Create new direct thread
+          const autoSubject = subject?.trim() || `${caller.slug} ↔ ${recipient.slug}`;
+          const { rows: [thread] } = await client.query(
+            `INSERT INTO threads (subject, created_by, created_slug)
+             VALUES ($1, $2, $3) RETURNING thread_id`,
+            [autoSubject, caller.id, caller.slug]
+          );
+          thread_id = thread.thread_id;
+
+          // Add both as participants
+          for (const p of [{ id: caller.id, slug: caller.slug }, { id: recipient.id, slug: recipient.slug }]) {
+            await client.query(
+              `INSERT INTO thread_participants (thread_id, participant_id, participant_slug, added_by, added_by_slug)
+               VALUES ($1, $2, $3, $4, $5) ON CONFLICT (thread_id, participant_id) DO NOTHING`,
+              [thread_id, p.id, p.slug, caller.id, caller.slug]
+            );
+          }
+        }
+
+        // Send message
+        const { rows: [message] } = await client.query(
+          `INSERT INTO thread_messages (thread_id, sender_id, sender_slug, type, body)
+           VALUES ($1, $2, $3, 'message', $4) RETURNING *`,
+          [thread_id, caller.id, caller.slug, body.trim()]
+        );
+
+        // Create notification for recipient
+        const { rows: [notif] } = await client.query(
+          `INSERT INTO notifications (recipient_id, recipient_slug, message_id, priority, status)
+           VALUES ($1, $2, $3, $4, 'pending') RETURNING notification_id`,
+          [recipient.id, recipient.slug, message.message_id, priority]
+        );
+
+        await client.query("COMMIT");
+
+        // Push real-time notification
+        pushToAgent(recipient.id, {
+          event: "notification",
+          data: {
+            notification_id: notif.notification_id,
+            thread_id,
+            message_id:  message.message_id,
+            from:        caller.slug,
+            priority,
+            body:        body.trim().slice(0, 100),
+          },
+        });
+
+        return { ok: true, thread_id, message_id: message.message_id, notification_id: notif.notification_id };
+      } catch (err) {
+        await client.query("ROLLBACK");
+        throw err;
+      } finally {
+        client.release();
+      }
+    }
+  );
+
+  // ── GET /threads — list threads ─────────────────────────────────────────
   server.get<{ Querystring: { search?: string; limit?: string; offset?: string; include_deleted?: string } }>(
-    "/api/v1/threads",
+    "/threads",
     async (req, reply) => {
       const caller = await resolveCaller(req, db);
       if (!caller) return reply.status(401).send({ ok: false, error: "not authenticated" });
@@ -243,7 +345,7 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
 
   // ── GET /api/v1/threads/:thread_id — get thread ────────────────────────────
   server.get<{ Params: { thread_id: string } }>(
-    "/api/v1/threads/:thread_id",
+    "/threads/:thread_id",
     async (req, reply) => {
       const caller = await resolveCaller(req, db);
       if (!caller) return reply.status(401).send({ ok: false, error: "not authenticated" });
@@ -262,7 +364,7 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
 
   // ── DELETE /api/v1/threads/:thread_id — soft delete ────────────────────────
   server.delete<{ Params: { thread_id: string } }>(
-    "/api/v1/threads/:thread_id",
+    "/threads/:thread_id",
     async (req, reply) => {
       const caller = await resolveCaller(req, db);
       if (!caller) return reply.status(401).send({ ok: false, error: "not authenticated" });
@@ -283,7 +385,7 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
 
   // ── GET /api/v1/threads/:thread_id/participants ─────────────────────────────
   server.get<{ Params: { thread_id: string } }>(
-    "/api/v1/threads/:thread_id/participants",
+    "/threads/:thread_id/participants",
     async (req, reply) => {
       const caller = await resolveCaller(req, db);
       if (!caller) return reply.status(401).send({ ok: false, error: "not authenticated" });
@@ -301,7 +403,7 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
 
   // ── POST /api/v1/threads/:thread_id/participants — add ─────────────────────
   server.post<{ Params: { thread_id: string }; Body: { participant_id: string } }>(
-    "/api/v1/threads/:thread_id/participants",
+    "/threads/:thread_id/participants",
     async (req, reply) => {
       const caller = await resolveCaller(req, db);
       if (!caller) return reply.status(401).send({ ok: false, error: "not authenticated" });
@@ -346,7 +448,7 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
 
   // ── DELETE /api/v1/threads/:thread_id/participants/:pid — remove ───────────
   server.delete<{ Params: { thread_id: string; pid: string } }>(
-    "/api/v1/threads/:thread_id/participants/:pid",
+    "/threads/:thread_id/participants/:pid",
     async (req, reply) => {
       const caller = await resolveCaller(req, db);
       if (!caller) return reply.status(401).send({ ok: false, error: "not authenticated" });
@@ -383,7 +485,7 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
     Params: { thread_id: string };
     Body: { body: string; reply_to?: string; priority?: string };
   }>(
-    "/api/v1/threads/:thread_id/messages",
+    "/threads/:thread_id/messages",
     async (req, reply) => {
       const caller = await resolveCaller(req, db);
       if (!caller) return reply.status(401).send({ ok: false, error: "not authenticated" });
@@ -427,7 +529,7 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
     Params: { thread_id: string };
     Querystring: { limit?: string; before?: string; types?: string };
   }>(
-    "/api/v1/threads/:thread_id/messages",
+    "/threads/:thread_id/messages",
     async (req, reply) => {
       const caller = await resolveCaller(req, db);
       if (!caller) return reply.status(401).send({ ok: false, error: "not authenticated" });
@@ -455,7 +557,7 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
 
   // ── GET /api/v1/threads/:thread_id/messages/:message_id ───────────────────
   server.get<{ Params: { thread_id: string; message_id: string } }>(
-    "/api/v1/threads/:thread_id/messages/:message_id",
+    "/threads/:thread_id/messages/:message_id",
     async (req, reply) => {
       const caller = await resolveCaller(req, db);
       if (!caller) return reply.status(401).send({ ok: false, error: "not authenticated" });
@@ -483,7 +585,7 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
 
   // ── GET receipts ───────────────────────────────────────────────────────────
   server.get<{ Params: { thread_id: string; message_id: string } }>(
-    "/api/v1/threads/:thread_id/messages/:message_id/receipts",
+    "/threads/:thread_id/messages/:message_id/receipts",
     async (req, reply) => {
       const caller = await resolveCaller(req, db);
       if (!caller) return reply.status(401).send({ ok: false, error: "not authenticated" });

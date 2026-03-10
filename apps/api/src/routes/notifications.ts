@@ -23,7 +23,7 @@ export async function registerNotifications(server: FastifyInstance, db: pg.Pool
   server.get<{
     Querystring: { status?: string; limit?: string; priority?: string };
   }>(
-    "/api/v1/notifications",
+    "/notifications",
     async (req, reply) => {
       const caller = await resolveCaller(req, db);
       if (!caller) return reply.status(401).send({ ok: false, error: "not authenticated" });
@@ -74,7 +74,7 @@ export async function registerNotifications(server: FastifyInstance, db: pg.Pool
     Params: { id: string };
     Body: { response_note?: string };
   }>(
-    "/api/v1/notifications/:id/process",
+    "/notifications/:id/process",
     async (req, reply) => {
       const caller = await resolveCaller(req, db);
       if (!caller) return reply.status(401).send({ ok: false, error: "not authenticated" });

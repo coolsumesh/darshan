@@ -35,7 +35,7 @@ export async function registerAuth(server: FastifyInstance) {
 
   // POST /api/v1/auth/login
   server.post<{ Body: { email?: string; password?: string } }>(
-    "/api/v1/auth/login",
+    "/auth/login",
     async (req, reply) => {
       const { email, password } = req.body ?? {};
       if (!email || !password) {
@@ -72,13 +72,13 @@ export async function registerAuth(server: FastifyInstance) {
   );
 
   // POST /api/v1/auth/logout
-  server.post("/api/v1/auth/logout", async (_req, reply) => {
+  server.post("/auth/logout", async (_req, reply) => {
     reply.clearCookie(COOKIE_NAME, { path: "/" });
     return { ok: true };
   });
 
   // GET /api/v1/auth/me — returns current session user (used by frontend)
-  server.get("/api/v1/auth/me", async (req, reply) => {
+  server.get("/auth/me", async (req, reply) => {
     const token = (req.cookies as Record<string, string>)?.[COOKIE_NAME];
     if (!token) return reply.status(401).send({ ok: false, error: "not authenticated" });
     const payload = verifyToken(token);
@@ -108,7 +108,7 @@ export async function registerAuth(server: FastifyInstance) {
 
   // DELETE /api/v1/auth/sessions/:userId — admin: force-logout a user
   server.delete<{ Params: { userId: string } }>(
-    "/api/v1/auth/sessions/:userId",
+    "/auth/sessions/:userId",
     async (req, reply) => {
       const { userId } = req.params;
       await db.query(
@@ -123,7 +123,7 @@ export async function registerAuth(server: FastifyInstance) {
   // Usage: GET /api/v1/auth/dev-login?email=ssumesh@gmail.com&secret=<DEV_LOGIN_SECRET>
   // Never set DEV_LOGIN_SECRET in production — that's the entire guard.
   server.get<{ Querystring: { email?: string; secret?: string; next?: string } }>(
-    "/api/v1/auth/dev-login",
+    "/auth/dev-login",
     async (req, reply) => {
       const DEV_SECRET = process.env.DEV_LOGIN_SECRET;
       if (!DEV_SECRET) {
@@ -169,7 +169,7 @@ export async function registerAuth(server: FastifyInstance) {
   // ── Google OAuth 2.0 ────────────────────────────────────────────────────────
 
   // GET /api/v1/auth/google — redirect to Google consent screen
-  server.get<{ Querystring: { next?: string } }>("/api/v1/auth/google", async (req, reply) => {
+  server.get<{ Querystring: { next?: string } }>("/auth/google", async (req, reply) => {
     if (!GOOGLE_CLIENT_ID) {
       return reply.redirect(`${APP_BASE_URL}/login?error=google_not_configured`, 302);
     }
@@ -189,7 +189,7 @@ export async function registerAuth(server: FastifyInstance) {
 
   // GET /api/v1/auth/google/callback — exchange code, set cookie, redirect to app
   server.get<{ Querystring: { code?: string; error?: string; state?: string } }>(
-    "/api/v1/auth/google/callback",
+    "/auth/google/callback",
     async (req, reply) => {
       const { code, error, state } = req.query;
       // Decode the post-login destination from state (if any)

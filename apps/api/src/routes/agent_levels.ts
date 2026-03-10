@@ -5,7 +5,7 @@ import { getRequestUser } from "./auth.js";
 export async function registerAgentLevels(server: FastifyInstance, db: pg.Pool) {
 
   // ── GET all level definitions ─────────────────────────────────────────────
-  server.get("/api/v1/agent-levels/definitions", async (_req, reply) => {
+  server.get("/agent-levels/definitions", async (_req, reply) => {
     const { rows } = await db.query(
       `SELECT * FROM agent_level_definitions ORDER BY level_id`
     );
@@ -14,7 +14,7 @@ export async function registerAgentLevels(server: FastifyInstance, db: pg.Pool) 
 
   // ── GET all agents with their level for a project ─────────────────────────
   server.get<{ Params: { projectId: string } }>(
-    "/api/v1/projects/:projectId/agent-levels",
+    "/projects/:projectId/agent-levels",
     async (req, reply) => {
       const { projectId } = req.params;
       const { rows } = await db.query(
@@ -40,7 +40,7 @@ export async function registerAgentLevels(server: FastifyInstance, db: pg.Pool) 
 
   // ── GET level + full event history for one agent in a project ─────────────
   server.get<{ Params: { projectId: string; agentId: string } }>(
-    "/api/v1/projects/:projectId/agent-levels/:agentId",
+    "/projects/:projectId/agent-levels/:agentId",
     async (req, reply) => {
       const { projectId, agentId } = req.params;
 
@@ -89,7 +89,7 @@ export async function registerAgentLevels(server: FastifyInstance, db: pg.Pool) 
       proofs?: Array<{ proof_type: "task" | "conversation" | "a2a_thread"; ref_id: string; notes?: string }>;
     };
   }>(
-    "/api/v1/projects/:projectId/agent-levels/:agentId",
+    "/projects/:projectId/agent-levels/:agentId",
     async (req, reply) => {
       const user = getRequestUser(req);
       if (!user) return reply.status(401).send({ ok: false, error: "not authenticated" });

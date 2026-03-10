@@ -6,7 +6,7 @@ export async function registerWorkspaces(server: FastifyInstance, db: pg.Pool) {
 
   // ── POST /api/v1/workspaces — create ──────────────────────────────────────
   server.post<{ Body: { name: string; description?: string } }>(
-    "/api/v1/workspaces",
+    "/workspaces",
     async (req, reply) => {
       const user = getRequestUser(req);
       if (!user) return reply.status(401).send({ ok: false, error: "not authenticated" });
@@ -26,7 +26,7 @@ export async function registerWorkspaces(server: FastifyInstance, db: pg.Pool) {
 
   // ── GET /api/v1/workspaces — list mine ────────────────────────────────────
   server.get(
-    "/api/v1/workspaces",
+    "/workspaces",
     async (req, reply) => {
       const user = getRequestUser(req);
       if (!user) return reply.status(401).send({ ok: false, error: "not authenticated" });
@@ -48,7 +48,7 @@ export async function registerWorkspaces(server: FastifyInstance, db: pg.Pool) {
 
   // ── GET /api/v1/workspaces/:id — get one ──────────────────────────────────
   server.get<{ Params: { id: string } }>(
-    "/api/v1/workspaces/:id",
+    "/workspaces/:id",
     async (req, reply) => {
       const user = getRequestUser(req);
       if (!user) return reply.status(401).send({ ok: false, error: "not authenticated" });
@@ -76,7 +76,7 @@ export async function registerWorkspaces(server: FastifyInstance, db: pg.Pool) {
 
   // ── PATCH /api/v1/workspaces/:id — update ─────────────────────────────────
   server.patch<{ Params: { id: string }; Body: { name?: string; description?: string } }>(
-    "/api/v1/workspaces/:id",
+    "/workspaces/:id",
     async (req, reply) => {
       const user = getRequestUser(req);
       if (!user) return reply.status(401).send({ ok: false, error: "not authenticated" });
@@ -114,7 +114,7 @@ export async function registerWorkspaces(server: FastifyInstance, db: pg.Pool) {
   // ── DELETE /api/v1/workspaces/:id — delete ────────────────────────────────
   // Projects become standalone (workspace_id set to NULL via ON DELETE SET NULL)
   server.delete<{ Params: { id: string } }>(
-    "/api/v1/workspaces/:id",
+    "/workspaces/:id",
     async (req, reply) => {
       const user = getRequestUser(req);
       if (!user) return reply.status(401).send({ ok: false, error: "not authenticated" });

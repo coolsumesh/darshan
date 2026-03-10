@@ -10,7 +10,7 @@ export async function registerAuditRoute(server: FastifyInstance, db: pg.Pool) {
       thread_id?: string;
       run_id?: string;
     };
-  }>("/api/v1/audit", async (req) => {
+  }>("/audit", async (req) => {
     const limit = Math.min(Number(req.query.limit ?? 100), 500);
     const since = req.query.since
       ? new Date(req.query.since)

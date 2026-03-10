@@ -176,7 +176,7 @@ export async function registerProjectChat(server: FastifyInstance, db: pg.Pool) 
   }
 
   server.get<{ Params: { id: string }; Querystring: { limit?: string } }>(
-    "/api/v1/projects/:id/chat/messages",
+    "/projects/:id/chat/messages",
     async (req, reply) => {
       const access = await checkAccess(req.params.id, req, "viewer");
       if ("deny" in access) {
@@ -211,7 +211,7 @@ export async function registerProjectChat(server: FastifyInstance, db: pg.Pool) 
   );
 
   server.post<{ Params: { id: string }; Body: { content?: string } }>(
-    "/api/v1/projects/:id/chat/messages",
+    "/projects/:id/chat/messages",
     async (req, reply) => {
       const access = await checkAccess(req.params.id, req, "viewer");
       if ("deny" in access) {

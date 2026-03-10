@@ -41,79 +41,81 @@ mkdirSync(uploadsDir, { recursive: true });
 await server.register(cors, { origin: true, credentials: true });
 await server.register(cookie);
 await server.register(websocket);
-await server.register(multipart, { limits: { fileSize: 2 * 1024 * 1024 } }); // 2MB
+await server.register(multipart, { limits: { fileSize: 2 * 1024 * 1024 } });
 await server.register(fastifyStatic, {
   root: join(__dirname, "..", "uploads"),
   prefix: "/uploads/",
   decorateReply: false,
 });
 
+// ── Root / health (no prefix) ─────────────────────────────────────────────────
 server.get("/health", async (): Promise<HealthResponse> => {
   return { ok: true, service: `${APP_NAME}-api`, time: new Date().toISOString() };
 });
-
 server.get("/", async () => {
   return { ok: true, service: `${APP_NAME}-api` };
 });
 
+// ── WebSocket (no prefix — lives at /ws) ─────────────────────────────────────
 const db = getDb();
 await runMigrations(db);
+await registerWs(server, db);
 
-// Register auth routes (no guard on these)
-await registerAuth(server);
-
-// Static API key for internal/agent use (heartbeat task polling, CLI calls)
+// ── Auth guard for all /api/v1/* ───────────────────────────────────────────────
+// Routes that handle their own auth return early here.
 const INTERNAL_API_KEY = process.env.DARSHAN_API_KEY ?? "824cdfcdec0e35cf550002c2dfa3541932f58e2e2497cfaa3c844dc99f5b972f";
 
-// Auth guard for all /api/v1/* routes — supports JWT cookie OR Bearer API key
 server.addHook("preHandler", async (req, reply) => {
   const url = req.url.split("?")[0];
   if (!url.startsWith("/api/v1/")) return;
-  if (url.startsWith("/api/v1/auth/")) return;
-  // Agent callback-token routes — handle their own auth internally
-  if (url.includes("/inbox")) return;
-  if (/^\/api\/v1\/agents\/[^/]+\/tasks$/.test(url)) return;
-  if (req.method === "PATCH" && /^\/api\/v1\/projects\/[^/]+\/tasks\/[^/]+$/.test(url)) return;
-  // Thread + notification routes support callback-token auth — handled in route
-  if (url.startsWith("/api/v1/threads")) return;
-  if (url.startsWith("/api/v1/notifications")) return;
-  // Project agents listing — callback-token auth handled in route
-  if (/^\/api\/v1\/projects\/[^/]+\/agents$/.test(url)) return;
-  // Public invite routes
-  if (url.startsWith("/api/v1/invites/")) return;
 
-  // 1. Try Bearer API key (for internal/agent calls)
+  // Auth routes — no guard
+  if (url.startsWith("/api/v1/auth/")) return;
+
+  // Agent callback-token routes — handle auth internally
+  if (url.includes("/inbox"))                                       return;
+  if (/^\/api\/v1\/agents\/[^/]+\/tasks$/.test(url))               return;
+  if (req.method === "PATCH" && /^\/api\/v1\/projects\/[^/]+\/tasks\/[^/]+$/.test(url)) return;
+
+  // Threads + notifications — dual-auth handled in route
+  if (url.startsWith("/api/v1/threads"))                           return;
+  if (url.startsWith("/api/v1/notifications"))                     return;
+
+  // Project agents — callback-token auth in route
+  if (/^\/api\/v1\/projects\/[^/]+\/agents$/.test(url))            return;
+
+  // Public invite preview
+  if (url.startsWith("/api/v1/invites/"))                          return;
+
+  // 1. Internal API key
   const authHeader = req.headers.authorization ?? "";
   if (authHeader.startsWith("Bearer ")) {
-    const key = authHeader.slice(7);
-    if (key === INTERNAL_API_KEY) return; // valid internal key
+    if (authHeader.slice(7) === INTERNAL_API_KEY) return;
   }
 
-  // 2. Try JWT cookie (for browser sessions)
+  // 2. JWT cookie
   const token = (req.cookies as Record<string, string>)?.["darshan_token"];
-  if (!token) {
-    return reply.status(401).send({ ok: false, error: "not authenticated" });
-  }
+  if (!token) return reply.status(401).send({ ok: false, error: "not authenticated" });
   const payload = verifyToken(token);
-  if (!payload) {
-    return reply.status(401).send({ ok: false, error: "invalid token" });
-  }
-  // authUser is decoded per-route via getRequestUser() helper
+  if (!payload) return reply.status(401).send({ ok: false, error: "invalid token" });
 });
 
-await registerAgents(server, db);
-await registerThreads(server, db);
-await registerNotifications(server, db);
-await registerRuns(server, db);
-await registerAgentChat(server, db);
-await registerAgentLevels(server, db);
-await registerAuditRoute(server, db);
-await registerOpsRateLimits(server, db);
-await registerProjects(server, db);
-await registerProjectChat(server, db);
-await registerInvites(server, db);
-await registerWorkspaces(server, db);
-await registerWs(server, db);
+// ── All API routes registered under /api/v1 prefix ───────────────────────────
+await server.register(async (app) => {
+  await registerAuth(app);
+  await registerAgents(app, db);
+  await registerThreads(app, db);
+  await registerNotifications(app, db);
+  await registerRuns(app, db);
+  await registerAgentChat(app, db);
+  await registerAgentLevels(app, db);
+  await registerAuditRoute(app, db);
+  await registerOpsRateLimits(app, db);
+  await registerProjects(app, db);
+  await registerProjectChat(app, db);
+  await registerInvites(app, db);
+  await registerWorkspaces(app, db);
+}, { prefix: "/api/v1" });
 
 startConnector(db);
 

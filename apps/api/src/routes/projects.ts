@@ -58,7 +58,7 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
   }
 
   // ── List all projects ──────────────────────────────────────────────────────
-  server.get("/api/v1/projects", async (req) => {
+  server.get("/projects", async (req) => {
     const userId = getRequestUser(req)?.userId ?? null;
     const { rows: projects } = await db.query(
       `select p.*,
@@ -90,7 +90,7 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
 
   // ── Get single project ─────────────────────────────────────────────────────
   server.get<{ Params: { id: string } }>(
-    "/api/v1/projects/:id",
+    "/projects/:id",
     async (req, reply) => {
       const access = await checkAccess(req.params.id, req, "viewer");
       if ("deny" in access) return reply.status(access.deny).send({ ok: false, error: access.deny === 404 ? "project not found" : "forbidden" });
@@ -111,7 +111,7 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
 
   // ── Create project ─────────────────────────────────────────────────────────
   server.post<{ Body: { slug: string; name: string; description?: string; status?: string; workspace_id?: string } }>(
-    "/api/v1/projects",
+    "/projects",
     async (req, reply) => {
       const { slug, name, description = "", status = "active", workspace_id } = req.body;
       if (!slug || !name) return reply.status(400).send({ ok: false, error: "slug and name required" });
@@ -127,7 +127,7 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
 
   // ── Update project — admin+ ────────────────────────────────────────────────
   server.patch<{ Params: { id: string }; Body: Record<string, unknown> }>(
-    "/api/v1/projects/:id",
+    "/projects/:id",
     async (req, reply) => {
       const access = await checkAccess(req.params.id, req, "admin");
       if ("deny" in access) return reply.status(access.deny).send({ ok: false, error: access.deny === 404 ? "project not found" : "forbidden" });
@@ -153,7 +153,7 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
 
   // ── Get architecture doc — member+ ─────────────────────────────────────────
   server.get<{ Params: { id: string } }>(
-    "/api/v1/projects/:id/architecture",
+    "/projects/:id/architecture",
     async (req, reply) => {
       const access = await checkAccess(req.params.id, req, "viewer");
       if ("deny" in access) return reply.status(access.deny).send({ ok: false, error: access.deny === 404 ? "project not found" : "forbidden" });
@@ -167,7 +167,7 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
 
   // ── Update architecture doc — admin+ ──────────────────────────────────────
   server.patch<{ Params: { id: string }; Body: { content: string } }>(
-    "/api/v1/projects/:id/architecture",
+    "/projects/:id/architecture",
     async (req, reply) => {
       const access = await checkAccess(req.params.id, req, "admin");
       if ("deny" in access) return reply.status(access.deny).send({ ok: false, error: access.deny === 404 ? "project not found" : "forbidden" });
@@ -181,7 +181,7 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
 
   // ── Get tech spec doc — member+ ────────────────────────────────────────────
   server.get<{ Params: { id: string } }>(
-    "/api/v1/projects/:id/tech-spec",
+    "/projects/:id/tech-spec",
     async (req, reply) => {
       const access = await checkAccess(req.params.id, req, "viewer");
       if ("deny" in access) return reply.status(access.deny).send({ ok: false, error: access.deny === 404 ? "project not found" : "forbidden" });
@@ -195,7 +195,7 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
 
   // ── Update tech spec doc — admin+ ─────────────────────────────────────────
   server.patch<{ Params: { id: string }; Body: { content: string } }>(
-    "/api/v1/projects/:id/tech-spec",
+    "/projects/:id/tech-spec",
     async (req, reply) => {
       const access = await checkAccess(req.params.id, req, "admin");
       if ("deny" in access) return reply.status(access.deny).send({ ok: false, error: access.deny === 404 ? "project not found" : "forbidden" });
@@ -209,7 +209,7 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
 
   // ── List tasks — member+ ───────────────────────────────────────────────────
   server.get<{ Params: { id: string }; Querystring: { status?: string; assignee?: string } }>(
-    "/api/v1/projects/:id/tasks",
+    "/projects/:id/tasks",
     async (req, reply) => {
       const access = await checkAccess(req.params.id, req, "viewer");
       if ("deny" in access) return reply.status(access.deny).send({ ok: false, error: access.deny === 404 ? "project not found" : "forbidden" });
@@ -271,7 +271,7 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
 
   // ── Create task — member+ ──────────────────────────────────────────────────
   server.post<{ Params: { id: string }; Body: { title: string; description?: string; proposer?: string; assignee?: string; status?: string; priority?: string; type?: string; estimated_sp?: number; due_date?: string } }>(
-    "/api/v1/projects/:id/tasks",
+    "/projects/:id/tasks",
     async (req, reply) => {
       const access = await checkAccess(req.params.id, req, "viewer");
       if ("deny" in access) return reply.status(access.deny).send({ ok: false, error: access.deny === 404 ? "project not found" : "forbidden" });
@@ -306,7 +306,7 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
 
   // ── Delete task — admin+ ───────────────────────────────────────────────────
   server.delete<{ Params: { id: string; taskId: string } }>(
-    "/api/v1/projects/:id/tasks/:taskId",
+    "/projects/:id/tasks/:taskId",
     async (req, reply) => {
       const access = await checkAccess(req.params.id, req, "admin");
       if ("deny" in access) return reply.status(access.deny).send({ ok: false, error: access.deny === 404 ? "project not found" : "forbidden" });
@@ -327,7 +327,7 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
 
   // ── Update task — member+ ──────────────────────────────────────────────────
   server.patch<{ Params: { id: string; taskId: string }; Body: Record<string, unknown> }>(
-    "/api/v1/projects/:id/tasks/:taskId",
+    "/projects/:id/tasks/:taskId",
     async (req, reply) => {
       const authUser = getRequestUser(req);
       const authHeader = req.headers.authorization ?? "";
@@ -543,7 +543,7 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
 
   // ── Get task activity — member+ ───────────────────────────────────────────
   server.get<{ Params: { id: string; taskId: string } }>(
-    "/api/v1/projects/:id/tasks/:taskId/activity",
+    "/projects/:id/tasks/:taskId/activity",
     async (req, reply) => {
       const access = await checkAccess(req.params.id, req, "viewer");
       if ("deny" in access) return reply.status(access.deny).send({ ok: false, error: access.deny === 404 ? "project not found" : "forbidden" });
@@ -560,7 +560,7 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
 
   // ── Get agent team — member+ ───────────────────────────────────────────────
   server.get<{ Params: { id: string } }>(
-    "/api/v1/projects/:id/team",
+    "/projects/:id/team",
     async (req, reply) => {
       const access = await checkAccess(req.params.id, req, "viewer");
       if ("deny" in access) return reply.status(access.deny).send({ ok: false, error: access.deny === 404 ? "project not found" : "forbidden" });
@@ -588,7 +588,7 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
 
   // ── Add agent to team — admin+ ─────────────────────────────────────────────
   server.post<{ Params: { id: string }; Body: { agent_id: string; role?: string } }>(
-    "/api/v1/projects/:id/team",
+    "/projects/:id/team",
     async (req, reply) => {
       const userId = getRequestUser(req)?.userId ?? null;
       if (!userId) return reply.status(401).send({ ok: false, error: "authentication required" });
@@ -660,7 +660,7 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
 
   // ── Remove agent from team — admin+ ───────────────────────────────────────
   server.delete<{ Params: { id: string; agentId: string } }>(
-    "/api/v1/projects/:id/team/:agentId",
+    "/projects/:id/team/:agentId",
     async (req, reply) => {
       const userId = getRequestUser(req)?.userId ?? null;
       if (!userId) return reply.status(401).send({ ok: false, error: "authentication required" });
@@ -690,7 +690,7 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
 
   // ── List user members — member+ ────────────────────────────────────────────
   server.get<{ Params: { id: string } }>(
-    "/api/v1/projects/:id/user-members",
+    "/projects/:id/user-members",
     async (req, reply) => {
       const access = await checkAccess(req.params.id, req, "viewer");
       if ("deny" in access) return reply.status(access.deny).send({ ok: false, error: access.deny === 404 ? "project not found" : "forbidden" });
@@ -711,7 +711,7 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
 
   // ── Add user member by email — admin+ ─────────────────────────────────────
   server.post<{ Params: { id: string }; Body: { email: string; role?: string } }>(
-    "/api/v1/projects/:id/user-members",
+    "/projects/:id/user-members",
     async (req, reply) => {
       const access = await checkAccess(req.params.id, req, "admin");
       if ("deny" in access) return reply.status(access.deny).send({ ok: false, error: access.deny === 404 ? "project not found" : "forbidden" });
@@ -739,7 +739,7 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
 
   // ── Remove user member — admin+ ────────────────────────────────────────────
   server.delete<{ Params: { id: string; userId: string } }>(
-    "/api/v1/projects/:id/user-members/:userId",
+    "/projects/:id/user-members/:userId",
     async (req, reply) => {
       const access = await checkAccess(req.params.id, req, "admin");
       if ("deny" in access) return reply.status(access.deny).send({ ok: false, error: access.deny === 404 ? "project not found" : "forbidden" });
@@ -755,7 +755,7 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
   const APP_BASE = process.env.APP_BASE_URL ?? "https://darshan.caringgems.in";
 
   server.post<{ Params: { id: string }; Body: { email?: string; role?: string } }>(
-    "/api/v1/projects/:id/invites",
+    "/projects/:id/invites",
     async (req, reply) => {
       const access = await checkAccess(req.params.id, req, "admin");
       if ("deny" in access) return reply.status(access.deny).send({ ok: false, error: access.deny === 404 ? "project not found" : "forbidden" });
@@ -777,7 +777,7 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
 
   // ── List invites — admin+ ──────────────────────────────────────────────────
   server.get<{ Params: { id: string } }>(
-    "/api/v1/projects/:id/invites",
+    "/projects/:id/invites",
     async (req, reply) => {
       const access = await checkAccess(req.params.id, req, "admin");
       if ("deny" in access) return reply.status(access.deny).send({ ok: false, error: access.deny === 404 ? "project not found" : "forbidden" });
@@ -800,7 +800,7 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
 
   // ── Revoke invite — admin+ ─────────────────────────────────────────────────
   server.delete<{ Params: { id: string; inviteId: string } }>(
-    "/api/v1/projects/:id/invites/:inviteId",
+    "/projects/:id/invites/:inviteId",
     async (req, reply) => {
       const access = await checkAccess(req.params.id, req, "admin");
       if ("deny" in access) return reply.status(access.deny).send({ ok: false, error: access.deny === 404 ? "project not found" : "forbidden" });
