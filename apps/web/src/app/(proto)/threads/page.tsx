@@ -280,11 +280,18 @@ export default function ThreadsPage() {
   }, []);
 
   // Load thread list
-  const loadThreads = React.useCallback(async (pid?: string | null, statusFilter?: "open" | "closed") => {
-    setLoading(true);
+  const loadThreads = React.useCallback(async (
+    pid?: string | null,
+    statusFilter?: "open" | "closed",
+    opts?: { silent?: boolean }
+  ) => {
+    const silent = opts?.silent ?? false;
+    if (!silent) setLoading(true);
+
     const s = statusFilter ?? threadStatusFilter;
     const data = await fetchThreads(pid ?? projectId, s);
     setThreads(data);
+
     // Load last message preview for each thread
     const previewMap: Record<string, { text: string; time: string }> = {};
     await Promise.all(
@@ -298,7 +305,8 @@ export default function ThreadsPage() {
       })
     );
     setPreviews(previewMap);
-    setLoading(false);
+
+    if (!silent) setLoading(false);
   }, []);
 
   React.useEffect(() => { loadThreads(projectId, threadStatusFilter); }, [projectId, threadStatusFilter]); // eslint-disable-line
@@ -317,6 +325,8 @@ export default function ThreadsPage() {
     const interval = setInterval(async () => {
       const msgs = await fetchThreadMessages(selected.thread_id);
       setMessages((prev) => {
+        // Guard against transient fetch failures that return [] and cause visible flicker.
+        if (msgs.length === 0 && prev.length > 0) return prev;
         // Only update if something changed (avoid unnecessary re-renders)
         if (prev.length === msgs.length && prev.at(-1)?.message_id === msgs.at(-1)?.message_id) return prev;
         bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -329,7 +339,7 @@ export default function ThreadsPage() {
   // Real-time thread list refresh (every 10s — catches new threads + new preview messages)
   React.useEffect(() => {
     const interval = setInterval(() => {
-      loadThreads(projectId, threadStatusFilter);
+      loadThreads(projectId, threadStatusFilter, { silent: true });
     }, 10000);
     return () => clearInterval(interval);
   }, [projectId, threadStatusFilter]); // eslint-disable-line
