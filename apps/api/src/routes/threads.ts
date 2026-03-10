@@ -57,6 +57,20 @@ async function checkThreadAccess(
   // Creator
   if (thread.created_by === caller.id) return { thread, role: "creator" };
 
+  // User access via project membership (owner or project_users)
+  if (caller.type === "user" && thread.project_id) {
+    const { rows: projAccess } = await db.query(
+      `SELECT 1
+       FROM projects p
+       LEFT JOIN project_users pu ON pu.project_id = p.id
+       WHERE p.id = $1
+         AND (p.owner_user_id = $2 OR pu.user_id = $2)
+       LIMIT 1`,
+      [thread.project_id, caller.id]
+    );
+    if (projAccess.length) return { thread, role: "owner" };
+  }
+
   // Agent owner — user who owns an agent that is/was a participant
   if (caller.type === "user") {
     const { rows: owned } = await db.query(
@@ -310,31 +324,61 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
 
       if (search?.trim()) {
         query = `
-          SELECT DISTINCT t.*, tp.removed_at AS my_removed_at
+          SELECT DISTINCT t.*, tp_self.removed_at AS my_removed_at
           FROM threads t
-          JOIN thread_participants tp ON tp.thread_id = t.thread_id
+          LEFT JOIN thread_participants tp_self
+            ON tp_self.thread_id = t.thread_id AND tp_self.participant_id = $1
           LEFT JOIN thread_messages tm ON tm.thread_id = t.thread_id
-          WHERE tp.participant_id = $1
-            AND ($2 = false OR t.deleted_at IS NULL)
-            AND ($3::uuid IS NULL OR t.project_id = $3)
+          WHERE
+            (
+              tp_self.participant_id IS NOT NULL
+              OR (
+                $2 = true
+                AND t.project_id IS NOT NULL
+                AND EXISTS (
+                  SELECT 1
+                  FROM projects p
+                  LEFT JOIN project_users pu ON pu.project_id = p.id
+                  WHERE p.id = t.project_id
+                    AND (p.owner_user_id = $1 OR pu.user_id = $1)
+                )
+              )
+            )
+            AND ($3 = false OR t.deleted_at IS NULL)
+            AND ($4::uuid IS NULL OR t.project_id = $4)
             AND (
-              to_tsvector('english', t.subject) @@ plainto_tsquery('english', $4)
-              OR to_tsvector('english', COALESCE(tm.body, '')) @@ plainto_tsquery('english', $4)
+              to_tsvector('english', t.subject) @@ plainto_tsquery('english', $5)
+              OR to_tsvector('english', COALESCE(tm.body, '')) @@ plainto_tsquery('english', $5)
             )
           ORDER BY t.created_at DESC
-          LIMIT $5 OFFSET $6`;
-        params = [caller.id, !showDeleted, pid, search.trim(), lim, off];
+          LIMIT $6 OFFSET $7`;
+        params = [caller.id, caller.type === "user", !showDeleted, pid, search.trim(), lim, off];
       } else {
         query = `
-          SELECT t.*, tp.removed_at AS my_removed_at
+          SELECT t.*, tp_self.removed_at AS my_removed_at
           FROM threads t
-          JOIN thread_participants tp ON tp.thread_id = t.thread_id
-          WHERE tp.participant_id = $1
-            AND ($2 = false OR t.deleted_at IS NULL)
-            AND ($3::uuid IS NULL OR t.project_id = $3)
+          LEFT JOIN thread_participants tp_self
+            ON tp_self.thread_id = t.thread_id AND tp_self.participant_id = $1
+          WHERE
+            (
+              tp_self.participant_id IS NOT NULL
+              OR (
+                $2 = true
+                AND t.project_id IS NOT NULL
+                AND EXISTS (
+                  SELECT 1
+                  FROM projects p
+                  LEFT JOIN project_users pu ON pu.project_id = p.id
+                  WHERE p.id = t.project_id
+                    AND (p.owner_user_id = $1 OR pu.user_id = $1)
+                )
+              )
+            )
+            AND ($3 = false OR t.deleted_at IS NULL)
+            AND ($4::uuid IS NULL OR t.project_id = $4)
           ORDER BY t.created_at DESC
-          LIMIT $4 OFFSET $5`;
-        params = [caller.id, !showDeleted, pid, lim, off];
+          LIMIT $5 OFFSET $6`;
+        params = [caller.id, caller.type === "user", !showDeleted, pid, lim, off];
       }
 
       const { rows } = await db.query(query, params);
