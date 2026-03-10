@@ -52,6 +52,41 @@ function Avatar({ slug, size = "md" }: { slug: string; size?: "sm" | "md" }) {
   );
 }
 
+function getMentionContext(text: string, cursor: number) {
+  const uptoCursor = text.slice(0, cursor);
+  const match = uptoCursor.match(/(?:^|\s)@([A-Za-z0-9_-]*)$/);
+  if (!match) return null;
+  const atIndex = uptoCursor.lastIndexOf("@");
+  return { query: match[1] ?? "", start: atIndex, end: cursor };
+}
+
+function renderMentions(body: string, knownSlugs: Set<string>) {
+  const parts: React.ReactNode[] = [];
+  const regex = /@([A-Za-z0-9_-]+)/g;
+  let last = 0;
+  let m: RegExpExecArray | null;
+
+  while ((m = regex.exec(body))) {
+    if (m.index > last) parts.push(body.slice(last, m.index));
+    const slug = m[1];
+    const known = knownSlugs.has(slug.toUpperCase());
+    parts.push(
+      <span
+        key={`${slug}-${m.index}`}
+        className={known
+          ? "rounded bg-violet-100 px-1 py-0.5 font-semibold text-violet-700 dark:bg-violet-900/40 dark:text-violet-300"
+          : "rounded bg-slate-100 px-1 py-0.5 font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-300"}
+      >
+        @{slug}
+      </span>
+    );
+    last = m.index + m[0].length;
+  }
+
+  if (last < body.length) parts.push(body.slice(last));
+  return parts;
+}
+
 // ── Thread list row ───────────────────────────────────────────────────────────
 
 function ThreadRow({
@@ -99,7 +134,7 @@ function ThreadRow({
 
 // ── Message bubble ────────────────────────────────────────────────────────────
 
-function MessageBubble({ msg, isMe }: { msg: ThreadMessage; isMe: boolean }) {
+function MessageBubble({ msg, isMe, knownSlugs }: { msg: ThreadMessage; isMe: boolean; knownSlugs: Set<string> }) {
   return (
     <div className={`flex items-start gap-3 ${isMe ? "flex-row-reverse" : ""}`}>
       <Avatar slug={msg.sender_slug} size="sm" />
@@ -113,7 +148,7 @@ function MessageBubble({ msg, isMe }: { msg: ThreadMessage; isMe: boolean }) {
           <span className="text-[10px] text-slate-400">{relativeTime(msg.sent_at)}</span>
         </div>
         <div
-          className={`rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
+          className={`rounded-2xl px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap ${
             isMe
               ? "rounded-tr-sm bg-violet-600 text-white"
               : msg.type === "event"
@@ -121,7 +156,7 @@ function MessageBubble({ msg, isMe }: { msg: ThreadMessage; isMe: boolean }) {
               : "rounded-tl-sm bg-white text-slate-800 ring-1 ring-slate-200 dark:bg-slate-800 dark:text-slate-100 dark:ring-slate-700"
           }`}
         >
-          {msg.body}
+          {renderMentions(msg.body, knownSlugs)}
         </div>
       </div>
     </div>
@@ -272,7 +307,12 @@ export default function ThreadsPage() {
   const [threadStatusFilter, setThreadStatusFilter] = React.useState<"open" | "closed">("open");
   const [closing, setClosing] = React.useState(false);
   const [composeOpen, setComposeOpen] = React.useState(false);
+  const [mentionSlugs, setMentionSlugs] = React.useState<string[]>([]);
+  const [mentionOpen, setMentionOpen] = React.useState(false);
+  const [mentionIndex, setMentionIndex] = React.useState(0);
+  const [mentionCtx, setMentionCtx] = React.useState<{ query: string; start: number; end: number } | null>(null);
   const bottomRef = React.useRef<HTMLDivElement>(null);
+  const textareaRef = React.useRef<HTMLTextAreaElement>(null);
 
   // Load projects once
   React.useEffect(() => {
@@ -323,6 +363,29 @@ export default function ThreadsPage() {
     if (!selected) return;
     fetchThreadMessages(selected.thread_id).then(setMessages).catch(() => {});
   }, [selected?.thread_id]); // eslint-disable-line
+
+  React.useEffect(() => {
+    if (!selected) {
+      setMentionSlugs([]);
+      return;
+    }
+
+    const fromMessages = messages.map((m) => m.sender_slug.toUpperCase());
+    const fallback = Array.from(new Set([selected.created_slug.toUpperCase(), ...fromMessages]));
+
+    if (!selected.project_id) {
+      setMentionSlugs(fallback);
+      return;
+    }
+
+    fetchTeam(selected.project_id)
+      .then((team) => {
+        const fromTeam = team.map((m) => (m.agent?.name ?? "").toUpperCase()).filter(Boolean);
+        const merged = Array.from(new Set([selected.created_slug.toUpperCase(), ...fromTeam, ...fromMessages]));
+        setMentionSlugs(merged);
+      })
+      .catch(() => setMentionSlugs(fallback));
+  }, [selected?.thread_id, selected?.project_id, messages]); // eslint-disable-line
 
   // Push-based realtime updates (no polling fallback in UI)
   React.useEffect(() => {
@@ -383,6 +446,29 @@ export default function ThreadsPage() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  const mentionSuggestions = React.useMemo(() => {
+    if (!mentionCtx) return [] as string[];
+    const q = mentionCtx.query.toUpperCase();
+    return mentionSlugs.filter((s) => s.startsWith(q)).slice(0, 8);
+  }, [mentionSlugs, mentionCtx]);
+
+  const applyMention = (slug: string) => {
+    if (!mentionCtx) return;
+    const before = draft.slice(0, mentionCtx.start + 1);
+    const after = draft.slice(mentionCtx.end);
+    const suffix = after.startsWith(" ") || after.length === 0 ? "" : " ";
+    const next = `${before}${slug}${suffix}${after}`;
+    setDraft(next);
+    setMentionOpen(false);
+    setMentionCtx(null);
+    setMentionIndex(0);
+    setTimeout(() => {
+      const pos = (before + slug + suffix).length;
+      textareaRef.current?.focus();
+      textareaRef.current?.setSelectionRange(pos, pos);
+    }, 0);
+  };
+
   const handleSend = async () => {
     if (!selected || !draft.trim() || sending) return;
     setSending(true);
@@ -390,11 +476,20 @@ export default function ThreadsPage() {
     if (msg) {
       setMessages((prev) => [...prev, msg]);
       setDraft("");
+      setMentionOpen(false);
+      setMentionCtx(null);
+      setMentionIndex(0);
     }
     setSending(false);
   };
 
-  const handleKey = (e: React.KeyboardEvent) => {
+  const handleKey = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (mentionOpen && mentionSuggestions.length > 0) {
+      if (e.key === "ArrowDown") { e.preventDefault(); setMentionIndex((i) => (i + 1) % mentionSuggestions.length); return; }
+      if (e.key === "ArrowUp") { e.preventDefault(); setMentionIndex((i) => (i - 1 + mentionSuggestions.length) % mentionSuggestions.length); return; }
+      if (e.key === "Enter" || e.key === "Tab") { e.preventDefault(); applyMention(mentionSuggestions[mentionIndex]); return; }
+      if (e.key === "Escape") { e.preventDefault(); setMentionOpen(false); return; }
+    }
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); }
   };
 
@@ -630,6 +725,7 @@ export default function ThreadsPage() {
                     key={msg.message_id}
                     msg={msg}
                     isMe={msg.sender_slug === "SANJAYA"}
+                    knownSlugs={new Set(mentionSlugs)}
                   />
                 ))
               )}
@@ -638,15 +734,50 @@ export default function ThreadsPage() {
 
             {/* Reply input */}
             <div className="border-t border-slate-200 bg-white px-4 py-3 dark:border-slate-800 dark:bg-slate-950">
-              <div className="flex items-end gap-2">
+              <div className="relative flex items-end gap-2">
                 <textarea
+                  ref={textareaRef}
                   rows={2}
                   value={draft}
-                  onChange={(e) => setDraft(e.target.value)}
+                  onChange={(e) => {
+                    const text = e.target.value;
+                    setDraft(text);
+                    const ctx = getMentionContext(text, e.target.selectionStart ?? text.length);
+                    setMentionCtx(ctx);
+                    setMentionOpen(Boolean(ctx));
+                    setMentionIndex(0);
+                  }}
+                  onClick={(e) => {
+                    const t = e.currentTarget;
+                    const ctx = getMentionContext(t.value, t.selectionStart ?? t.value.length);
+                    setMentionCtx(ctx);
+                    setMentionOpen(Boolean(ctx));
+                  }}
+                  onKeyUp={(e) => {
+                    const t = e.currentTarget;
+                    const ctx = getMentionContext(t.value, t.selectionStart ?? t.value.length);
+                    setMentionCtx(ctx);
+                    setMentionOpen(Boolean(ctx));
+                  }}
                   onKeyDown={handleKey}
-                  placeholder="Reply… (Enter to send, Shift+Enter for new line)"
+                  placeholder="Reply… (use @slug to mention, Enter to send)"
                   className="flex-1 resize-none rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800 placeholder-slate-400 outline-none focus:border-violet-400 focus:ring-1 focus:ring-violet-400 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:placeholder-slate-500"
                 />
+                {mentionOpen && mentionSuggestions.length > 0 && (
+                  <div className="absolute bottom-12 left-0 z-30 w-72 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl dark:border-slate-700 dark:bg-slate-900">
+                    {mentionSuggestions.map((slug, idx) => (
+                      <button
+                        key={slug}
+                        type="button"
+                        onClick={() => applyMention(slug)}
+                        className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm ${idx === mentionIndex ? "bg-violet-50 text-violet-700 dark:bg-violet-950/40 dark:text-violet-300" : "text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800"}`}
+                      >
+                        <span className={`h-2 w-2 rounded-full ${slugColor(slug)}`} />
+                        <span className="font-medium">@{slug}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
                 <button
                   onClick={handleSend}
                   disabled={!draft.trim() || sending}
