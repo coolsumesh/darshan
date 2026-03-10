@@ -859,6 +859,7 @@ export type LevelDefinition = {
   name?: string;
   label: string;
   description: string;
+  gate?: string | null;
 };
 
 export type AgentProjectLevel = {

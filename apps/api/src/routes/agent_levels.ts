@@ -15,7 +15,8 @@ export async function registerAgentLevels(server: FastifyInstance, db: pg.Pool) 
            level AS level_id,
            name,
            name AS label,
-           name AS description
+           COALESCE(description, name) AS description,
+           gate
          FROM project_level_definitions
          WHERE project_id = $1
          ORDER BY level`,
@@ -31,7 +32,8 @@ export async function registerAgentLevels(server: FastifyInstance, db: pg.Pool) 
          level AS level_id,
          name,
          name AS label,
-         name AS description
+         COALESCE(description, name) AS description,
+         gate
        FROM project_level_definitions
        ORDER BY level, name`
     );
