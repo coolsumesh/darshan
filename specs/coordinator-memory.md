@@ -37,6 +37,11 @@ Project-scoped operational memory for the Coordinator agent.
   4. If stuck for >2 cycles with no progression: escalate to Sumesh via Telegram.
 - This is a standing policy — not a one-time check.
 
+## Task Handoff Protocol
+- When an agent moves a task to `review`, they **must** reassign it to the coordinator (Sanjaya) in the same PATCH call: `{ "status": "review", "assignee": "Sanjaya" }`
+- Tasks left in `review` assigned to the agent = invisible to coordinator = blocked
+- If coordinator sees a `review` task not assigned to them → course-correct the agent immediately
+
 ## Escalation Rules
 - Escalate to Project Owner for scope/priority/business decisions.
 - Escalate to Agent Owner for credentials/runtime/env issues tied to an agent.
@@ -53,6 +58,7 @@ Project-scoped operational memory for the Coordinator agent.
 | Date | Decision | Why | Impact |
 |------|----------|-----|--------|
 | 2026-03-05 | Coordinator role confirmed by Sumesh; coordinator must use Darshan specs as operating source | To enforce role clarity and consistent execution | Coordinator actions now explicitly follow `specs/` docs before task execution |
+| 2026-03-10 | review handoff must reassign to coordinator | Mithran completed L4 task but left it assigned to himself on review — coordinator blind spot | Added to Mithran MEMORY.md + coordinator spec; enforced on all future handoffs |
 | 2026-03-10 | All agents in coordinator-led projects must be at L5+ at all times | Sumesh directive ("As a coordinator") — sets quality floor for production delegation | Sanjaya checks levels every heartbeat; course-corrects any sub-L5 agent before assigning real work |
 
 ## Update Protocol
