@@ -4,10 +4,17 @@ import { getRequestUser } from "./auth.js";
 
 export async function registerAgentLevels(server: FastifyInstance, db: pg.Pool) {
 
-  // ── GET all level definitions ─────────────────────────────────────────────
-  server.get("/agent-levels/definitions", async (_req, reply) => {
+  // ── GET level definitions for a project ───────────────────────────────────
+  server.get<{ Querystring: { project_id?: string } }>("/agent-levels/definitions", async (req, reply) => {
+    const projectId = req.query.project_id?.trim();
+    if (!projectId) return reply.send({ ok: true, definitions: [] });
+
     const { rows } = await db.query(
-      `SELECT * FROM agent_level_definitions ORDER BY level_id`
+      `SELECT project_id, level, name
+       FROM project_level_definitions
+       WHERE project_id = $1
+       ORDER BY level`,
+      [projectId]
     );
     return reply.send({ ok: true, definitions: rows });
   });
@@ -21,15 +28,13 @@ export async function registerAgentLevels(server: FastifyInstance, db: pg.Pool) 
         `SELECT
            apl.id, apl.agent_id, apl.project_id,
            apl.current_level, apl.created_at, apl.updated_at,
-           a.name   AS agent_name,
-           a.slug   AS agent_slug,
-           d.name   AS level_name,
-           d.label  AS level_label,
-           d.description AS level_description,
-           d.can_receive_tasks, d.max_parallel_tasks, d.requires_approval
+           a.name AS agent_name,
+           a.slug AS agent_slug,
+           d.name AS level_name
          FROM agent_project_levels apl
          JOIN agents a ON a.id = apl.agent_id
-         JOIN agent_level_definitions d ON d.level_id = apl.current_level
+         LEFT JOIN project_level_definitions d
+           ON d.project_id = apl.project_id AND d.level = apl.current_level
          WHERE apl.project_id = $1
          ORDER BY apl.current_level DESC, a.name`,
         [projectId]
@@ -38,44 +43,36 @@ export async function registerAgentLevels(server: FastifyInstance, db: pg.Pool) 
     }
   );
 
-  // ── GET level + full event history for one agent in a project ─────────────
+  // ── GET current level + event history for one agent in a project ──────────
   server.get<{ Params: { projectId: string; agentId: string } }>(
     "/projects/:projectId/agent-levels/:agentId",
     async (req, reply) => {
       const { projectId, agentId } = req.params;
 
       const { rows: [current] } = await db.query(
-        `SELECT apl.*, d.name AS level_name, d.label AS level_label,
-                d.description AS level_description,
-                d.can_receive_tasks, d.max_parallel_tasks, d.requires_approval
+        `SELECT apl.*, d.name AS level_name
          FROM agent_project_levels apl
-         JOIN agent_level_definitions d ON d.level_id = apl.current_level
+         LEFT JOIN project_level_definitions d
+           ON d.project_id = apl.project_id AND d.level = apl.current_level
          WHERE apl.project_id = $1 AND apl.agent_id = $2`,
         [projectId, agentId]
       );
 
       const { rows: events } = await db.query(
         `SELECT e.*,
-                fd.label AS from_label, td.label AS to_label
+                fd.name AS from_name,
+                td.name AS to_name
          FROM agent_level_events e
-         JOIN agent_level_definitions fd ON fd.level_id = e.from_level
-         JOIN agent_level_definitions td ON td.level_id = e.to_level
+         LEFT JOIN project_level_definitions fd
+           ON fd.project_id = e.project_id AND fd.level = e.from_level
+         LEFT JOIN project_level_definitions td
+           ON td.project_id = e.project_id AND td.level = e.to_level
          WHERE e.project_id = $1 AND e.agent_id = $2
          ORDER BY e.created_at DESC`,
         [projectId, agentId]
       );
 
-      const eventIds = events.map((e: any) => e.id);
-      let proofs: any[] = [];
-      if (eventIds.length > 0) {
-        const { rows } = await db.query(
-          `SELECT * FROM agent_level_proofs WHERE event_id = ANY($1) ORDER BY created_at`,
-          [eventIds]
-        );
-        proofs = rows;
-      }
-
-      return reply.send({ ok: true, current: current ?? null, events, proofs });
+      return reply.send({ ok: true, current: current ?? null, events, proofs: [] });
     }
   );
 
@@ -86,7 +83,6 @@ export async function registerAgentLevels(server: FastifyInstance, db: pg.Pool) 
       level: number;
       reason?: string;
       changed_by_type?: "agent" | "user";
-      proofs?: Array<{ proof_type: "task" | "conversation" | "a2a_thread"; ref_id: string; notes?: string }>;
     };
   }>(
     "/projects/:projectId/agent-levels/:agentId",
@@ -95,7 +91,7 @@ export async function registerAgentLevels(server: FastifyInstance, db: pg.Pool) 
       if (!user) return reply.status(401).send({ ok: false, error: "not authenticated" });
 
       const { projectId, agentId } = req.params;
-      const { level, reason, changed_by_type = "user", proofs = [] } = req.body ?? {};
+      const { level, reason, changed_by_type = "user" } = req.body ?? {};
 
       if (typeof level !== "number") {
         return reply.status(400).send({ ok: false, error: "level (number) required" });
@@ -125,17 +121,6 @@ export async function registerAgentLevels(server: FastifyInstance, db: pg.Pool) 
          RETURNING id`,
         [projectId, agentId, fromLevel, level, user.userId, changed_by_type, reason ?? null]
       );
-
-      // Insert proofs
-      if (proofs.length > 0) {
-        for (const p of proofs) {
-          await db.query(
-            `INSERT INTO agent_level_proofs (event_id, proof_type, ref_id, notes)
-             VALUES ($1, $2, $3, $4)`,
-            [event.id, p.proof_type, p.ref_id, p.notes ?? null]
-          );
-        }
-      }
 
       return reply.send({ ok: true, event_id: event.id });
     }

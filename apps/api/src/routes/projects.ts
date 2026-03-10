@@ -550,14 +550,15 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
                 a.agent_type, a.model, a.provider, a.capabilities,
                 a.ping_status, a.last_ping_ms, a.last_seen_at,
                 coalesce(par.agent_role, 'worker') as agent_role,
-                coalesce(acl.current_level, 0) as agent_level,
-                coalesce(acl.level_confidence, 'low') as level_confidence,
-                acl.last_evaluated_at
+                coalesce(apl.current_level, 0) as agent_level,
+                null::text as level_confidence,
+                null::timestamptz as last_evaluated_at
          from project_agents pt
          join agents a on a.id = pt.agent_id
          left join project_agent_roles par
            on par.project_id = pt.project_id and par.agent_id = pt.agent_id
-         left join agent_capability_levels acl on acl.agent_id = pt.agent_id
+         left join agent_project_levels apl
+           on apl.project_id = pt.project_id and apl.agent_id = pt.agent_id
          where pt.project_id = $1
          order by pt.joined_at asc`,
         [access.projectId]
