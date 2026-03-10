@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import {
   fetchThreads,
   fetchThreadMessages,
@@ -515,6 +516,17 @@ export default function ThreadsPage() {
               />
             ))
           )}
+        </div>
+
+        {/* Channel docs shortcut (below thread list) */}
+        <div className="border-t border-slate-200 p-3 dark:border-slate-800">
+          <Link
+            href="/threads/darshan-channel-enablement"
+            className="block rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 text-xs text-violet-700 hover:bg-violet-100 dark:border-violet-900/60 dark:bg-violet-950/30 dark:text-violet-300"
+          >
+            <div className="font-semibold">Darshan Channel Enablement Docs</div>
+            <div className="mt-0.5 text-[11px] opacity-80">Files, source code, install paths, runtime + troubleshooting</div>
+          </Link>
         </div>
       </div>
 
