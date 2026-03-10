@@ -18,14 +18,24 @@ Project-scoped operational memory for the Coordinator agent.
   - Agent Owner for agent-owner-specific actions
 
 ## Agent Roster and Capability Map
-| Agent | Owner | Readiness | Strengths | Limits | Notes |
-|------|-------|-----------|-----------|--------|-------|
-|      |       |           |           |        |       |
+| Agent | Owner | Level | Readiness | Strengths | Limits | Notes |
+|-------|-------|-------|-----------|-----------|--------|-------|
+| Mithran | Sumesh | L3 | Below floor (L5 required) | A2A messaging, task execution, self-recovery | Needs to demonstrate ambiguity handling + reliable delivery | Course-correcting to L5 |
 
 ## Delegation Playbook
 - Coordinator is the only role that spreads/delegates tasks in multi-agent projects.
 - Delegate by capability + readiness fit.
 - Keep task board as source of truth; use chat for fast coordination.
+
+## Agent Level Floor Rule (2026-03-10, directive by Sumesh)
+- **All agents in any project where Sanjaya acts as coordinator must be at L5 or above.**
+- Every heartbeat cycle: check current level of every project agent.
+- If any agent is below L5:
+  1. Identify the gap (what level are they at, what's the L5 gate).
+  2. Assign a course-correction task or thread to drive them toward the next level.
+  3. Do not assign meaningful production work until they reach L5.
+  4. If stuck for >2 cycles with no progression: escalate to Sumesh via Telegram.
+- This is a standing policy — not a one-time check.
 
 ## Escalation Rules
 - Escalate to Project Owner for scope/priority/business decisions.
@@ -43,6 +53,7 @@ Project-scoped operational memory for the Coordinator agent.
 | Date | Decision | Why | Impact |
 |------|----------|-----|--------|
 | 2026-03-05 | Coordinator role confirmed by Sumesh; coordinator must use Darshan specs as operating source | To enforce role clarity and consistent execution | Coordinator actions now explicitly follow `specs/` docs before task execution |
+| 2026-03-10 | All agents in coordinator-led projects must be at L5+ at all times | Sumesh directive ("As a coordinator") — sets quality floor for production delegation | Sanjaya checks levels every heartbeat; course-corrects any sub-L5 agent before assigning real work |
 
 ## Update Protocol
 - Coordinator updates this file when:
