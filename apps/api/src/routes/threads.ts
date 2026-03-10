@@ -118,12 +118,33 @@ async function fanOutNotifications(
     );
 
     // Real-time push if recipient is an agent connected via WS
-    pushToAgent(r.participant_id, "notification", {
-      notification_id: notif.notification_id,
-      message_id:      messageId,
-      thread_id:       threadId,
-      type:            "a2a_message",
-      priority,
+    // Enrich with message body/sender so the extension doesn't need a follow-up fetch
+    db.query(
+      `SELECT tm.body, tm.sender_slug, t.subject
+       FROM thread_messages tm
+       JOIN threads t ON t.thread_id = tm.thread_id
+       WHERE tm.message_id = $1 LIMIT 1`,
+      [messageId]
+    ).then(({ rows: [msg] }) => {
+      pushToAgent(r.participant_id, "notification", {
+        notification_id: notif.notification_id,
+        message_id:      messageId,
+        thread_id:       threadId,
+        type:            "a2a_message",
+        priority,
+        message_body:    msg?.body ?? "",
+        message_from:    msg?.sender_slug ?? "",
+        thread_subject:  msg?.subject ?? "",
+      });
+    }).catch(() => {
+      // Fallback: push without enrichment
+      pushToAgent(r.participant_id, "notification", {
+        notification_id: notif.notification_id,
+        message_id:      messageId,
+        thread_id:       threadId,
+        type:            "a2a_message",
+        priority,
+      });
     });
   }
 }
