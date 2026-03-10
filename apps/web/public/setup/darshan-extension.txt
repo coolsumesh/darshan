@@ -1,8 +1,9 @@
-﻿import type { OpenClawPluginApi, PluginRuntime } from "openclaw/plugin-sdk";
+import type { OpenClawPluginApi, PluginRuntime } from "openclaw/plugin-sdk";
 import { emptyPluginConfigSchema } from "openclaw/plugin-sdk";
 
 const CHANNEL_ID = "darshan";
-const POLL_INTERVAL_MS = 3000;
+const POLL_INTERVAL_MS = 3000;     // main loop tick
+const NOTIF_POLL_MS   = 30000;     // notification poll fallback (every 30s)
 
 let _runtime: PluginRuntime | null = null;
 
@@ -13,298 +14,157 @@ function getDarshanConfig(cfg: any) {
     process.env.DARSHAN_BASE_URL ??
     "https://darshan.caringgems.in/api/backend"
   ).replace(/\/$/, "");
-  const apiKey =
-    c.apiKey ??
-    process.env.DARSHAN_API_KEY ??
-    "824cdfcdec0e35cf550002c2dfa3541932f58e2e2497cfaa3c844dc99f5b972f";
-  // Agent-specific credentials â€” read from openclaw config (set via `openclaw config set channels.darshan.agentId`)
-  // Env var fallback uses generic DARSHAN_AGENT_* (slug-based vars like AGENT_SANJAYA_* are set in env but
-  // each instance should configure via openclaw config so the extension stays slug-agnostic)
-  const agentId =
-    c.agentId ??
-    process.env.DARSHAN_AGENT_ID ??
-    null;
-  const agentToken =
-    c.agentToken ??
-    process.env.DARSHAN_AGENT_TOKEN ??
-    null;
-  return { baseUrl, apiKey, agentId, agentToken };
+  const agentId    = c.agentId    ?? process.env.DARSHAN_AGENT_ID    ?? null;
+  const agentToken = c.agentToken ?? process.env.DARSHAN_AGENT_TOKEN ?? null;
+  return { baseUrl, agentId, agentToken };
 }
 
-// â”€â”€ Shared A2A message handler â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-async function handleA2AMessage(
-  item: { id?: string; inbox_id?: string; from_agent_id: string; corr_id: string; thread_id?: string; payload: { text?: string; from_agent_name?: string }; status?: string },
-  baseUrl: string,
-  agentId: string,
+// ── Process a single notification ────────────────────────────────────────────
+async function processNotification(
+  notif: {
+    notification_id: string;
+    message_id:      string;
+    thread_id:       string;
+    thread_subject?: string;
+    message_body:    string;
+    message_from:    string;   // sender_slug
+    priority?:       string;
+  },
+  baseUrl:    string,
+  agentId:    string,
   agentToken: string,
-  log: any
+  log:        any
 ) {
-  const inboxId  = item.id ?? item.inbox_id ?? "";
-  const fromName = item.payload?.from_agent_name ?? "agent";
-  const text     = item.payload?.text ?? "";
+  const headers = { Authorization: `Bearer ${agentToken}`, "Content-Type": "application/json" };
 
-  const ack = async (response: string) => {
-    await fetch(`${baseUrl}/api/v1/agents/${agentId}/inbox/ack`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${agentToken}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ inbox_id: inboxId, callback_token: agentToken, response }),
-      signal: AbortSignal.timeout(10000),
+  const markProcessed = async (note: string) => {
+    await fetch(`${baseUrl}/api/v1/notifications/${notif.notification_id}/process`, {
+      method:  "POST",
+      headers,
+      body:    JSON.stringify({ response_note: note }),
+      signal:  AbortSignal.timeout(10000),
     }).catch(() => {});
   };
 
   const sendReply = async (replyText: string) => {
     const clean = replyText.trim();
     if (!clean || clean === "NO_REPLY" || clean === "HEARTBEAT_OK") return false;
-    await fetch(`${baseUrl}/api/v1/a2a/send`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${agentToken}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        from_agent_id: agentId, to_agent_id: item.from_agent_id,
-        text: clean, thread_id: item.thread_id ?? null,
-        reply_to_corr_id: item.corr_id,
-      }),
-      signal: AbortSignal.timeout(15000),
-    });
-    log?.info?.(`[darshan] a2a reply sent to ${fromName}: ${clean.slice(0, 60)}`);
+    await fetch(`${baseUrl}/api/v1/threads/${notif.thread_id}/messages`, {
+      method:  "POST",
+      headers,
+      body:    JSON.stringify({ body: clean }),
+      signal:  AbortSignal.timeout(15000),
+    }).catch(() => {});
+    log?.info?.(`[darshan] reply sent in thread ${notif.thread_id.slice(0, 8)}: ${clean.slice(0, 60)}`);
     return true;
   };
 
   try {
-    const rt = _runtime!;
+    const rt  = _runtime!;
     const cfg = await (rt as any).config.loadConfig();
     let delivered = false;
 
-    const attemptDispatch = async (bodyText: string) => {
-      await (rt as any).channel.reply.dispatchReplyWithBufferedBlockDispatcher({
-        ctx: {
-          Body: bodyText,
-          From: item.from_agent_id,
-          To: agentId,
-          SessionKey: `darshan:a2a:${item.from_agent_id}`,
-          AccountId: "default",
-          OriginatingChannel: CHANNEL_ID as any,
-          OriginatingTo: item.from_agent_id,
-          ChatType: "direct" as const,
-          SenderName: fromName,
-        },
-        cfg,
-        dispatcherOptions: {
-          deliver: async (payload: { text?: string; body?: string }) => {
-            const out = payload?.text ?? payload?.body ?? "";
-            const sent = await sendReply(out);
-            if (sent) {
-              delivered = true;
-              await ack(`replied: ${out.slice(0, 80)}`);
-            }
-          },
-        },
-      });
-    };
-
-    // First pass: normal conversational input
-    await attemptDispatch(`${fromName}: ${text}`);
-
-    // Second pass: force explicit response if model returned NO_REPLY/empty
-    if (!delivered) {
-      log?.warn?.("[darshan] no usable reply on first pass; retrying with explicit instruction");
-      await attemptDispatch(
-        `You are responding to another agent in Darshan A2A.\n` +
-        `You MUST send a concise textual reply now (do not output NO_REPLY or HEARTBEAT_OK).\n` +
-        `Sender: ${fromName}\nMessage: ${text}`
-      );
-    }
-
-    // Final fallback: send minimal structured response (avoid silent ACK-only loops)
-    if (!delivered) {
-      log?.warn?.("[darshan] no usable reply after retry; sending minimal structured fallback");
-      const fallbackText =
-        "NEED_CLARIFICATION\n" +
-        "- I received your message but could not generate a full response yet.\n" +
-        "- Please restate the task in strict output format (PASS/FAIL + bullets) and I will respond accordingly.";
-      const sent = await sendReply(fallbackText);
-      if (sent) {
-        await ack("replied: minimal structured fallback");
-      } else {
-        await ack("auto-acked: no textual reply produced");
-      }
-    }
-  } catch (err: any) {
-    log?.error?.(`[darshan] handleA2AMessage error: ${err?.message ?? err}`);
-    await ack(`error: ${String(err?.message ?? err).slice(0, 80)}`);
-  }
-}
-
-// â”€â”€ Agent inbox WS subscription (real-time push) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-let _wsReconnectTimer: ReturnType<typeof setTimeout> | null = null;
-
-function startAgentInboxWs(
-  wsUrl: string,
-  agentId: string,
-  agentToken: string,
-  onInboxItem: (item: any) => void,
-  abortSignal: AbortSignal,
-  log: any
-) {
-  if (abortSignal.aborted) return;
-
-  let ws: any;
-  try {
-    // Use the global WebSocket (available in Node 22+ / modern runtimes)
-    ws = new (globalThis as any).WebSocket(wsUrl);
-  } catch {
-    log?.warn?.("[darshan] WebSocket not available, skipping realtime push");
-    return;
-  }
-
-  ws.onopen = () => {
-    log?.info?.("[darshan] WS connected, authenticating agent...");
-    ws.send(JSON.stringify({ type: "agent_auth", agent_id: agentId, token: agentToken }));
-  };
-
-  ws.onmessage = (event: any) => {
-    try {
-      const msg = JSON.parse(typeof event.data === "string" ? event.data : event.data.toString());
-      if (msg.type === "agent_subscribed") {
-        log?.info?.(`[darshan] WS subscribed to inbox push for agent ${agentId}`);
-      } else if (msg.type === "inbox_item") {
-        log?.info?.(`[darshan] WS push received: ${msg.data?.type} corr=${msg.data?.corr_id}`);
-        onInboxItem(msg.data);
-      }
-    } catch { /* ignore */ }
-  };
-
-  ws.onclose = () => {
-    if (abortSignal.aborted) return;
-    log?.warn?.("[darshan] WS closed, reconnecting in 5s...");
-    _wsReconnectTimer = setTimeout(() => {
-      startAgentInboxWs(wsUrl, agentId, agentToken, onInboxItem, abortSignal, log);
-    }, 5000);
-  };
-
-  ws.onerror = () => {
-    log?.warn?.("[darshan] WS error");
-  };
-
-  abortSignal.addEventListener("abort", () => {
-    if (_wsReconnectTimer) clearTimeout(_wsReconnectTimer);
-    try { ws.close(); } catch { /* ignore */ }
-  }, { once: true });
-}
-
-async function fetchPending(baseUrl: string, apiKey: string) {
-  try {
-    const res = await fetch(`${baseUrl}/api/v1/openclaw/pending`, {
-      headers: { Authorization: `Bearer ${apiKey}` },
-      signal: AbortSignal.timeout(10000),
-    });
-    if (!res.ok) return [];
-    const data: any = await res.json();
-    return (data.runs ?? []) as Array<{
-      run_id: string;
-      thread_id: string;
-      agent_id: string;
-      agent_name: string;
-      content: string | null;
-      requested_by_user_id: string | null;
-    }>;
-  } catch {
-    return [];
-  }
-}
-
-async function claimRun(baseUrl: string, apiKey: string, runId: string) {
-  try {
-    const res = await fetch(`${baseUrl}/api/v1/openclaw/claim/${runId}`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${apiKey}` },
-      signal: AbortSignal.timeout(10000),
-    });
-    return res.ok;
-  } catch {
-    return false;
-  }
-}
-
-async function postReply(
-  baseUrl: string,
-  apiKey: string,
-  params: { run_id: string; thread_id: string; agent_id: string; agent_name: string; text: string }
-) {
-  try {
-    await fetch(`${baseUrl}/api/v1/openclaw/reply`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify(params),
-      signal: AbortSignal.timeout(15000),
-    });
-  } catch {}
-}
-
-async function processRun(
-  run: { run_id: string; thread_id: string; agent_id: string; agent_name: string; content: string | null; requested_by_user_id: string | null },
-  baseUrl: string,
-  apiKey: string,
-  log: any
-) {
-  const claimed = await claimRun(baseUrl, apiKey, run.run_id);
-  if (!claimed) return;
-
-  const message = run.content?.trim() ?? "";
-  log?.info?.(`[darshan] processing run ${run.run_id} for agent ${run.agent_name}`);
-
-  if (!message) {
-    await postReply(baseUrl, apiKey, {
-      run_id: run.run_id, thread_id: run.thread_id,
-      agent_id: run.agent_id, agent_name: run.agent_name,
-      text: "No message content received.",
-    });
-    return;
-  }
-
-  try {
-    const rt = _runtime!;
-    const cfg = await (rt as any).config.loadConfig();
-    const msgCtx = {
-      Body: message,
-      From: run.thread_id,
-      To: run.agent_name,
-      SessionKey: run.thread_id,
-      AccountId: "default",
-      OriginatingChannel: CHANNEL_ID as any,
-      OriginatingTo: run.thread_id,
-      ChatType: "direct" as const,
-      SenderName: run.requested_by_user_id ?? "user",
-    };
     await (rt as any).channel.reply.dispatchReplyWithBufferedBlockDispatcher({
-      ctx: msgCtx,
+      ctx: {
+        Body:               notif.message_body,
+        From:               notif.message_from,
+        To:                 agentId,
+        SessionKey:         `darshan:thread:${notif.thread_id}`,
+        AccountId:          "default",
+        OriginatingChannel: CHANNEL_ID as any,
+        OriginatingTo:      notif.thread_id,
+        ChatType:           "direct" as const,
+        SenderName:         notif.message_from,
+        Subject:            notif.thread_subject ?? "",
+      },
       cfg,
       dispatcherOptions: {
         deliver: async (payload: { text?: string; body?: string }) => {
-          const text = payload?.text ?? payload?.body ?? "";
-          if (text.trim()) {
-            await postReply(baseUrl, apiKey, {
-              run_id: run.run_id, thread_id: run.thread_id,
-              agent_id: run.agent_id, agent_name: run.agent_name,
-              text,
-            });
+          const out = payload?.text ?? payload?.body ?? "";
+          const sent = await sendReply(out);
+          if (sent) {
+            delivered = true;
+            await markProcessed(`replied: ${out.slice(0, 80)}`);
           }
         },
       },
     });
+
+    if (!delivered) {
+      await markProcessed("auto-processed: no reply generated");
+    }
   } catch (err: any) {
-    log?.error?.(`[darshan] run ${run.run_id} error: ${err?.message ?? err}`);
-    await postReply(baseUrl, apiKey, {
-      run_id: run.run_id, thread_id: run.thread_id,
-      agent_id: run.agent_id, agent_name: run.agent_name,
-      text: "Sorry, I encountered an error processing your message.",
-    });
+    log?.error?.(`[darshan] notification ${notif.notification_id} error: ${err?.message ?? err}`);
+    await markProcessed(`error: ${err?.message ?? "unknown"}`);
   }
 }
 
+// ── WS real-time push ─────────────────────────────────────────────────────────
+function startNotificationWs(
+  wsUrl:       string,
+  agentId:     string,
+  agentToken:  string,
+  onNotif:     (data: any) => void,
+  abortSignal: AbortSignal | null,
+  log:         any
+) {
+  if (abortSignal?.aborted) return;
+
+  let ws: any = null;
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+
+  const cleanup = () => {
+    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+    try { ws?.close?.(); } catch {}
+  };
+
+  abortSignal?.addEventListener?.("abort", cleanup, { once: true });
+
+  const connect = () => {
+    if (abortSignal?.aborted) return;
+    try {
+      const WebSocket = (globalThis as any).WebSocket ?? require("ws");
+      ws = new WebSocket(`${wsUrl}?agentId=${agentId}&token=${agentToken}`);
+
+      ws.onopen = () => {
+        log?.info?.(`[darshan] WS connected (${wsUrl})`);
+      };
+
+      ws.onmessage = (evt: any) => {
+        try {
+          const msg = JSON.parse(evt.data ?? evt);
+          // Event format: { type: "notification", data: { notification_id, thread_id, ... } }
+          if (msg?.type === "notification" && msg?.data) {
+            onNotif(msg.data);
+          }
+        } catch {}
+      };
+
+      ws.onerror = (err: any) => {
+        log?.warn?.(`[darshan] WS error: ${err?.message ?? err}`);
+      };
+
+      ws.onclose = () => {
+        if (!abortSignal?.aborted) {
+          log?.info?.("[darshan] WS closed, reconnecting in 15s");
+          reconnectTimer = setTimeout(connect, 15000);
+        }
+      };
+    } catch (err: any) {
+      log?.warn?.(`[darshan] WS init error: ${err?.message ?? err}`);
+      if (!abortSignal?.aborted) {
+        reconnectTimer = setTimeout(connect, 15000);
+      }
+    }
+  };
+
+  connect();
+}
+
 const plugin = {
-  id: CHANNEL_ID,
-  name: "Darshan",
-  description: "Darshan native channel plugin",
+  id:          CHANNEL_ID,
+  name:        "Darshan",
+  description: "Darshan native channel plugin (notifications + threads)",
   configSchema: emptyPluginConfigSchema(),
 
   register(api: OpenClawPluginApi) {
@@ -315,30 +175,36 @@ const plugin = {
       plugin: {
         id: CHANNEL_ID,
         meta: {
-          id: CHANNEL_ID,
-          label: "Darshan",
+          id:             CHANNEL_ID,
+          label:          "Darshan",
           selectionLabel: "Darshan",
-          detailLabel: "Darshan",
-          blurb: "Native Darshan channel",
-          order: 95,
+          detailLabel:    "Darshan",
+          blurb:          "Native Darshan channel",
+          order:          95,
         },
         capabilities: {
-          chatTypes: ["direct" as const, "group" as const],
-          media: false, threads: true, reactions: false,
-          edit: false, unsend: false, reply: true, effects: false, blockStreaming: false,
+          chatTypes:      ["direct" as const, "group" as const],
+          media:          false,
+          threads:        true,
+          reactions:      false,
+          edit:           false,
+          unsend:         false,
+          reply:          true,
+          effects:        false,
+          blockStreaming: false,
         },
         reload: { configPrefixes: ["channels.darshan"] },
         configSchema: emptyPluginConfigSchema(),
         config: {
-          listAccountIds: (_cfg: any) => ["default"],
-          resolveAccount: (cfg: any) => ({
+          listAccountIds:     (_cfg: any) => ["default"],
+          resolveAccount:     (cfg: any)  => ({
             accountId: "default",
-            enabled: cfg?.channels?.darshan?.enabled !== false,
+            enabled:   cfg?.channels?.darshan?.enabled !== false,
           }),
-          describeAccount: (_account: any, _cfg: any) => ({ configured: true }),
-          isConfigured: async (_account: any, _cfg: any) => true,
-          defaultAccountId: () => "default",
-          setAccountEnabled: ({ cfg, enabled }: any) => ({
+          describeAccount:    (_account: any, _cfg: any) => ({ configured: true }),
+          isConfigured:       async (_account: any, _cfg: any) => true,
+          defaultAccountId:   () => "default",
+          setAccountEnabled:  ({ cfg, enabled }: any) => ({
             ...cfg,
             channels: { ...(cfg?.channels ?? {}), darshan: { ...(cfg?.channels?.darshan ?? {}), enabled } },
           }),
@@ -346,99 +212,112 @@ const plugin = {
         messaging: { normalizeTarget: (t: string) => t?.trim() || undefined },
         directory: { self: async () => null, listPeers: async () => [], listGroups: async () => [] },
         outbound: {
-          deliveryMode: "gateway" as const,
+          deliveryMode:  "gateway" as const,
           textChunkLimit: 4000,
+          // Proactive send (agent → agent): uses POST /threads/direct
           sendText: async ({ to, text }: any) => {
             const cfg = await (_runtime as any)?.config?.loadConfig?.() ?? {};
             const { baseUrl, agentId, agentToken } = getDarshanConfig(cfg);
-            if (agentId && agentToken && text) {
-              await fetch(`${baseUrl}/api/v1/a2a/send`, {
-                method: "POST",
-                headers: { Authorization: `Bearer ${agentToken}`, "Content-Type": "application/json" },
-                body: JSON.stringify({ from_agent_id: agentId, to_agent_id: to, text }),
+            if (agentId && agentToken && text?.trim()) {
+              await fetch(`${baseUrl}/api/v1/threads/direct`, {
+                method:  "POST",
+                headers: {
+                  Authorization:  `Bearer ${agentToken}`,
+                  "Content-Type": "application/json",
+                },
+                body:   JSON.stringify({ to, body: text.trim() }),
                 signal: AbortSignal.timeout(15000),
               }).catch(() => {});
             }
             return {
-              channel: CHANNEL_ID,
+              channel:   CHANNEL_ID,
               messageId: `darshan-${Date.now()}`,
-              chatId: String(to ?? "unknown"),
+              chatId:    String(to ?? "unknown"),
             };
           },
         },
         gateway: {
           startAccount: async (ctx: any) => {
             const { cfg, abortSignal, setStatus, log } = ctx;
-            const { baseUrl, apiKey, agentId, agentToken } = getDarshanConfig(cfg);
+            const { baseUrl, agentId, agentToken } = getDarshanConfig(cfg);
 
             setStatus?.({ configured: true, running: true, lastError: null });
             log?.info?.(`[darshan] started, polling ${baseUrl}`);
             console.log(`[darshan] startAccount called, polling ${baseUrl}`);
 
-            // â”€â”€ Real-time inbox push via WebSocket â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-            if (agentId && agentToken) {
-              // baseUrl = "https://darshan.caringgems.in/api/backend"
-              // WS must go through /api/backend/ws so Nginx routes it to the API (port 4000)
-              const wsUrl = baseUrl
-                .replace(/^https:\/\//, "wss://")
-                .replace(/^http:\/\//, "ws://") + "/ws";
-
-              startAgentInboxWs(
-                wsUrl, agentId, agentToken,
-                async (item: any) => {
-                  if (item?.type !== "a2a_message") return;
-                  log?.info?.(`[darshan] WS push: a2a from ${item.from_agent_name}`);
-                  // Normalize WS item shape to match REST inbox shape
-                  const normalized = {
-                    id: item.inbox_id ?? item.id ?? "",
-                    inbox_id: item.inbox_id ?? item.id ?? "",
-                    from_agent_id: item.from_agent_id,
-                    corr_id: item.corr_id,
-                    thread_id: item.thread_id,
-                    payload: { text: item.text, from_agent_name: item.from_agent_name },
-                  };
-                  handleA2AMessage(normalized, baseUrl, agentId, agentToken, log)
-                    .catch((e: any) => log?.error?.(`[darshan] WS a2a error: ${e?.message ?? e}`));
-                },
-                abortSignal,
-                log
-              );
-            } else {
-              log?.warn?.("[darshan] no agentId/agentToken configured - skipping realtime inbox push");
+            if (!agentId || !agentToken) {
+              log?.warn?.("[darshan] no agentId/agentToken — skipping");
+              return { stop: () => {} };
             }
 
-            // ── Inbox poll fallback for a2a_message (runs every 30s) ────────
-            let lastInboxPoll = 0;
-            const INBOX_POLL_MS = 30000;
+            const headers = { Authorization: `Bearer ${agentToken}`, "Content-Type": "application/json" };
 
-            async function pollInboxForA2A() {
-              if (!agentId || !agentToken) return;
+            // ── WS real-time push ────────────────────────────────────────────
+            const wsBase = baseUrl
+              .replace(/^https:\/\//, "wss://")
+              .replace(/^http:\/\//, "ws://");
+
+            // Set of notification_ids already being processed (avoid double-process)
+            const inFlight = new Set<string>();
+
+            const handleWsNotif = (data: any) => {
+              const nid = data?.notification_id;
+              if (!nid || inFlight.has(nid)) return;
+              inFlight.add(nid);
+              log?.info?.(`[darshan] WS push: notification ${nid}`);
+              // Fetch full notification to get message body
+              fetch(`${baseUrl}/api/v1/notifications?status=pending&limit=50`, { headers })
+                .then((r) => r.json())
+                .then((d: any) => {
+                  const found = (d.notifications ?? []).find((n: any) => n.notification_id === nid);
+                  if (found) {
+                    processNotification(found, baseUrl, agentId, agentToken, log)
+                      .catch(() => {})
+                      .finally(() => inFlight.delete(nid));
+                  } else {
+                    inFlight.delete(nid);
+                  }
+                })
+                .catch(() => inFlight.delete(nid));
+            };
+
+            startNotificationWs(
+              `${wsBase}/ws`, agentId, agentToken,
+              handleWsNotif, abortSignal, log
+            );
+
+            // ── Poll fallback (every 30s) ─────────────────────────────────────
+            let lastPoll = 0;
+
+            async function pollNotifications() {
               try {
-                const res = await fetch(`${baseUrl}/api/v1/agents/${agentId}/inbox`, {
-                  headers: { Authorization: `Bearer ${agentToken}` },
-                  signal: AbortSignal.timeout(10000),
-                });
+                const res = await fetch(
+                  `${baseUrl}/api/v1/notifications?status=pending&limit=50`,
+                  { headers: { Authorization: `Bearer ${agentToken}` }, signal: AbortSignal.timeout(10000) }
+                );
                 if (!res.ok) return;
-                const data = await res.json() as { items?: any[] };
-                const a2aItems = (data.items ?? []).filter((i: any) => i.type === "a2a_message" && i.status === "pending");
-                for (const item of a2aItems) {
-                  log?.info?.(`[darshan] inbox poll found a2a from ${item.payload?.from_agent_name}`);
-                  await handleA2AMessage(item, baseUrl, agentId, agentToken, log)
-                    .catch((e: any) => log?.error?.(`[darshan] poll a2a error: ${e?.message ?? e}`));
+                const data = await res.json() as { notifications?: any[] };
+                const pending = (data.notifications ?? []).filter(
+                  (n: any) => !inFlight.has(n.notification_id)
+                );
+                for (const notif of pending) {
+                  inFlight.add(notif.notification_id);
+                  processNotification(notif, baseUrl, agentId, agentToken, log)
+                    .catch((e: any) => log?.error?.(`[darshan] notif error: ${e?.message ?? e}`))
+                    .finally(() => inFlight.delete(notif.notification_id));
                 }
               } catch (err: any) {
-                log?.warn?.(`[darshan] inbox poll error: ${err?.message ?? err}`);
+                log?.warn?.(`[darshan] poll error: ${err?.message ?? err}`);
               }
             }
 
+            // ── Main loop ─────────────────────────────────────────────────────
             while (!abortSignal?.aborted) {
-              // Poll inbox for a2a messages every 30s as WS fallback
-              if (Date.now() - lastInboxPoll > INBOX_POLL_MS) {
-                lastInboxPoll = Date.now();
-                pollInboxForA2A().catch(() => {});
+              if (Date.now() - lastPoll > NOTIF_POLL_MS) {
+                lastPoll = Date.now();
+                pollNotifications().catch(() => {});
               }
 
-              // Sleep POLL_INTERVAL_MS or until aborted
               await new Promise<void>((resolve) => {
                 if (abortSignal?.aborted) { resolve(); return; }
                 const t = setTimeout(resolve, POLL_INTERVAL_MS);
@@ -446,7 +325,7 @@ const plugin = {
               });
             }
 
-            log?.info?.(`[darshan] stopped`);
+            log?.info?.("[darshan] stopped");
             console.log("[darshan] startAccount exiting");
             return { stop: () => {} };
           },
