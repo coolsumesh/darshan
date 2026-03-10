@@ -307,17 +307,19 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
   );
 
   // ── GET /threads — list threads ─────────────────────────────────────────
-  server.get<{ Querystring: { search?: string; limit?: string; offset?: string; include_deleted?: string; project_id?: string } }>(
+  server.get<{ Querystring: { search?: string; limit?: string; offset?: string; include_deleted?: string; project_id?: string; status?: string } }>(
     "/threads",
     async (req, reply) => {
       const caller = await resolveCaller(req, db);
       if (!caller) return reply.status(401).send({ ok: false, error: "not authenticated" });
 
-      const { search, limit = "10", offset = "0", include_deleted, project_id } = req.query;
+      const { search, limit = "10", offset = "0", include_deleted, project_id, status = "open" } = req.query;
       const lim = Math.min(Number(limit), 100);
       const off = Number(offset);
       const showDeleted = include_deleted === "true";
       const pid = project_id?.trim() || null;
+      // status filter: "open" | "closed" | "archived" | "all"
+      const statusFilter = ["open", "closed", "archived"].includes(status) ? status : null;
 
       let query: string;
       let params: unknown[];
@@ -361,13 +363,14 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
           WHERE
             ($3 = false OR t.deleted_at IS NULL)
             AND ($4::uuid IS NULL OR t.project_id = $4)
+            AND ($5::text IS NULL OR t.status = $5)
             AND (
-              to_tsvector('english', t.subject) @@ plainto_tsquery('english', $5)
-              OR to_tsvector('english', COALESCE(tm.body, '')) @@ plainto_tsquery('english', $5)
+              to_tsvector('english', t.subject) @@ plainto_tsquery('english', $6)
+              OR to_tsvector('english', COALESCE(tm.body, '')) @@ plainto_tsquery('english', $6)
             )
           ORDER BY t.created_at DESC
-          LIMIT $6 OFFSET $7`;
-        params = [caller.id, caller.type === "user", !showDeleted, pid, search.trim(), lim, off];
+          LIMIT $7 OFFSET $8`;
+        params = [caller.id, caller.type === "user", !showDeleted, pid, statusFilter, search.trim(), lim, off];
       } else {
         query = `${visibilityCte}
           SELECT t.*, tp_self.removed_at AS my_removed_at
@@ -378,9 +381,10 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
           WHERE
             ($3 = false OR t.deleted_at IS NULL)
             AND ($4::uuid IS NULL OR t.project_id = $4)
+            AND ($5::text IS NULL OR t.status = $5)
           ORDER BY t.created_at DESC
-          LIMIT $5 OFFSET $6`;
-        params = [caller.id, caller.type === "user", !showDeleted, pid, lim, off];
+          LIMIT $6 OFFSET $7`;
+        params = [caller.id, caller.type === "user", !showDeleted, pid, statusFilter, lim, off];
       }
 
       const { rows } = await db.query(query, params);
@@ -425,6 +429,32 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
         [req.params.thread_id]
       );
       return { ok: true };
+    }
+  );
+
+  // ── PATCH /api/v1/threads/:thread_id/status ────────────────────────────────
+  server.patch<{ Params: { thread_id: string }; Body: { status: string } }>(
+    "/threads/:thread_id/status",
+    async (req, reply) => {
+      const caller = await resolveCaller(req, db);
+      if (!caller) return reply.status(401).send({ ok: false, error: "not authenticated" });
+
+      const { status } = req.body ?? {};
+      if (!["open", "closed", "archived"].includes(status)) {
+        return reply.status(400).send({ ok: false, error: "status must be open, closed, or archived" });
+      }
+
+      const access = await checkThreadAccess(req.params.thread_id, caller, db);
+      if (!access) return reply.status(404).send({ ok: false, error: "thread not found" });
+      if (access.role !== "creator" && access.role !== "owner") {
+        return reply.status(403).send({ ok: false, error: "only the thread creator or owner can change status" });
+      }
+
+      await db.query(
+        `UPDATE threads SET status = $1 WHERE thread_id = $2`,
+        [status, req.params.thread_id]
+      );
+      return { ok: true, status };
     }
   );
 
