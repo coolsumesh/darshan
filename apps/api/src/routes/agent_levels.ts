@@ -126,15 +126,17 @@ export async function registerAgentLevels(server: FastifyInstance, db: pg.Pool) 
       const INTERNAL_API_KEY = process.env.DARSHAN_API_KEY ?? "824cdfcdec0e35cf550002c2dfa3541932f58e2e2497cfaa3c844dc99f5b972f";
 
       // Accept: JWT user, internal API key, or agent callback token (coordinator)
-      let callerId: string | null = user?.userId ?? null;
-      if (!callerId && bearer === INTERNAL_API_KEY) callerId = "internal";
-      if (!callerId && bearer) {
+      let authenticated = false;
+      let callerId: string | null = null; // UUID for changed_by — null for internal key
+      if (user) { authenticated = true; callerId = user.userId; }
+      else if (bearer === INTERNAL_API_KEY) { authenticated = true; callerId = null; }
+      else if (bearer) {
         const { rows: [agent] } = await db.query(
           `SELECT id FROM agents WHERE callback_token = $1 LIMIT 1`, [bearer]
         );
-        if (agent) callerId = agent.id;
+        if (agent) { authenticated = true; callerId = agent.id; }
       }
-      if (!callerId) return reply.status(401).send({ ok: false, error: "not authenticated" });
+      if (!authenticated) return reply.status(401).send({ ok: false, error: "not authenticated" });
 
       const { projectId, agentId } = req.params;
       const { level, reason, changed_by_type = "user" } = req.body ?? {};
