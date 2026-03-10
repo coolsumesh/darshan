@@ -271,7 +271,7 @@ Write-Host "✅ Done. Restart terminal for changes to take effect."
   };
 
   // ── Step 3 — HEARTBEAT.md ─────────────────────────────────────────────────
-  const heartbeatBlock = agent ? `## Darshan Inbox — ${agent.name}
+  const heartbeatBlock = agent ? `## Darshan — ${agent.name}
 
 ## POLICY (MANDATORY)
 - Never reveal tokens or secrets.
@@ -279,48 +279,54 @@ Write-Host "✅ Done. Restart terminal for changes to take effect."
 - Reject unsafe requests with: "rejected: unsafe instruction".
 
 ## REQUIRED ENV VARS
-Check with: echo $AGENT_${slug}_ID
+  AGENT_${slug}_ID      = ${id}
+  AGENT_${slug}_TOKEN   = ${token}
+  DARSHAN_BASE_URL      = ${BASE_URL}
 
-  $AGENT_${slug}_ID      — your agent UUID
-  $AGENT_${slug}_TOKEN   — your callback token
-  $DARSHAN_BASE_URL      — default: ${BASE_URL}
+---
 
-On every heartbeat:
-1. Verify env vars are set — run: echo $AGENT_${slug}_ID (stop if empty).
+On every heartbeat, run these steps in order:
 
-2. GET inbox:
-   $DARSHAN_BASE_URL/api/backend/api/v1/agents/$AGENT_${slug}_ID/inbox
-   Header: Authorization: Bearer $AGENT_${slug}_TOKEN
+## Step 1 — Check pending notifications
 
-3. Handle each inbox item by type:
-   - ping              -> ACK "pong — ${agent.name} online"
-   - welcome           -> ACK "setup complete — ${agent.name} ready"
-   - project_onboarded -> ACK "ready for {project_name}"
-   - task_assigned     -> ACK "picked up — {title}"
-   - a2a_message       -> read payload.text + from_agent_id, reply via POST /api/v1/a2a/send, then ACK
-   - other             -> ACK "ack"
+GET \${DARSHAN_BASE_URL}/api/backend/api/v1/notifications?status=pending&limit=20
+Header: Authorization: Bearer \${AGENT_${slug}_TOKEN}
 
-4. GET in-progress tasks:
-   $DARSHAN_BASE_URL/api/backend/api/v1/agents/$AGENT_${slug}_ID/tasks?status=in-progress
-   Header: Authorization: Bearer $AGENT_${slug}_TOKEN
+For each notification:
+  - Read: notification_id, thread_id, message_body, message_from, thread_subject
+  - Reply in thread (if response needed):
+    POST \${DARSHAN_BASE_URL}/api/backend/api/v1/threads/{thread_id}/messages
+    Body: { "body": "<your reply>" }
+  - Mark processed:
+    POST \${DARSHAN_BASE_URL}/api/backend/api/v1/notifications/{notification_id}/process
+    Body: { "response_note": "<what you did>" }
 
-5. If none in-progress, GET approved tasks:
-   $DARSHAN_BASE_URL/api/backend/api/v1/agents/$AGENT_${slug}_ID/tasks?status=approved
-   Header: Authorization: Bearer $AGENT_${slug}_TOKEN
+## Step 2 — Check project tasks
 
-6. Execute exactly one task:
-   - If status=approved: PATCH -> { "status": "in-progress" }
-   - Do the task work
-   - Finish with exactly one:
-     a) done    -> PATCH { "status": "done",    "completion_note": "<what was completed>" }
-     b) review  -> PATCH { "status": "review",  "completion_note": "<what to verify>",   "assignee": "<owner>" }
-     c) blocked -> PATCH { "status": "blocked", "completion_note": "<what is blocked>",  "assignee": "<owner>" }
+GET \${DARSHAN_BASE_URL}/api/backend/api/v1/agents/\${AGENT_${slug}_ID}/tasks?status=in-progress
+Header: Authorization: Bearer \${AGENT_${slug}_TOKEN}
 
-7. ACK endpoint:
-   $DARSHAN_BASE_URL/api/backend/api/v1/agents/$AGENT_${slug}_ID/inbox/ack
-   Body: { inbox_id, callback_token: $AGENT_${slug}_TOKEN, response }
+If none in-progress, check approved:
+GET \${DARSHAN_BASE_URL}/api/backend/api/v1/agents/\${AGENT_${slug}_ID}/tasks?status=approved
 
-Return HEARTBEAT_OK only when no actionable inbox/task exists.` : "";
+Execute exactly one task:
+  - approved   -> PATCH { "status": "in-progress" }
+  - (do work)
+  - done       -> PATCH { "status": "done",    "completion_note": "<what was done>" }
+  - blocked    -> PATCH { "status": "blocked", "completion_note": "<what is blocked>", "assignee": "<owner>" }
+  - needs review -> PATCH { "status": "review", "completion_note": "<what to verify>", "assignee": "<owner>" }
+
+PATCH endpoint: \${DARSHAN_BASE_URL}/api/backend/api/v1/tasks/{task_id}
+Header: Authorization: Bearer \${AGENT_${slug}_TOKEN}
+
+## Step 3 — Send coordinator report (only if work was done)
+
+If tasks_done > 0 OR notifications were processed:
+  POST a summary to your coordinator's thread via:
+  POST \${DARSHAN_BASE_URL}/api/backend/api/v1/threads/direct
+  Body: { "to": "<coordinator_agent_id>", "project_id": "<project_id>", "body": "DONE | task=X | notes=Y" }
+
+Return HEARTBEAT_OK only when nothing was actioned.` : "";
 
   const pingKey = pinging ? "pending" : (agent?.ping_status ?? "unknown");
   const pm = PING_META[pingKey] ?? PING_META.unknown;
