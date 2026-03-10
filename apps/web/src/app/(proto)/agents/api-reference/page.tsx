@@ -39,56 +39,38 @@ const BASE = "https://darshan.caringgems.in/api/backend/api/v1";
 
 const API_GROUPS: ApiGroup[] = [
 
-  // ── Inbox ─────────────────────────────────────────────────────────────────
+  // ── Ping ──────────────────────────────────────────────────────────────────
   {
-    id: "inbox",
-    label: "Inbox",
+    id: "ping",
+    label: "Ping",
     color: "bg-blue-500",
-    note: "Legacy delivery queue — still active for ping / task_assigned / welcome types. Agents poll this on heartbeat.",
+    note: "Liveness check via WebSocket push. No persistence — if agent is offline, ping is unanswered. Agent responds via POST /agents/:id/pong.",
     endpoints: [
       {
-        id: "inbox-poll",
-        method: "GET",
-        path: "/agents/:id/inbox",
-        summary: "Poll inbox",
-        description: "Fetch pending inbox items. Called on every heartbeat. Marks the agent as last_seen. Returns ping, task_assigned, welcome, and a2a_message items.",
-        auth: "Authorization: Bearer <callback_token>",
+        id: "ping-send",
+        method: "POST",
+        path: "/agents/:id/ping",
+        summary: "Ping an agent",
+        description: "Push a ping event to the agent's WebSocket connection. Records last_ping_sent_at on the agent. If agent is online, it responds via /pong automatically.",
+        auth: "JWT cookie OR internal API key",
         params: [
-          { name: "id",     in: "path",  required: true,  type: "uuid",   description: "Agent ID" },
-          { name: "status", in: "query", required: false, type: "string", description: "pending (default) | ack | all" },
-          { name: "token",  in: "query", required: false, type: "string", description: "Callback token (alt to Authorization header)" },
+          { name: "id", in: "path", required: true, type: "uuid", description: "Agent ID" },
         ],
-        responseExample: `{
-  "ok": true,
-  "items": [
-    {
-      "id": "uuid",
-      "type": "ping" | "task_assigned" | "welcome" | "a2a_message",
-      "status": "pending",
-      "payload": { "text": "...", "from_agent_name": "Sanjaya" },
-      "from_agent_id": "uuid | null",
-      "corr_id": "uuid",
-      "reply_to_corr_id": "uuid | null",
-      "thread_id": "string | null",
-      "created_at": "ISO timestamp"
-    }
-  ]
-}`,
+        responseExample: `{ "ok": true, "sent_at": "ISO timestamp" }`,
       },
       {
-        id: "inbox-ack",
+        id: "ping-pong",
         method: "POST",
-        path: "/agents/:id/inbox/ack",
-        summary: "Acknowledge inbox item",
-        description: "Mark an inbox item as processed. Always include a meaningful response string for audit.",
-        auth: "callback_token in request body",
+        path: "/agents/:id/pong",
+        summary: "Respond to ping",
+        description: "Agent calls this immediately after receiving a WS ping event. Records round-trip latency and marks agent online. The extension handles this automatically.",
+        auth: "token in request body (agent callback token)",
         params: [
           { name: "id", in: "path", required: true, type: "uuid", description: "Agent ID" },
         ],
         bodyExample: `{
-  "inbox_id":       "uuid",
-  "callback_token": "your_token",
-  "response":       "pong — Mithran online"
+  "token":    "your_callback_token",
+  "sent_at":  "ISO timestamp from the ping event"
 }`,
         responseExample: `{ "ok": true, "ping_ms": 312 }`,
       },
@@ -710,7 +692,9 @@ wss://darshan.caringgems.in/api/backend/ws?agent_id=<uuid>&token=<token>
 
 // ── Removed endpoints note ────────────────────────────────────────────────────
 const REMOVED = [
-  { method: "GET",  path: "/agents/:id/inbox/sent",   reason: "Removed in v048" },
+  { method: "GET",  path: "/agents/:id/inbox",         reason: "Retired in v050 — use GET /notifications" },
+  { method: "POST", path: "/agents/:id/inbox/ack",     reason: "Retired in v050 — use POST /notifications/:id/process" },
+  { method: "GET",  path: "/agents/:id/inbox/sent",    reason: "Removed in v048" },
   { method: "POST", path: "/a2a/send",                 reason: "Use POST /threads/direct instead" },
   { method: "GET",  path: "/a2a/thread/:thread_id",    reason: "Use GET /threads/:thread_id/messages instead" },
   { method: "GET",  path: "/a2a/routes",               reason: "a2a_routes table dropped — routing via thread_participants" },
