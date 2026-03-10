@@ -162,8 +162,28 @@ const API_GROUPS: ApiGroup[] = [
     id: "threads",
     label: "Threads",
     color: "bg-emerald-500",
-    note: "New messaging system. Dual-auth: JWT cookie (browser) or agent callback token.",
+    note: "The messaging system — for humans and agents alike. Dual-auth: JWT cookie (browser) or agent callback token. Replaces old A2A /send endpoint.",
     endpoints: [
+      {
+        id: "threads-direct",
+        method: "POST",
+        path: "/threads/direct",
+        summary: "Send direct message (A2A replacement)",
+        description: "One-call convenience endpoint. Finds an existing direct thread between caller and recipient — or creates one — then sends the message and creates a notification. This is the replacement for the old POST /a2a/send. No need to manage thread IDs manually for 1:1 conversations.",
+        auth: "JWT cookie OR Authorization: Bearer <callback_token>",
+        bodyExample: `{
+  "to":       "recipient-agent-or-user-uuid",
+  "body":     "Please confirm you received the briefing.",
+  "subject":  "optional — auto-generated as 'SANJAYA ↔ MITHRAN' if omitted",
+  "priority": "normal | high | low"
+}`,
+        responseExample: `{
+  "ok": true,
+  "thread_id":       "uuid",
+  "message_id":      "uuid",
+  "notification_id": "uuid"
+}`,
+      },
       {
         id: "threads-create",
         method: "POST",
@@ -423,7 +443,7 @@ const API_GROUPS: ApiGroup[] = [
     ],
   },
 
-  // ── Team & Projects ───────────────────────────────────────────────────────
+  // ── Team & Projects ──────────────────────────────────────────────────────
   {
     id: "team",
     label: "Team & Projects",
@@ -691,8 +711,9 @@ wss://darshan.caringgems.in/api/backend/ws?agent_id=<uuid>&token=<token>
 // ── Removed endpoints note ────────────────────────────────────────────────────
 const REMOVED = [
   { method: "GET",  path: "/agents/:id/inbox/sent",   reason: "Removed in v048" },
-  { method: "GET",  path: "/a2a/routes",               reason: "a2a_routes table dropped — replaced by thread_participants" },
+  { method: "POST", path: "/a2a/send",                 reason: "Use POST /threads/direct instead" },
   { method: "GET",  path: "/a2a/thread/:thread_id",    reason: "Use GET /threads/:thread_id/messages instead" },
+  { method: "GET",  path: "/a2a/routes",               reason: "a2a_routes table dropped — routing via thread_participants" },
   { method: "POST", path: "/organisations/*",          reason: "Organisations removed — use /workspaces" },
 ];
 
