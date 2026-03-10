@@ -315,6 +315,7 @@ export default function ThreadsPage() {
   const [mentionCtx, setMentionCtx] = React.useState<{ query: string; start: number; end: number } | null>(null);
   const bottomRef = React.useRef<HTMLDivElement>(null);
   const recognitionRef = React.useRef<any>(null);
+  const voiceBaseDraftRef = React.useRef("");
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
 
   // Load projects once
@@ -516,17 +517,26 @@ export default function ThreadsPage() {
     recognition.lang = "en-US";
     recognition.interimResults = true;
     recognition.continuous = false;
+    voiceBaseDraftRef.current = draft;
 
     recognition.onstart = () => setIsListening(true);
     recognition.onend = () => setIsListening(false);
     recognition.onerror = () => setIsListening(false);
 
     recognition.onresult = (event: any) => {
-      let transcript = "";
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        transcript += event.results[i][0].transcript;
+      let finalText = "";
+      let interimText = "";
+
+      for (let i = 0; i < event.results.length; i++) {
+        const chunk = String(event.results[i]?.[0]?.transcript ?? "").trim();
+        if (!chunk) continue;
+        if (event.results[i].isFinal) finalText += `${finalText ? " " : ""}${chunk}`;
+        else interimText += `${interimText ? " " : ""}${chunk}`;
       }
-      setDraft((prev) => `${prev}${prev ? " " : ""}${transcript.trim()}`.trim());
+
+      const spoken = `${finalText}${finalText && interimText ? " " : ""}${interimText}`.trim();
+      const base = voiceBaseDraftRef.current.trim();
+      setDraft(`${base}${base && spoken ? " " : ""}${spoken}`.trim());
     };
 
     recognition.start();
