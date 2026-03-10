@@ -857,7 +857,7 @@ export type AgentProjectLevel = {
   agent_name: string;
   agent_slug: string;
   level_name?: string | null;
-  level_label?: string | null;
+  level_label: string;
   level_description?: string | null;
   can_receive_tasks?: boolean | null;
   max_parallel_tasks?: number | null;

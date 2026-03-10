@@ -49,9 +49,9 @@ export async function registerAgentLevels(server: FastifyInstance, db: pg.Pool) 
            apl.current_level, apl.created_at, apl.updated_at,
            a.name AS agent_name,
            a.slug AS agent_slug,
-           d.name AS level_name,
-           d.name AS level_label,
-           d.name AS level_description,
+           COALESCE(d.name, 'L' || apl.current_level::text) AS level_name,
+           COALESCE(d.name, 'L' || apl.current_level::text) AS level_label,
+           COALESCE(d.name, 'L' || apl.current_level::text) AS level_description,
            null::boolean AS can_receive_tasks,
            null::int AS max_parallel_tasks,
            null::boolean AS requires_approval
@@ -74,9 +74,10 @@ export async function registerAgentLevels(server: FastifyInstance, db: pg.Pool) 
       const { projectId, agentId } = req.params;
 
       const { rows: [current] } = await db.query(
-        `SELECT apl.*, d.name AS level_name,
-                d.name AS level_label,
-                d.name AS level_description,
+        `SELECT apl.*,
+                COALESCE(d.name, 'L' || apl.current_level::text) AS level_name,
+                COALESCE(d.name, 'L' || apl.current_level::text) AS level_label,
+                COALESCE(d.name, 'L' || apl.current_level::text) AS level_description,
                 null::boolean AS can_receive_tasks,
                 null::int AS max_parallel_tasks,
                 null::boolean AS requires_approval
@@ -89,10 +90,10 @@ export async function registerAgentLevels(server: FastifyInstance, db: pg.Pool) 
 
       const { rows: events } = await db.query(
         `SELECT e.*,
-                fd.name AS from_label,
-                td.name AS to_label,
-                fd.name AS from_name,
-                td.name AS to_name
+                COALESCE(fd.name, 'L' || e.from_level::text) AS from_label,
+                COALESCE(td.name, 'L' || e.to_level::text) AS to_label,
+                COALESCE(fd.name, 'L' || e.from_level::text) AS from_name,
+                COALESCE(td.name, 'L' || e.to_level::text) AS to_name
          FROM agent_level_events e
          LEFT JOIN project_level_definitions fd
            ON fd.project_id = e.project_id AND fd.level = e.from_level
