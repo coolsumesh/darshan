@@ -3,39 +3,47 @@ import type pg from "pg";
 import { getRequestUser } from "./auth.js";
 
 export async function registerAgentLevels(server: FastifyInstance, db: pg.Pool) {
+  async function canAccessProject(req: Parameters<typeof getRequestUser>[0], projectId?: string): Promise<boolean> {
+    if (!projectId?.trim()) return false;
+
+    const user = getRequestUser(req);
+    if (!user) return false;
+
+    const { rows } = await db.query(
+      `SELECT 1
+       FROM projects p
+       LEFT JOIN project_users pu ON pu.project_id = p.id
+       WHERE p.id = $1 AND (p.owner_user_id = $2 OR pu.user_id = $2)
+       LIMIT 1`,
+      [projectId, user.userId]
+    );
+
+    return !!rows[0];
+  }
 
   // ── GET level definitions for a project ───────────────────────────────────
   server.get<{ Querystring: { project_id?: string } }>("/agent-levels/definitions", async (req, reply) => {
     const projectId = req.query.project_id?.trim();
 
-    if (projectId) {
-      const { rows } = await db.query(
-        `SELECT
-           project_id,
-           level AS level_id,
-           name,
-           name AS label,
-           COALESCE(description, name) AS description,
-           gate
-         FROM project_level_definitions
-         WHERE project_id = $1
-         ORDER BY level`,
-        [projectId]
-      );
-      return reply.send({ ok: true, definitions: rows });
+    if (!projectId) {
+      return reply.status(400).send({ ok: false, error: "project_id is required" });
     }
 
-    // Back-compat: when no project is provided, return distinct levels across all projects
+    const allowed = await canAccessProject(req, projectId);
+    if (!allowed) return reply.status(403).send({ ok: false, error: "forbidden" });
+
     const { rows } = await db.query(
-      `SELECT DISTINCT ON (level)
-         null::uuid AS project_id,
+      `SELECT
+         project_id,
          level AS level_id,
          name,
          name AS label,
          COALESCE(description, name) AS description,
          gate
        FROM project_level_definitions
-       ORDER BY level, name`
+       WHERE project_id = $1
+       ORDER BY level`,
+      [projectId]
     );
     return reply.send({ ok: true, definitions: rows });
   });
@@ -45,24 +53,33 @@ export async function registerAgentLevels(server: FastifyInstance, db: pg.Pool) 
     "/projects/:projectId/agent-levels",
     async (req, reply) => {
       const { projectId } = req.params;
+      const allowed = await canAccessProject(req, projectId);
+      if (!allowed) return reply.status(403).send({ ok: false, error: "forbidden" });
+
       const { rows } = await db.query(
         `SELECT
-           apl.id, apl.agent_id, apl.project_id,
-           apl.current_level, apl.created_at, apl.updated_at,
+           COALESCE(apl.id, pa.agent_id) AS id,
+           pa.agent_id,
+           pa.project_id,
+           COALESCE(apl.current_level, 0) AS current_level,
+           COALESCE(apl.created_at, now()) AS created_at,
+           COALESCE(apl.updated_at, now()) AS updated_at,
            a.name AS agent_name,
            a.slug AS agent_slug,
-           COALESCE(d.name, 'L' || apl.current_level::text) AS level_name,
-           COALESCE(d.name, 'L' || apl.current_level::text) AS level_label,
-           COALESCE(d.name, 'L' || apl.current_level::text) AS level_description,
+           COALESCE(d.name, 'L' || COALESCE(apl.current_level, 0)::text) AS level_name,
+           COALESCE(d.name, 'L' || COALESCE(apl.current_level, 0)::text) AS level_label,
+           COALESCE(d.name, 'L' || COALESCE(apl.current_level, 0)::text) AS level_description,
            null::boolean AS can_receive_tasks,
            null::int AS max_parallel_tasks,
            null::boolean AS requires_approval
-         FROM agent_project_levels apl
-         JOIN agents a ON a.id = apl.agent_id
+         FROM project_agents pa
+         JOIN agents a ON a.id = pa.agent_id
+         LEFT JOIN agent_project_levels apl
+           ON apl.project_id = pa.project_id AND apl.agent_id = pa.agent_id
          LEFT JOIN project_level_definitions d
-           ON d.project_id = apl.project_id AND d.level = apl.current_level
-         WHERE apl.project_id = $1
-         ORDER BY apl.current_level DESC, a.name`,
+           ON d.project_id = pa.project_id AND d.level = COALESCE(apl.current_level, 0)
+         WHERE pa.project_id = $1
+         ORDER BY COALESCE(apl.current_level, 0) DESC, a.name`,
         [projectId]
       );
       return reply.send({ ok: true, levels: rows });
@@ -74,6 +91,8 @@ export async function registerAgentLevels(server: FastifyInstance, db: pg.Pool) 
     "/projects/:projectId/agent-levels/:agentId",
     async (req, reply) => {
       const { projectId, agentId } = req.params;
+      const allowed = await canAccessProject(req, projectId);
+      if (!allowed) return reply.status(403).send({ ok: false, error: "forbidden" });
 
       const { rows: [current] } = await db.query(
         `SELECT apl.*,
@@ -139,6 +158,11 @@ export async function registerAgentLevels(server: FastifyInstance, db: pg.Pool) 
       if (!authenticated) return reply.status(401).send({ ok: false, error: "not authenticated" });
 
       const { projectId, agentId } = req.params;
+      if (user) {
+        const allowed = await canAccessProject(req, projectId);
+        if (!allowed) return reply.status(403).send({ ok: false, error: "forbidden" });
+      }
+
       const { level, reason, changed_by_type = "user" } = req.body ?? {};
 
       if (typeof level !== "number") {
@@ -171,6 +195,23 @@ export async function registerAgentLevels(server: FastifyInstance, db: pg.Pool) 
       );
 
       return reply.send({ ok: true, event_id: event.id });
+    }
+  );
+
+  // ── DELETE remove agent level row in a project ────────────────────────────
+  server.delete<{ Params: { projectId: string; agentId: string } }>(
+    "/projects/:projectId/agent-levels/:agentId",
+    async (req, reply) => {
+      const { projectId, agentId } = req.params;
+      const allowed = await canAccessProject(req, projectId);
+      if (!allowed) return reply.status(403).send({ ok: false, error: "forbidden" });
+
+      await db.query(
+        `DELETE FROM agent_project_levels WHERE project_id = $1 AND agent_id = $2`,
+        [projectId, agentId]
+      );
+
+      return reply.send({ ok: true });
     }
   );
 }

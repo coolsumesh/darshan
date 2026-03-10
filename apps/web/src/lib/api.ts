@@ -915,12 +915,10 @@ export type LevelProof = {
   created_at?: string;
 };
 
-export async function fetchLevelDefinitions(projectId?: string): Promise<LevelDefinition[]> {
-  const qs = new URLSearchParams();
-  if (projectId) qs.set("project_id", projectId);
-  const suffix = qs.toString();
+export async function fetchLevelDefinitions(projectId: string): Promise<LevelDefinition[]> {
+  const qs = new URLSearchParams({ project_id: projectId });
   const data = await apiFetch<{ ok: boolean; definitions: LevelDefinition[] }>(
-    `/api/v1/agent-levels/definitions${suffix ? `?${suffix}` : ""}`
+    `/api/v1/agent-levels/definitions?${qs.toString()}`
   );
   return data?.ok ? data.definitions : [];
 }
@@ -962,4 +960,12 @@ export async function setAgentLevel(
     }
   );
   return data ?? { ok: false };
+}
+
+export async function deleteAgentLevel(projectId: string, agentId: string): Promise<boolean> {
+  const data = await apiFetch<{ ok: boolean }>(
+    `/api/v1/projects/${projectId}/agent-levels/${agentId}`,
+    { method: "DELETE" }
+  );
+  return data?.ok ?? false;
 }
