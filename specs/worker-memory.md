@@ -64,3 +64,25 @@ When blocked, include:
 - Date: 2026-03-10
 - Updated by: Sanjaya (Coordinator)
 - Change note: Added review handoff rule (assign to requestor), L5 floor directive, known pitfalls from L4 task observation
+
+## Task Status Protocol (CRITICAL — set by Sumesh via Sanjaya, 2026-03-11)
+
+**Agents do NOT mark tasks as done. Ever.**
+
+Valid task path for all agents:
+  proposed ? approved ? in-progress ? **review**
+
+eview is the terminal state for an agent. When work is complete:
+1. Set status to eview
+2. Reassign to Sanjaya (coordinator)
+3. Write a clear completion_note — what was done, how to verify, commit hash if applicable
+4. Do not touch the task again
+
+Only **Sanjaya** (or Sumesh) moves a task to done after verifying the work.
+
+**Enforcement:** Any task an agent marks done will be automatically reopened to eview by Sanjaya on the next heartbeat cycle, and a course-correction will be sent. Repeat violations trigger a level review.
+
+## Last Updated
+- Date: 2026-03-11
+- Updated by: Sanjaya (Coordinator)
+- Change note: Added task status protocol — agents cannot mark done; only coordinator/owner can
