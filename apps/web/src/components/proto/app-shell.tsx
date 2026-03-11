@@ -64,15 +64,12 @@ const SETTINGS_NAV = [
   { href: "/settings", label: "Settings",    icon: Settings         },
 ] as const;
 
-const DOCS_NAV = [
-  { href: "/docs",                   label: "Overview",        icon: FileText  },
-  { href: "/docs/getting-started",   label: "Getting Started", icon: FileText  },
-  { href: "/docs/agents",            label: "Agents Guide",    icon: FileText  },
-  { href: "/docs/api",               label: "API Reference",   icon: FileText  },
-] as const;
-
-const HELP_NAV = [
-  { href: "/help/faq", label: "FAQ",         icon: HelpCircle       },
+const HELP_MENU_NAV = [
+  { href: "/docs",                 label: "Overview",        icon: FileText   },
+  { href: "/docs/getting-started", label: "Getting Started", icon: FileText   },
+  { href: "/docs/agents",          label: "Agents Guide",    icon: FileText   },
+  { href: "/docs/api",             label: "API Reference",   icon: Code2      },
+  { href: "/help/faq",             label: "FAQ",             icon: HelpCircle },
 ] as const;
 
 // ─── Nav primitives ───────────────────────────────────────────────────────────
@@ -175,19 +172,6 @@ function Sidebar({
           ))}
         </div>
 
-        <SectionLabel label="Docs" collapsed={collapsed} />
-        <div className="flex flex-col gap-0.5">
-          {DOCS_NAV.map((item) => (
-            <NavItem key={item.href} {...item} active={isActive(item.href)} collapsed={collapsed} />
-          ))}
-        </div>
-
-        <SectionLabel label="Help" collapsed={collapsed} />
-        <div className="flex flex-col gap-0.5">
-          {HELP_NAV.map((item) => (
-            <NavItem key={item.href} {...item} active={isActive(item.href)} collapsed={collapsed} />
-          ))}
-        </div>
       </nav>
 
       {/* Bottom pinned */}
@@ -413,6 +397,61 @@ function NotificationBell() {
   );
 }
 
+function HelpMenu() {
+  const pathname = usePathname();
+  const [open, setOpen] = React.useState(false);
+  const panelRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    function handler(e: MouseEvent) {
+      if (panelRef.current && !panelRef.current.contains(e.target as Node)) setOpen(false);
+    }
+    if (open) document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  return (
+    <div className="relative" ref={panelRef}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="grid h-8 w-8 place-items-center rounded-lg text-white/50 hover:bg-white/10 hover:text-white transition-colors"
+        title="Help"
+        aria-label="Help"
+      >
+        <HelpCircle className="h-4 w-4" />
+      </button>
+
+      {open && (
+        <div
+          className="absolute right-0 top-full mt-2 w-60 rounded-xl border border-white/10 p-1.5 shadow-xl z-50"
+          style={{ backgroundColor: "#1A0F2E" }}
+        >
+          {HELP_MENU_NAV.map((item) => {
+            const active = pathname === item.href || pathname.startsWith(item.href + "/");
+            const Icon = item.icon;
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                onClick={() => setOpen(false)}
+                className={cn(
+                  "flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-xs transition-colors",
+                  active
+                    ? "bg-white/10 text-white"
+                    : "text-white/70 hover:bg-white/5 hover:text-white"
+                )}
+              >
+                <Icon className="h-3.5 w-3.5" />
+                <span>{item.label}</span>
+              </Link>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── App Shell ────────────────────────────────────────────────────────────────
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
@@ -530,9 +569,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           <NotificationBell />
 
           {/* Help */}
-          <button className="grid h-8 w-8 place-items-center rounded-lg text-white/50 hover:bg-white/10 hover:text-white transition-colors">
-            <HelpCircle className="h-4 w-4" />
-          </button>
+          <HelpMenu />
 
           {/* Divider */}
           <div className="mx-2 h-5 w-px bg-white/10" />
