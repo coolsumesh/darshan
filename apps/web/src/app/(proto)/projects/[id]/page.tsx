@@ -1747,6 +1747,7 @@ function UserMembersSection({ projectId, canAdmin }: { projectId: string; canAdm
   }
 
   const ROLE_META: Record<string, { label: string; bg: string; text: string }> = {
+    owner:       { label: "Owner",       bg: "bg-amber-100",   text: "text-amber-700"   },
     admin:       { label: "Admin",       bg: "bg-violet-100",  text: "text-violet-700"  },
     contributor: { label: "Contributor", bg: "bg-brand-100",   text: "text-brand-700"   },
     viewer:      { label: "Viewer",      bg: "bg-zinc-100",    text: "text-zinc-600"    },
