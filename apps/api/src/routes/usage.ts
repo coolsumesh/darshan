@@ -76,8 +76,10 @@ export async function registerUsage(server: FastifyInstance, db: pg.Pool) {
   }>(
     "/usage",
     async (req, reply) => {
+      const bearer = (req.headers.authorization ?? "").replace(/^Bearer\s+/i, "").trim();
       const jwtUser = getRequestUser(req);
-      if (!jwtUser) return reply.status(401).send({ ok: false, error: "not authenticated" });
+      const isInternal = bearer === INTERNAL_API_KEY;
+      if (!jwtUser && !isInternal) return reply.status(401).send({ ok: false, error: "not authenticated" });
 
       const { thread_id, agent_id, from, to, limit = "100" } = req.query;
       const lim = Math.min(Number(limit), 500);
