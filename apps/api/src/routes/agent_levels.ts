@@ -40,7 +40,7 @@ export async function registerAgentLevels(server: FastifyInstance, db: pg.Pool) 
        LEFT JOIN project_users pu ON pu.project_id = p.id
        WHERE p.id = $1 AND (p.owner_user_id = $2 OR pu.user_id = $2)
        LIMIT 1`,
-      [id, user.userId]
+      [projectId, user.userId]
     );
     return !!rows[0];
   }
@@ -53,7 +53,7 @@ export async function registerAgentLevels(server: FastifyInstance, db: pg.Pool) 
       return reply.status(400).send({ ok: false, error: "project_id is required" });
     }
 
-    const allowed = await canAccessProject(req, id);
+    const allowed = await canAccessProject(req, projectId);
     if (!allowed) return reply.status(403).send({ ok: false, error: "forbidden" });
 
     const { rows } = await db.query(
@@ -67,7 +67,7 @@ export async function registerAgentLevels(server: FastifyInstance, db: pg.Pool) 
        FROM project_level_definitions
        WHERE project_id = $1
        ORDER BY level`,
-      [id]
+      [projectId]
     );
     return reply.send({ ok: true, definitions: rows });
   });
