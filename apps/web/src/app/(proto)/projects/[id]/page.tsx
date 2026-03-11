@@ -2381,12 +2381,23 @@ function ProjectStatsBar({ projectId }: { projectId: string }) {
 }
 
 // ─── Project Header ───────────────────────────────────────────────────────────
-function ProjectHeader({ project }: { project: { id: string; name: string; description?: string; status?: string; slug?: string } }) {
+function ProjectHeader({
+  project,
+  myRole,
+}: {
+  project: { id: string; name: string; description?: string; status?: string; slug?: string };
+  myRole: "owner" | "admin" | "contributor" | "viewer";
+}) {
   const status = project.status ?? "active";
   const statusCls =
     status === "active"  ? "bg-emerald-100 text-emerald-700" :
     status === "review"  ? "bg-amber-100 text-amber-700"     :
     status === "planned" ? "bg-zinc-100 text-zinc-600"       : "bg-zinc-100 text-zinc-500";
+
+  const roleCls =
+    myRole === "owner"       ? "bg-violet-100 text-violet-700" :
+    myRole === "admin"       ? "bg-sky-100 text-sky-700"       :
+    myRole === "contributor" ? "bg-indigo-100 text-indigo-700" : "bg-zinc-100 text-zinc-600";
 
   return (
     <div className="flex min-h-[56px] shrink-0 items-center gap-3 border-b border-zinc-200 bg-white px-1 py-2 sm:h-[72px] sm:gap-4 dark:border-[#2D2A45] dark:bg-transparent">
@@ -2406,6 +2417,9 @@ function ProjectHeader({ project }: { project: { id: string; name: string; descr
         <div className="flex flex-wrap items-center gap-2">
           <h1 className="font-display text-lg font-extrabold text-zinc-900 dark:text-white sm:text-xl">{project.name}</h1>
           <span className={cn("rounded-full px-2.5 py-0.5 text-xs font-semibold capitalize", statusCls)}>{status}</span>
+          <span className={cn("rounded-full px-2.5 py-0.5 text-xs font-semibold", roleCls)}>
+            My role: {myRole}
+          </span>
         </div>
         {project.description && (
           <p className="mt-0.5 hidden text-sm text-zinc-500 dark:text-zinc-400 sm:block truncate">{project.description}</p>
@@ -2490,7 +2504,7 @@ export default function ProjectDetailPage(props: { params: Promise<{ id: string 
   return (
     <div className="flex h-full flex-col">
       {/* Project header */}
-      <ProjectHeader project={project} />
+      <ProjectHeader project={project} myRole={myRole} />
 
       {/* Stats bar */}
       <ProjectStatsBar projectId={project.id} />
