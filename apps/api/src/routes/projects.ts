@@ -684,7 +684,7 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
     }
   );
 
-  // ── Add user member by email — admin+ ─────────────────────────────────────
+  // ── Add user by email (invite-only) — admin+ ──────────────────────────────
   server.post<{ Params: { id: string }; Body: { email: string; role?: string } }>(
     "/projects/:id/user-members",
     async (req, reply) => {
@@ -693,22 +693,53 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
 
       const { email, role = "contributor" } = req.body;
       if (!email) return reply.status(400).send({ ok: false, error: "email required" });
+      const normalizedEmail = email.trim().toLowerCase();
 
-      const { rows: users } = await db.query(
-        `select id, name, email from users where lower(email) = lower($1)`,
-        [email.trim()]
+      // If already a member, don't auto-mutate anything.
+      const { rows: existingMember } = await db.query(
+        `select 1
+         from project_users pu
+         join users u on u.id = pu.user_id
+         where pu.project_id = $1 and lower(u.email) = lower($2)
+         limit 1`,
+        [access.projectId, normalizedEmail]
       );
-      if (!users[0]) return reply.status(404).send({ ok: false, error: "no user found with that email" });
+      if (existingMember[0]) {
+        return reply.status(409).send({ ok: false, error: "user already a project member" });
+      }
+
+      // Reuse active invite if one already exists for this email.
+      const { rows: existingInvite } = await db.query(
+        `select * from project_invites
+         where project_id = $1
+           and lower(invitee_email) = lower($2)
+           and accepted_at is null
+           and declined_at is null
+           and expires_at > now()
+         order by created_at desc
+         limit 1`,
+        [access.projectId, normalizedEmail]
+      );
+
+      if (existingInvite[0]) {
+        return reply.status(200).send({
+          ok: true,
+          invite: { ...existingInvite[0], invite_url: `${APP_BASE}/invite/project/${existingInvite[0].token}` },
+        });
+      }
 
       const invitedBy = getRequestUser(req)?.userId ?? null;
       const { rows } = await db.query(
-        `insert into project_users (project_id, user_id, role, invited_by)
+        `insert into project_invites (project_id, role, invited_by, invitee_email)
          values ($1, $2, $3, $4)
-         on conflict (project_id, user_id) do update set role = excluded.role
          returning *`,
-        [access.projectId, users[0].id, role, invitedBy]
+        [access.projectId, role, invitedBy, normalizedEmail]
       );
-      return reply.status(201).send({ ok: true, member: { ...rows[0], user_id: users[0].id, email: users[0].email, name: users[0].name } });
+
+      return reply.status(201).send({
+        ok: true,
+        invite: { ...rows[0], invite_url: `${APP_BASE}/invite/project/${rows[0].token}` },
+      });
     }
   );
 

@@ -1673,12 +1673,16 @@ function UserMembersSection({ projectId, canAdmin }: { projectId: string; canAdm
   async function handleAdd() {
     if (!email.trim()) return;
     setAdding(true); setAddError(null);
-    const result = await addUserMember(projectId, email.trim(), role);
-    if (result) {
-      setMembers((prev) => [...prev.filter((m) => m.user_id !== result.user_id), result]);
-      setEmail(""); setShowAdd(false);
+    const invite = await addUserMember(projectId, email.trim(), role);
+    if (invite) {
+      setGeneratedInvite(invite);
+      setActiveInvites((prev) => [invite, ...prev.filter((i) => i.id !== invite.id)]);
+      setInviteEmail("");
+      setEmail("");
+      setShowAdd(false);
+      setShowInvite(true);
     } else {
-      setAddError("No account found with that email, or they're already a member.");
+      setAddError("Could not create invite. They may already be a member, or you may not have admin access.");
     }
     setAdding(false);
   }

@@ -589,12 +589,12 @@ export async function fetchUserMembers(projectId: string): Promise<UserMember[]>
 
 export async function addUserMember(
   projectId: string, email: string, role: ProjectMembershipRole
-): Promise<UserMember | null> {
-  const data = await apiFetch<{ ok: boolean; member: UserMember }>(`/api/v1/projects/${projectId}/user-members`, {
+): Promise<ProjectInvite | null> {
+  const data = await apiFetch<{ ok: boolean; invite: ProjectInvite }>(`/api/v1/projects/${projectId}/user-members`, {
     method: "POST",
     body: JSON.stringify({ email, role }),
   });
-  return data?.ok ? data.member : null;
+  return data?.ok ? data.invite : null;
 }
 
 export async function removeUserMember(projectId: string, userId: string): Promise<boolean> {
