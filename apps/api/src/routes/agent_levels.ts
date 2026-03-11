@@ -40,7 +40,7 @@ export async function registerAgentLevels(server: FastifyInstance, db: pg.Pool) 
        LEFT JOIN project_users pu ON pu.project_id = p.id
        WHERE p.id = $1 AND (p.owner_user_id = $2 OR pu.user_id = $2)
        LIMIT 1`,
-      [projectId, user.userId]
+      [id, user.userId]
     );
     return !!rows[0];
   }
@@ -53,7 +53,7 @@ export async function registerAgentLevels(server: FastifyInstance, db: pg.Pool) 
       return reply.status(400).send({ ok: false, error: "project_id is required" });
     }
 
-    const allowed = await canAccessProject(req, projectId);
+    const allowed = await canAccessProject(req, id);
     if (!allowed) return reply.status(403).send({ ok: false, error: "forbidden" });
 
     const { rows } = await db.query(
@@ -67,17 +67,17 @@ export async function registerAgentLevels(server: FastifyInstance, db: pg.Pool) 
        FROM project_level_definitions
        WHERE project_id = $1
        ORDER BY level`,
-      [projectId]
+      [id]
     );
     return reply.send({ ok: true, definitions: rows });
   });
 
   // ── GET all agents with their level for a project ─────────────────────────
-  server.get<{ Params: { projectId: string } }>(
-    "/projects/:projectId/agent-levels",
+  server.get<{ Params: { id: string } }>(
+    "/projects/:id/agent-levels",
     async (req, reply) => {
-      const { projectId } = req.params;
-      const allowed = await canAccessProject(req, projectId);
+      const { id } = req.params;
+      const allowed = await canAccessProject(req, id);
       if (!allowed) return reply.status(403).send({ ok: false, error: "forbidden" });
 
       const { rows } = await db.query(
@@ -104,18 +104,18 @@ export async function registerAgentLevels(server: FastifyInstance, db: pg.Pool) 
            ON d.project_id = pa.project_id AND d.level = COALESCE(apl.current_level, 0)
          WHERE pa.project_id = $1
          ORDER BY COALESCE(apl.current_level, 0) DESC, a.name`,
-        [projectId]
+        [id]
       );
       return reply.send({ ok: true, levels: rows });
     }
   );
 
   // ── GET current level + event history for one agent in a project ──────────
-  server.get<{ Params: { projectId: string; agentId: string } }>(
-    "/projects/:projectId/agent-levels/:agentId",
+  server.get<{ Params: { id: string; agentId: string } }>(
+    "/projects/:id/agent-levels/:agentId",
     async (req, reply) => {
-      const { projectId, agentId } = req.params;
-      const allowed = await canAccessProject(req, projectId);
+      const { id, agentId } = req.params;
+      const allowed = await canAccessProject(req, id);
       if (!allowed) return reply.status(403).send({ ok: false, error: "forbidden" });
 
       const { rows: [current] } = await db.query(
@@ -130,7 +130,7 @@ export async function registerAgentLevels(server: FastifyInstance, db: pg.Pool) 
          LEFT JOIN project_level_definitions d
            ON d.project_id = apl.project_id AND d.level = apl.current_level
          WHERE apl.project_id = $1 AND apl.agent_id = $2`,
-        [projectId, agentId]
+        [id, agentId]
       );
 
       const { rows: events } = await db.query(
@@ -146,7 +146,7 @@ export async function registerAgentLevels(server: FastifyInstance, db: pg.Pool) 
            ON td.project_id = e.project_id AND td.level = e.to_level
          WHERE e.project_id = $1 AND e.agent_id = $2
          ORDER BY e.created_at DESC`,
-        [projectId, agentId]
+        [id, agentId]
       );
 
       return reply.send({ ok: true, current: current ?? null, events, proofs: [] });
@@ -155,14 +155,14 @@ export async function registerAgentLevels(server: FastifyInstance, db: pg.Pool) 
 
   // ── POST set/update agent level in a project (upsert) ─────────────────────
   server.post<{
-    Params: { projectId: string; agentId: string };
+    Params: { id: string; agentId: string };
     Body: {
       level: number;
       reason?: string;
       changed_by_type?: "agent" | "user" | "coordinator";
     };
   }>(
-    "/projects/:projectId/agent-levels/:agentId",
+    "/projects/:id/agent-levels/:agentId",
     async (req, reply) => {
       const user = getRequestUser(req);
       const bearer = (req.headers.authorization ?? "").replace(/^Bearer\s+/i, "").trim();
@@ -181,9 +181,9 @@ export async function registerAgentLevels(server: FastifyInstance, db: pg.Pool) 
       }
       if (!authenticated) return reply.status(401).send({ ok: false, error: "not authenticated" });
 
-      const { projectId, agentId } = req.params;
+      const { id, agentId } = req.params;
       if (user) {
-        const allowed = await canAccessProject(req, projectId);
+        const allowed = await canAccessProject(req, id);
         if (!allowed) return reply.status(403).send({ ok: false, error: "forbidden" });
       }
 
@@ -196,7 +196,7 @@ export async function registerAgentLevels(server: FastifyInstance, db: pg.Pool) 
       // Get current level (or default 0)
       const { rows: [existing] } = await db.query(
         `SELECT current_level FROM agent_project_levels WHERE project_id = $1 AND agent_id = $2`,
-        [projectId, agentId]
+        [id, agentId]
       );
       const fromLevel = existing?.current_level ?? 0;
 
@@ -206,7 +206,7 @@ export async function registerAgentLevels(server: FastifyInstance, db: pg.Pool) 
          VALUES ($1, $2, $3)
          ON CONFLICT (project_id, agent_id)
          DO UPDATE SET current_level = $3, updated_at = now()`,
-        [projectId, agentId, level]
+        [id, agentId, level]
       );
 
       // Record event
@@ -215,7 +215,7 @@ export async function registerAgentLevels(server: FastifyInstance, db: pg.Pool) 
            (project_id, agent_id, from_level, to_level, changed_by, changed_by_type, reason)
          VALUES ($1, $2, $3, $4, $5, $6, $7)
          RETURNING id`,
-        [projectId, agentId, fromLevel, level, callerId, changed_by_type, reason ?? null]
+        [id, agentId, fromLevel, level, callerId, changed_by_type, reason ?? null]
       );
 
       return reply.send({ ok: true, event_id: event.id });
@@ -223,16 +223,16 @@ export async function registerAgentLevels(server: FastifyInstance, db: pg.Pool) 
   );
 
   // ── DELETE remove agent level row in a project ────────────────────────────
-  server.delete<{ Params: { projectId: string; agentId: string } }>(
-    "/projects/:projectId/agent-levels/:agentId",
+  server.delete<{ Params: { id: string; agentId: string } }>(
+    "/projects/:id/agent-levels/:agentId",
     async (req, reply) => {
-      const { projectId, agentId } = req.params;
-      const allowed = await canAccessProject(req, projectId);
+      const { id, agentId } = req.params;
+      const allowed = await canAccessProject(req, id);
       if (!allowed) return reply.status(403).send({ ok: false, error: "forbidden" });
 
       await db.query(
         `DELETE FROM agent_project_levels WHERE project_id = $1 AND agent_id = $2`,
-        [projectId, agentId]
+        [id, agentId]
       );
 
       return reply.send({ ok: true });
