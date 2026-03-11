@@ -8,6 +8,7 @@ import { authLogout, authMe, fetchMyInvites, fetchInviteByToken, acceptProjectIn
 import {
   Activity,
   Award,
+  BarChart2,
   Bell,
   BookOpen,
   Bot,
@@ -57,7 +58,8 @@ const AGENTS_NAV = [
   { href: "/agents/levels",   label: "Levels",    icon: Award          },
   { href: "/agents/activity",      label: "Activity",  icon: Zap   },
   { href: "/agents/invites",       label: "Invites",   icon: Link2 },
-  { href: "/agents/api-reference", label: "API Ref",   icon: Code2 },
+  { href: "/agents/api-reference", label: "API Ref",   icon: Code2     },
+  { href: "/agents/usage",         label: "Usage",     icon: BarChart2 },
 ] as const;
 
 const SETTINGS_NAV = [

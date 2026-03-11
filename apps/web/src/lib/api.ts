@@ -974,3 +974,44 @@ export async function deleteAgentLevel(projectId: string, agentId: string): Prom
   );
   return data?.ok ?? false;
 }
+
+// ── LLM Usage ─────────────────────────────────────────────────────────────────
+
+export type UsageEvent = {
+  id: string;
+  session_key: string;
+  thread_id: string | null;
+  agent_id: string | null;
+  model: string;
+  tokens_delta: number;
+  tokens_total: number;
+  context_tokens: number | null;
+  recorded_at: string;
+};
+
+export type UsageSummary = {
+  events: UsageEvent[];
+  total_tokens: number;
+  total_events: number;
+  by_model: Record<string, number>;
+};
+
+export async function fetchUsage(params?: {
+  thread_id?: string;
+  agent_id?: string;
+  from?: string;
+  to?: string;
+  limit?: number;
+}): Promise<UsageSummary> {
+  const qs = new URLSearchParams();
+  if (params?.thread_id) qs.set("thread_id", params.thread_id);
+  if (params?.agent_id)  qs.set("agent_id",  params.agent_id);
+  if (params?.from)      qs.set("from",       params.from);
+  if (params?.to)        qs.set("to",         params.to);
+  if (params?.limit)     qs.set("limit",      String(params.limit));
+  const q = qs.toString();
+  const data = await apiFetch<{ ok: boolean } & UsageSummary>(`/api/v1/usage${q ? "?" + q : ""}`);
+  return data?.ok
+    ? { events: data.events, total_tokens: data.total_tokens, total_events: data.total_events, by_model: data.by_model }
+    : { events: [], total_tokens: 0, total_events: 0, by_model: {} };
+}

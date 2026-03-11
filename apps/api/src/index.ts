@@ -28,6 +28,7 @@ import { registerProjectChat } from "./routes/projectChat.js";
 import { registerInvites } from "./routes/invites.js";
 import { registerWorkspaces } from "./routes/workspaces.js";
 import { registerAuth, verifyToken } from "./routes/auth.js";
+import { registerUsage } from "./routes/usage.js";
 
 const PORT = Number(process.env.PORT ?? 4000);
 const HOST = process.env.HOST ?? "0.0.0.0";
@@ -87,6 +88,9 @@ server.addHook("preHandler", async (req, reply) => {
   // Public invite preview
   if (url.startsWith("/api/v1/invites/"))                          return;
 
+  // Usage — dual-auth handled in route
+  if (url.startsWith("/api/v1/usage"))                             return;
+
   // 1. Internal API key
   const authHeader = req.headers.authorization ?? "";
   if (authHeader.startsWith("Bearer ")) {
@@ -115,6 +119,7 @@ await server.register(async (app) => {
   await registerProjectChat(app, db);
   await registerInvites(app, db);
   await registerWorkspaces(app, db);
+  await registerUsage(app, db);
 }, { prefix: "/api/v1" });
 
 startConnector(db);
