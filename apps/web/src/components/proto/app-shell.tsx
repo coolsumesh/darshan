@@ -46,7 +46,6 @@ const PRIMARY_NAV = [
   { href: "/projects",      label: "Projects",       icon: FolderKanban      },
   { href: "/workspaces",    label: "Workspaces",     icon: Building2         },
   { href: "/threads",       label: "Threads",        icon: MessageSquareText  },
-  { href: "/calendar",      label: "Calendar",       icon: CalendarDays      },
 ] as const;
 
 const AGENTS_NAV = [
