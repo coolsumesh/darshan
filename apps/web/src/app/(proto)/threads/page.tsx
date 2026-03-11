@@ -307,6 +307,8 @@ export default function ThreadsPage() {
   const [projectId, setProjectId] = React.useState<string | null>(null);
   const [dropdownOpen, setDropdownOpen] = React.useState(false);
   const [threadStatusFilter, setThreadStatusFilter] = React.useState<"open" | "closed">("open");
+  const [threadSearch, setThreadSearch] = React.useState("");
+  const [debouncedThreadSearch, setDebouncedThreadSearch] = React.useState("");
   const [closing, setClosing] = React.useState(false);
   const [composeOpen, setComposeOpen] = React.useState(false);
   const [mentionSlugs, setMentionSlugs] = React.useState<string[]>([]);
@@ -323,17 +325,22 @@ export default function ThreadsPage() {
     fetchProjects().then(setProjects);
   }, []);
 
+  React.useEffect(() => {
+    const t = setTimeout(() => setDebouncedThreadSearch(threadSearch.trim()), 250);
+    return () => clearTimeout(t);
+  }, [threadSearch]);
+
   // Load thread list
   const loadThreads = React.useCallback(async (
     pid?: string | null,
     statusFilter?: "open" | "closed",
-    opts?: { silent?: boolean }
+    opts?: { silent?: boolean; search?: string }
   ) => {
     const silent = opts?.silent ?? false;
     if (!silent) setLoading(true);
 
     const s = statusFilter ?? threadStatusFilter;
-    const data = await fetchThreads(pid ?? projectId, s);
+    const data = await fetchThreads(pid ?? projectId, s, opts?.search ?? debouncedThreadSearch);
     setThreads(data);
 
     // Load last message preview for each thread
@@ -353,7 +360,7 @@ export default function ThreadsPage() {
     if (!silent) setLoading(false);
   }, []);
 
-  React.useEffect(() => { loadThreads(projectId, threadStatusFilter); }, [projectId, threadStatusFilter]); // eslint-disable-line
+  React.useEffect(() => { loadThreads(projectId, threadStatusFilter, { search: debouncedThreadSearch }); }, [projectId, threadStatusFilter, debouncedThreadSearch]); // eslint-disable-line
 
   const handleProjectChange = (pid: string | null) => {
     setProjectId(pid);
@@ -414,12 +421,12 @@ export default function ThreadsPage() {
             if (selected && selected.thread_id === threadId) {
               setMessages((prev) => prev.some((m) => m.message_id === msg.message_id) ? prev : [...prev, msg]);
             }
-            loadThreads(projectId, threadStatusFilter, { silent: true });
+            loadThreads(projectId, threadStatusFilter, { silent: true, search: debouncedThreadSearch });
             return;
           }
 
           if (type === "thread.created" || type === "thread.status_changed" || type === "thread.deleted") {
-            loadThreads(projectId, threadStatusFilter, { silent: true });
+            loadThreads(projectId, threadStatusFilter, { silent: true, search: debouncedThreadSearch });
           }
         } catch {
           // Ignore malformed websocket events
@@ -567,7 +574,7 @@ export default function ThreadsPage() {
   const handleThreadCreated = async (thread: Thread) => {
     setComposeOpen(false);
     // Reload list then open the new thread
-    await loadThreads(thread.project_id, threadStatusFilter);
+    await loadThreads(thread.project_id, threadStatusFilter, { search: debouncedThreadSearch });
     setSelected(thread);
     const msgs = await fetchThreadMessages(thread.thread_id);
     setMessages(msgs);
@@ -608,7 +615,7 @@ export default function ThreadsPage() {
                 <Plus className="h-3.5 w-3.5" />
               </button>
               <button
-                onClick={() => loadThreads(projectId)}
+                onClick={() => loadThreads(projectId, threadStatusFilter, { search: debouncedThreadSearch })}
                 className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800"
               >
                 <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
@@ -651,6 +658,16 @@ export default function ThreadsPage() {
               )}
             </div>
           )}
+        </div>
+
+        {/* Search */}
+        <div className="px-3 pb-2">
+          <input
+            value={threadSearch}
+            onChange={(e) => setThreadSearch(e.target.value)}
+            placeholder="Search threads…"
+            className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs text-slate-700 placeholder-slate-400 outline-none focus:border-violet-400 focus:ring-1 focus:ring-violet-400 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+          />
         </div>
 
         {/* Status tabs */}
