@@ -355,7 +355,7 @@ export default function ThreadsPage() {
     const previewMap: Record<string, { text: string; time: string }> = {};
     await Promise.all(
       data.map(async (t) => {
-        const msgs = await fetchThreadMessages(t.thread_id);
+        const msgs = await fetchThreadMessages(t.thread_id, 20);
         const last = msgs.filter((m) => m.type === "message").at(-1);
         previewMap[t.thread_id] = {
           text: last ? last.body.slice(0, 80) : "",
@@ -379,7 +379,7 @@ export default function ThreadsPage() {
       const existing = threads.find((t) => t.thread_id === threadId);
       if (existing) {
         setSelected(existing);
-        const msgs = await fetchThreadMessages(existing.thread_id);
+        const msgs = await fetchThreadMessages(existing.thread_id, 200);
         setMessages(msgs);
         return;
       }
@@ -391,7 +391,7 @@ export default function ThreadsPage() {
       setThreadStatusFilter(direct.status === "open" ? "open" : "closed");
       setThreads((prev) => (prev.some((t) => t.thread_id === direct.thread_id) ? prev : [direct, ...prev]));
       setSelected(direct);
-      const msgs = await fetchThreadMessages(direct.thread_id);
+      const msgs = await fetchThreadMessages(direct.thread_id, 200);
       setMessages(msgs);
     };
 
@@ -408,7 +408,7 @@ export default function ThreadsPage() {
   // Load messages when thread selected
   React.useEffect(() => {
     if (!selected) return;
-    fetchThreadMessages(selected.thread_id).then(setMessages).catch(() => {});
+    fetchThreadMessages(selected.thread_id, 200).then(setMessages).catch(() => {});
   }, [selected?.thread_id]); // eslint-disable-line
 
   React.useEffect(() => {
@@ -484,7 +484,7 @@ export default function ThreadsPage() {
   const selectThread = React.useCallback(async (thread: Thread) => {
     setSelected(thread);
     setMessages([]);
-    const msgs = await fetchThreadMessages(thread.thread_id);
+    const msgs = await fetchThreadMessages(thread.thread_id, 200);
     setMessages(msgs);
   }, []);
 
@@ -613,7 +613,7 @@ export default function ThreadsPage() {
     // Reload list then open the new thread
     await loadThreads(thread.project_id, threadStatusFilter, { search: debouncedThreadSearch });
     setSelected(thread);
-    const msgs = await fetchThreadMessages(thread.thread_id);
+    const msgs = await fetchThreadMessages(thread.thread_id, 200);
     setMessages(msgs);
   };
 
