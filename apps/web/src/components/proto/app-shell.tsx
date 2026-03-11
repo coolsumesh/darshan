@@ -60,10 +60,6 @@ const AGENTS_NAV = [
   { href: "/agents/api-reference", label: "API Ref",   icon: Code2 },
 ] as const;
 
-const TOOL_NAV = [
-  { href: "/inspect",  label: "Inspect",     icon: Search           },
-] as const;
-
 const SETTINGS_NAV = [
   { href: "/settings", label: "Settings",    icon: Settings         },
 ] as const;
@@ -169,13 +165,6 @@ function Sidebar({
         <div className="flex flex-col gap-0.5">
           {AGENTS_NAV.map((item) => (
             <NavItem key={item.href} {...item} active={isActive(item.href, item.href === "/agents")} collapsed={collapsed} />
-          ))}
-        </div>
-
-        <SectionLabel label="Tools" collapsed={collapsed} />
-        <div className="flex flex-col gap-0.5">
-          {TOOL_NAV.map((item) => (
-            <NavItem key={item.href} {...item} active={isActive(item.href)} collapsed={collapsed} />
           ))}
         </div>
 
