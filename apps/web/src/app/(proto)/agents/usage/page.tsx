@@ -48,7 +48,7 @@ function EventRow({ event }: { event: UsageEvent }) {
       </td>
       <td className="px-4 py-2.5 text-xs text-slate-500 dark:text-slate-400">
         {event.thread_id
-          ? <a href={`/threads`} className="text-violet-600 hover:underline dark:text-violet-400">{event.thread_id.slice(0, 8)}…</a>
+          ? <a href={`/threads?thread_id=${encodeURIComponent(event.thread_id)}`} className="text-violet-600 hover:underline dark:text-violet-400">{event.thread_id.slice(0, 8)}…</a>
           : <span className="text-slate-300 dark:text-slate-600">—</span>
         }
       </td>
@@ -92,6 +92,7 @@ export default function UsagePage() {
   }, [load]);
 
   const topModel = Object.entries(data.by_model).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "—";
+  const latestThreadId = data.events.find((e) => !!e.thread_id)?.thread_id ?? null;
 
   // Today's tokens
   const todayMs = new Date().setHours(0, 0, 0, 0);
@@ -103,9 +104,16 @@ export default function UsagePage() {
     <div className="mx-auto max-w-6xl space-y-6 p-6">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2.5">
-          <BarChart2 className="h-5 w-5 text-violet-500" />
-          <h1 className="text-lg font-semibold text-slate-900 dark:text-slate-100">LLM Usage</h1>
+        <div className="flex flex-col gap-0.5">
+          <div className="flex items-center gap-2.5">
+            <BarChart2 className="h-5 w-5 text-violet-500" />
+            <h1 className="text-lg font-semibold text-slate-900 dark:text-slate-100">LLM Usage</h1>
+          </div>
+          {latestThreadId && (
+            <div className="pl-7 font-mono text-[10px] text-slate-400" title={latestThreadId}>
+              thread_id: {latestThreadId}
+            </div>
+          )}
         </div>
         <div className="flex items-center gap-3">
           <span className="text-xs text-slate-400">

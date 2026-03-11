@@ -4,6 +4,7 @@ import * as React from "react";
 import Link from "next/link";
 import {
   fetchThreads,
+  fetchThread,
   fetchThreadMessages,
   fetchProjects,
   fetchTeam,
@@ -294,6 +295,7 @@ function NewThreadModal({
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function ThreadsPage() {
+  const [deepLinkThreadId, setDeepLinkThreadId] = React.useState<string | null>(null);
   const [threads, setThreads] = React.useState<Thread[]>([]);
   const [messages, setMessages] = React.useState<ThreadMessage[]>([]);
   const [selected, setSelected] = React.useState<Thread | null>(null);
@@ -319,6 +321,12 @@ export default function ThreadsPage() {
   const recognitionRef = React.useRef<any>(null);
   const voiceBaseDraftRef = React.useRef("");
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
+
+  React.useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const tid = params.get("thread_id");
+    setDeepLinkThreadId(tid && tid.trim() ? tid.trim() : null);
+  }, []);
 
   // Load projects once
   React.useEffect(() => {
@@ -361,6 +369,34 @@ export default function ThreadsPage() {
   }, []);
 
   React.useEffect(() => { loadThreads(projectId, threadStatusFilter, { search: debouncedThreadSearch }); }, [projectId, threadStatusFilter, debouncedThreadSearch]); // eslint-disable-line
+
+  React.useEffect(() => {
+    const threadId = deepLinkThreadId?.trim();
+    if (!threadId) return;
+    if (selected?.thread_id === threadId) return;
+
+    const pickThread = async () => {
+      const existing = threads.find((t) => t.thread_id === threadId);
+      if (existing) {
+        setSelected(existing);
+        const msgs = await fetchThreadMessages(existing.thread_id);
+        setMessages(msgs);
+        return;
+      }
+
+      const direct = await fetchThread(threadId);
+      if (!direct) return;
+
+      setProjectId(direct.project_id ?? null);
+      setThreadStatusFilter(direct.status === "open" ? "open" : "closed");
+      setThreads((prev) => (prev.some((t) => t.thread_id === direct.thread_id) ? prev : [direct, ...prev]));
+      setSelected(direct);
+      const msgs = await fetchThreadMessages(direct.thread_id);
+      setMessages(msgs);
+    };
+
+    pickThread().catch(() => {});
+  }, [deepLinkThreadId, threads, selected?.thread_id]);
 
   const handleProjectChange = (pid: string | null) => {
     setProjectId(pid);

@@ -124,6 +124,11 @@ export async function fetchThreads(
   return data?.ok ? (data.threads ?? []) : [];
 }
 
+export async function fetchThread(threadId: string): Promise<Thread | null> {
+  const data = await apiFetch<{ ok: boolean; thread: Thread }>(`/api/v1/threads/${threadId}`);
+  return data?.ok ? data.thread ?? null : null;
+}
+
 export async function fetchThreadMessages(threadId: string): Promise<ThreadMessage[]> {
   const data = await apiFetch<{ ok: boolean; messages: ThreadMessage[] }>(
     `/api/v1/threads/${threadId}/messages?limit=100`
