@@ -52,7 +52,6 @@ const PRIMARY_NAV = [
 const AGENTS_NAV = [
   { href: "/agents",          label: "Registry",  icon: Users          },
   { href: "/agents/onboard",  label: "Onboard",   icon: Terminal       },
-  { href: "/agents/inbox",    label: "Inbox",     icon: Mail           },
   { href: "/agents/tasks",    label: "Tasks",     icon: ClipboardList  },
   { href: "/agents/chat",     label: "Chat",      icon: MessageSquareText },
   { href: "/agents/levels",   label: "Levels",    icon: Award          },
