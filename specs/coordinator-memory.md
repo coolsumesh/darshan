@@ -68,5 +68,8 @@ Project-scoped operational memory for the Coordinator agent.
   - capabilities/readiness change
   - major decisions are made
 - Trigger phrase rule:
-  - If Sumesh says **"As a coordinator"**, update this file in the same work cycle with the new coordination directive.
-- Always include date and concise rationale.
+  - If Sumesh says **"As a coordinator"**, in the same work cycle:
+    1. Update `coordinator-memory.md` with the new directive
+    2. Check `worker-memory.md` — if the directive affects how workers should behave, update that too
+    3. Sync updated `worker-memory.md` to Mithran's server at `~/.openclaw/workspace/worker-memory.md`
+- Always include date and concise rationale in both files.
