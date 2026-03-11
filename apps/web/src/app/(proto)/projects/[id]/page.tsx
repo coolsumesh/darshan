@@ -1659,6 +1659,7 @@ function UserMembersSection({ projectId, canAdmin }: { projectId: string; canAdm
   const [inviteRole,     setInviteRole]     = React.useState<"contributor" | "admin" | "viewer">("contributor");
   const [generating,     setGenerating]     = React.useState(false);
   const [generatedInvite, setGeneratedInvite] = React.useState<ProjectInvite | null>(null);
+  const [inviteError,    setInviteError]    = React.useState<string | null>(null);
   const [copied,         setCopied]         = React.useState(false);
   const [activeInvites,  setActiveInvites]  = React.useState<ProjectInvite[]>([]);
   const [revoking,       setRevoking]       = React.useState<string | null>(null);
@@ -1690,13 +1691,40 @@ function UserMembersSection({ projectId, canAdmin }: { projectId: string; canAdm
   }
 
   async function handleGenerateInvite() {
+    setInviteError(null);
     setGenerating(true);
-    const inv = await createProjectInvite(projectId, inviteEmail.trim() || undefined, inviteRole);
+
+    const email = inviteEmail.trim();
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setInviteError("Please enter a valid email address.");
+      setGenerating(false);
+      return;
+    }
+
+    const inv = await createProjectInvite(projectId, email || undefined, inviteRole);
     if (inv) {
       setGeneratedInvite(inv);
       setActiveInvites((prev) => [inv, ...prev]);
       setInviteEmail("");
+      setGenerating(false);
+      return;
     }
+
+    // Fallback: if API returned null, try to find an existing active invite for this email.
+    const existing = await fetchProjectInvites(projectId);
+    const match = existing.find((i) =>
+      !i.accepted_at && !i.declined_at &&
+      new Date(i.expires_at) > new Date() &&
+      ((email && i.invitee_email?.toLowerCase() === email.toLowerCase()) || (!email && !i.invitee_email))
+    );
+
+    if (match) {
+      setGeneratedInvite(match);
+      setInviteError("An active invite already exists for this recipient. Reusing that link.");
+    } else {
+      setInviteError("Could not generate invite link. Check your project role (admin+) and try again.");
+    }
+
     setGenerating(false);
   }
 
@@ -1816,6 +1844,11 @@ function UserMembersSection({ projectId, canAdmin }: { projectId: string; canAdm
               <p className="mt-1.5 text-[11px] text-sky-600/70 dark:text-sky-400/60">
                 Link expires in 7 days. Leave email blank to share with anyone.
               </p>
+              {inviteError && (
+                <p className={`mt-1.5 text-[11px] ${inviteError.startsWith("An active invite") ? "text-amber-600 dark:text-amber-400" : "text-red-600 dark:text-red-400"}`}>
+                  {inviteError}
+                </p>
+              )}
             </>
           ) : (
             <div className="flex flex-col gap-2">
@@ -1835,7 +1868,7 @@ function UserMembersSection({ projectId, canAdmin }: { projectId: string; canAdm
                 </button>
               </div>
               <button
-                onClick={() => setGeneratedInvite(null)}
+                onClick={() => { setGeneratedInvite(null); setInviteError(null); }}
                 className="self-start text-xs text-sky-600 hover:underline dark:text-sky-400"
               >
                 Generate another
