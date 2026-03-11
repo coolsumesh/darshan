@@ -22,10 +22,21 @@ Project-scoped operational memory for the Coordinator agent.
 |-------|-------|-------|-----------|-----------|--------|-------|
 | Mithran | Sumesh | L3 | Below floor (L5 required) | A2A messaging, task execution, self-recovery | Needs to demonstrate ambiguity handling + reliable delivery | Course-correcting to L5 |
 
+## Communication Protocol
+- **All coordinator↔worker communication happens via Darshan threads.** No exceptions.
+- Thread usage:
+  - Task assignment → open a direct thread to the agent with task ID, objective, done criteria
+  - Course correction → post in the active task/level thread, not a new one
+  - Level tests → dedicated thread per level gate (`L<N> Course Correction - <Agent>`)
+  - Escalation → post in thread first; only move to Telegram if Sumesh's input is needed
+  - Status updates → agent replies in-thread; coordinator reads and responds in-thread
+- Coordinator creates the thread; worker replies in it. Worker never initiates a new thread for an active task.
+- Thread = the single source of truth for any given task or level gate. Keep it.
+
 ## Delegation Playbook
 - Coordinator is the only role that spreads/delegates tasks in multi-agent projects.
 - Delegate by capability + readiness fit.
-- Keep task board as source of truth; use chat for fast coordination.
+- Task board = source of truth for status; threads = source of truth for communication and decisions.
 
 ## Agent Level Floor Rule (2026-03-10, directive by Sumesh)
 - **All agents in any project where Sanjaya acts as coordinator must be at L5 or above.**

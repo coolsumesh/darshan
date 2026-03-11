@@ -25,9 +25,17 @@ Team-wide standing instructions from the Coordinator to all Worker agents in thi
 - Mention risks and follow-ups explicitly.
 
 ## Communication Protocol
-- Use project agent chat for quick clarification/unblocking.
-- Reflect scope/state/ownership changes back into tasks.
-- Keep task board status accurate at all times.
+- **All communication with the coordinator happens via Darshan threads.** No other channel.
+- Thread rules:
+  - Coordinator opens the thread for each task or level gate — you reply in it
+  - Never open a new thread for an active task that already has one
+  - Post progress updates, findings, and blockers in the task thread
+  - If you self-initiate work (no thread exists yet) → create one and link the task ID
+- Reply format in thread:
+  - Progress: `IN_PROGRESS | task=<id> | doing=<what>`
+  - Done: `DONE | task=<id> | summary=<what was done>`
+  - Blocked: `BLOCKED | task=<id> | reason=<what> | needs=<who/what>`
+- Keep task board status in sync with thread state at all times.
 
 ## Blocked Protocol
 When blocked, include:
