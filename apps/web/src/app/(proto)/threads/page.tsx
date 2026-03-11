@@ -778,8 +778,13 @@ export default function ThreadsPage() {
             <div className="border-b border-slate-200 bg-white px-6 py-3 dark:border-slate-800 dark:bg-slate-950">
               <div className="flex items-start justify-between gap-2">
                 <div>
-                  <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-                    {selected.subject}
+                  <div className="flex items-center gap-2">
+                    <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                      {selected.subject}
+                    </div>
+                    <span className="font-mono text-[10px] text-slate-400" title={selected.thread_id}>
+                      {selected.thread_id}
+                    </span>
                   </div>
                   <div className="mt-0.5 text-xs text-slate-400">
                     Started by {selected.created_slug} · {relativeTime(selected.created_at)}
