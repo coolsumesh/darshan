@@ -57,7 +57,6 @@ const AGENTS_NAV = [
   { href: "/agents/chat",     label: "Chat",      icon: MessageSquareText },
   { href: "/agents/levels",   label: "Levels",    icon: Award          },
   { href: "/agents/activity",      label: "Activity",  icon: Zap   },
-  { href: "/agents/invites",       label: "Invites",   icon: Link2 },
   { href: "/agents/api-reference", label: "API Ref",   icon: Code2     },
   { href: "/agents/usage",         label: "Usage",     icon: BarChart2 },
 ] as const;
