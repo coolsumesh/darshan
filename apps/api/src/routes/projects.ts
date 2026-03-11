@@ -670,17 +670,35 @@ export async function registerProjects(server: FastifyInstance, db: pg.Pool) {
       const access = await checkAccess(req.params.id, req, "viewer");
       if ("deny" in access) return reply.status(access.deny).send({ ok: false, error: access.deny === 404 ? "project not found" : "forbidden" });
       const { rows } = await db.query(
-        `select pum.id,
-                case when p.owner_user_id = pum.user_id then 'owner' else pum.role end as role,
-                pum.joined_at,
-                u.id as user_id, u.email, u.name, u.avatar_url,
-                inv.name as invited_by_name
-         from project_users pum
-         join users u on u.id = pum.user_id
-         join projects p on p.id = pum.project_id
-         left join users inv on inv.id = pum.invited_by
-         where pum.project_id = $1
-         order by pum.joined_at asc`,
+        `with members as (
+           select pum.id,
+                  case when p.owner_user_id = pum.user_id then 'owner' else pum.role end as role,
+                  pum.joined_at,
+                  u.id as user_id, u.email, u.name, u.avatar_url,
+                  inv.name as invited_by_name
+           from project_users pum
+           join users u on u.id = pum.user_id
+           join projects p on p.id = pum.project_id
+           left join users inv on inv.id = pum.invited_by
+           where pum.project_id = $1
+
+           union all
+
+           select p.id as id,
+                  'owner' as role,
+                  p.created_at as joined_at,
+                  u.id as user_id, u.email, u.name, u.avatar_url,
+                  null::text as invited_by_name
+           from projects p
+           join users u on u.id = p.owner_user_id
+           where p.id = $1
+             and not exists (
+               select 1 from project_users pu
+               where pu.project_id = p.id and pu.user_id = p.owner_user_id
+             )
+         )
+         select * from members
+         order by joined_at asc`,
         [access.projectId]
       );
       return { ok: true, members: rows };
