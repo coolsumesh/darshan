@@ -1976,7 +1976,14 @@ function UserMembersSection({ projectId, canAdmin }: { projectId: string; canAdm
 }
 
 // ─── Team Tab ──────────────────────────────────────────────────────────────────
-const TEAM_ROLES = ["Member", "Coordinator", "Developer", "Reviewer", "Observer"];
+const TEAM_ROLES = ["worker", "coordinator", "reviewer"] as const;
+
+function toApiTeamRole(role: string): "worker" | "coordinator" | "reviewer" {
+  const r = role.trim().toLowerCase();
+  if (r === "coordinator" || r === "reviewer" || r === "worker") return r;
+  if (r === "developer" || r === "member" || r === "observer") return "worker";
+  return "worker";
+}
 
 function AgentRegistryPanel({ agents, onAdd, onClose, alreadyAdded }: {
   agents: TeamMemberWithAgent["agent"][]; onAdd: (id: string, role: string) => Promise<boolean>; onClose: () => void; alreadyAdded: Set<string>;
@@ -2206,10 +2213,15 @@ function TeamTab({ projectId, canManageAgents, canAdminUsers }: { projectId: str
 
   const addedIds = new Set(team.map((m) => m.agentId));
 
-  async function handleAdd(agentId: string): Promise<boolean> {
-    const ok = await addTeamMember(projectId, agentId);
+  async function handleAdd(agentId: string, role: string): Promise<boolean> {
+    const ok = await addTeamMember(projectId, agentId, toApiTeamRole(role));
     if (ok) fetchTeam(projectId).then(setTeam);
     return ok;
+  }
+
+  async function handleRoleChange(agentId: string, role: string): Promise<void> {
+    await addTeamMember(projectId, agentId, toApiTeamRole(role));
+    fetchTeam(projectId).then(setTeam);
   }
   async function handleRemove(agentId: string) {
     await removeTeamMember(projectId, agentId);
@@ -2296,7 +2308,7 @@ function TeamTab({ projectId, canManageAgents, canAdminUsers }: { projectId: str
               canManageAgents={canManageAgents}
               onPing={() => handlePing(m.agentId)}
               onRemove={() => handleRemove(m.agentId)}
-              onRoleChange={undefined}
+              onRoleChange={(role) => { void handleRoleChange(m.agentId, role); }}
             />
           ))
         )}
