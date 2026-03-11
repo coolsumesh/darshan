@@ -485,7 +485,8 @@ export default function ThreadsPage() {
     setSending(true);
     const msg = await sendThreadMessage(selected.thread_id, draft.trim());
     if (msg) {
-      setMessages((prev) => [...prev, msg]);
+      // Do not append optimistically here.
+      // WebSocket thread.message_created is the single source of truth and avoids duplicate flashes.
       setDraft("");
       setMentionOpen(false);
       setMentionCtx(null);
