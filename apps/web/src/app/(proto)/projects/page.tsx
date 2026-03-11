@@ -222,11 +222,11 @@ function NewProjectModal({
             <p className="text-[11px] text-zinc-400">Used in URLs. Auto-generated from name; lowercase letters, numbers, hyphens only.</p>
           </div>
 
-          {/* Description */}
+          {/* Goal & Objective */}
           <div className="flex flex-col gap-1.5">
-            <label className={labelCls}>Description</label>
+            <label className={labelCls}>Goal &amp; Objective</label>
             <textarea
-              placeholder="What is this project about?"
+              placeholder="What is the goal and objective of this project?"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               rows={3}
