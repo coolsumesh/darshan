@@ -596,7 +596,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               )}
               <div className="hidden sm:flex flex-col items-start leading-tight">
                 <span className="text-xs font-semibold text-white">{me?.name ?? "…"}</span>
-                <span className="text-[10px] text-white/40">{me?.role ?? ""}</span>
               </div>
               <ChevronDown className={cn("hidden sm:block h-3 w-3 text-white/30 transition-transform", userMenuOpen && "rotate-180")} />
             </button>
@@ -609,8 +608,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               >
                 {/* User info header */}
                 <div className="px-4 py-3 border-b border-white/10">
-                  <p className="text-xs font-semibold text-white">Sumesh</p>
-                  <p className="text-[10px] text-white/40 mt-0.5">Admin</p>
+                  <p className="text-xs font-semibold text-white">{me?.name ?? "User"}</p>
                 </div>
 
                 {/* Logout */}
