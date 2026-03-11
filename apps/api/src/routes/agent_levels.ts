@@ -2,10 +2,35 @@ import type { FastifyInstance } from "fastify";
 import type pg from "pg";
 import { getRequestUser } from "./auth.js";
 
+const INTERNAL_API_KEY = process.env.DARSHAN_API_KEY ?? "824cdfcdec0e35cf550002c2dfa3541932f58e2e2497cfaa3c844dc99f5b972f";
+
 export async function registerAgentLevels(server: FastifyInstance, db: pg.Pool) {
+  function getBearerToken(req: Parameters<typeof getRequestUser>[0]): string {
+    return (req.headers.authorization ?? "").replace(/^Bearer\s+/i, "").trim();
+  }
+
+  // Returns true for: JWT user with project access, internal API key, or project agent callback token
   async function canAccessProject(req: Parameters<typeof getRequestUser>[0], projectId?: string): Promise<boolean> {
     if (!projectId?.trim()) return false;
 
+    const bearer = getBearerToken(req);
+
+    // Internal API key — full access
+    if (bearer === INTERNAL_API_KEY) return true;
+
+    // Agent callback token — must belong to an agent in this project
+    if (bearer) {
+      const { rows } = await db.query(
+        `SELECT 1 FROM agents a
+         JOIN project_agents pa ON pa.agent_id = a.id
+         WHERE a.callback_token = $1 AND pa.project_id = $2
+         LIMIT 1`,
+        [bearer, projectId]
+      );
+      if (rows[0]) return true;
+    }
+
+    // JWT user — must be owner or project member
     const user = getRequestUser(req);
     if (!user) return false;
 
@@ -17,7 +42,6 @@ export async function registerAgentLevels(server: FastifyInstance, db: pg.Pool) 
        LIMIT 1`,
       [projectId, user.userId]
     );
-
     return !!rows[0];
   }
 
