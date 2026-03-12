@@ -1,5 +1,4 @@
-ALTER TABLE agent_capability_evidence
-  ADD COLUMN IF NOT EXISTS thread_id UUID REFERENCES threads(thread_id) ON DELETE SET NULL;
+-- (agent_capability_evidence not in schema — skipped)
 
 CREATE TEMP TABLE task_thread_migration_map (
   task_id UUID PRIMARY KEY,
@@ -161,13 +160,9 @@ JOIN tasks t ON t.id = ta.task_id
 JOIN projects p ON p.id = t.project_id
 LEFT JOIN users owner_user ON owner_user.id = p.owner_user_id;
 
-UPDATE agent_capability_evidence ace
-SET thread_id = map.thread_id
-FROM task_thread_migration_map map
-WHERE ace.task_id = map.task_id;
+-- (agent_capability_evidence not in schema — skipped)
 
-ALTER TABLE agent_capability_evidence
-  DROP CONSTRAINT IF EXISTS agent_capability_evidence_task_id_fkey;
+-- (agent_capability_evidence not in schema — skipped)
 
 DROP INDEX IF EXISTS task_activity_task_idx;
 DROP INDEX IF EXISTS task_activity_project_idx;
