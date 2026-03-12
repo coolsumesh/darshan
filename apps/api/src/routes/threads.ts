@@ -100,14 +100,24 @@ async function fanOutNotifications(
   messageId: string,
   threadId: string,
   senderId: string,
-  priority: string = "normal"
+  priority: string = "normal",
+  messageBody: string = ""
 ) {
+  // Parse @mentions — if present, only notify mentioned agents
+  const mentionedSlugs = (messageBody.match(/@([A-Za-z0-9_]+)/g) ?? [])
+    .map(m => m.slice(1).toLowerCase());
+
   // All active participants except sender
-  const { rows: recipients } = await db.query(
+  const { rows: allRecipients } = await db.query(
     `SELECT participant_id, participant_slug FROM thread_participants
      WHERE thread_id = $1 AND participant_id != $2 AND removed_at IS NULL`,
     [threadId, senderId]
   );
+
+  // If message has @mentions, only notify the mentioned participants
+  const recipients = mentionedSlugs.length > 0
+    ? allRecipients.filter(r => mentionedSlugs.includes((r.participant_slug ?? "").toLowerCase()))
+    : allRecipients;
 
   for (const r of recipients) {
     const { rows: [notif] } = await db.query(
@@ -625,7 +635,7 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
       );
 
       // Fan out notifications to all active participants except sender
-      await fanOutNotifications(db, msg.message_id, req.params.thread_id, caller.id, priority);
+      await fanOutNotifications(db, msg.message_id, req.params.thread_id, caller.id, priority, body.trim());
 
       broadcast("thread.message_created", { thread_id: req.params.thread_id, message: msg });
 
