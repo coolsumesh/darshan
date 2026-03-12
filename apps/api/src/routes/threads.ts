@@ -219,6 +219,29 @@ async function closeTaskThread(threadId: string, caller: Caller, db: DbExecutor)
   return rows[0];
 }
 
+async function hydrateThread(db: DbExecutor, threadId: string) {
+  const { rows } = await db.query(
+    `SELECT
+       t.*,
+       COALESCE(assignee_agent.name, assignee_user.name) AS assignee_name,
+       first_message.body AS description
+     FROM threads t
+     LEFT JOIN agents assignee_agent ON assignee_agent.id = t.assignee_agent_id
+     LEFT JOIN users assignee_user ON assignee_user.id = t.assignee_user_id
+     LEFT JOIN LATERAL (
+       SELECT body
+       FROM thread_messages
+       WHERE thread_id = t.thread_id AND type = 'message'
+       ORDER BY sent_at ASC
+       LIMIT 1
+     ) first_message ON true
+     WHERE t.thread_id = $1
+     LIMIT 1`,
+    [threadId]
+  );
+  return rows[0];
+}
+
 async function notifyTaskAssignee(threadId: string, db: pg.Pool) {
   const { rows } = await db.query(
     `SELECT
@@ -474,12 +497,14 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
 
         await client.query("COMMIT");
 
+        const hydratedThread = await hydrateThread(client, thread.thread_id);
+
         if (thread.thread_type === "task" && thread.assignee_agent_id) {
           await notifyTaskAssignee(thread.thread_id, db);
         }
 
-        broadcast("thread.created", { thread });
-        return { ok: true, thread_id: thread.thread_id, thread };
+        broadcast("thread.created", { thread: hydratedThread });
+        return { ok: true, thread_id: thread.thread_id, thread: hydratedThread };
       } catch (err) {
         await client.query("ROLLBACK");
         throw err;
@@ -786,7 +811,8 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
         [req.params.thread_id]
       );
 
-      return { ok: true, thread: access.thread, participants, role: access.role };
+      const thread = await hydrateThread(db, req.params.thread_id);
+      return { ok: true, thread: thread ?? access.thread, participants, role: access.role };
     }
   );
 
@@ -850,8 +876,9 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
         if (!permitted) {
           return reply.status(403).send({ ok: false, error: "only the coordinator or project owner can close a task thread" });
         }
-        const closed = await closeTaskThread(req.params.thread_id, caller, db);
+        await closeTaskThread(req.params.thread_id, caller, db);
         await insertEventMessage(db, req.params.thread_id, caller.id, caller.slug, `${caller.slug} closed this task thread`);
+        const closed = await hydrateThread(db, req.params.thread_id);
         broadcast("thread.status_changed", { thread_id: req.params.thread_id, status: "closed" });
         return { ok: true, thread: closed };
       }
@@ -932,8 +959,9 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
         await notifyTaskAssignee(req.params.thread_id, db);
       }
 
-      broadcast("thread.updated", { thread_id: req.params.thread_id, thread: updatedThread });
-      return { ok: true, thread: updatedThread };
+      const hydratedThread = await hydrateThread(db, req.params.thread_id);
+      broadcast("thread.updated", { thread_id: req.params.thread_id, thread: hydratedThread ?? updatedThread });
+      return { ok: true, thread: hydratedThread ?? updatedThread };
     }
   );
 
@@ -954,8 +982,9 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
         return reply.status(403).send({ ok: false, error: "only the coordinator or project owner can close a task thread" });
       }
 
-      const thread = await closeTaskThread(req.params.thread_id, caller, db);
+      await closeTaskThread(req.params.thread_id, caller, db);
       await insertEventMessage(db, req.params.thread_id, caller.id, caller.slug, `${caller.slug} closed this task thread`);
+      const thread = await hydrateThread(db, req.params.thread_id);
       broadcast("thread.status_changed", { thread_id: req.params.thread_id, status: "closed" });
       return { ok: true, thread };
     }

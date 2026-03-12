@@ -171,6 +171,12 @@ function ThreadRow({
   );
 }
 
+function formatTaskStatus(status: Thread["task_status"]): string {
+  if (!status) return "No task status";
+  if (status === "in-progress") return "In Progress";
+  return status.charAt(0).toUpperCase() + status.slice(1);
+}
+
 // ── Message bubble ────────────────────────────────────────────────────────────
 
 function MessageBubble({ msg, isMe, knownSlugs }: { msg: ThreadMessage; isMe: boolean; knownSlugs: Set<string> }) {
@@ -829,28 +835,43 @@ export default function ThreadsPage() {
                   <div className="mt-0.5 text-xs text-slate-400">
                     Started by {selected.created_slug} · {relativeTime(selected.created_at)}
                   </div>
+                  {selected.thread_type === "task" && (
+                    <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
+                      <span className="rounded-full bg-violet-100 px-2 py-0.5 font-medium text-violet-700 dark:bg-violet-950/40 dark:text-violet-300">
+                        Task
+                      </span>
+                      {selected.task_status && (
+                        <span className="rounded-full bg-slate-100 px-2 py-0.5 font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                          {formatTaskStatus(selected.task_status)}
+                        </span>
+                      )}
+                      <span className="rounded-full bg-slate-100 px-2 py-0.5 font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                        {selected.assignee_name ? `Assignee: ${selected.assignee_name}` : "Unassigned"}
+                      </span>
+                    </div>
+                  )}
                 </div>
                 <div className="flex shrink-0 items-center gap-1.5">
                   {selected.status !== "closed" && (
                     <button
                       onClick={() => handleSetStatus("closed")}
                       disabled={closing}
-                      title="Close thread"
+                      title={selected.thread_type === "task" ? "Complete task" : "Close thread"}
                       className="flex items-center gap-1 rounded-lg border border-slate-200 px-2 py-1 text-xs text-slate-500 hover:border-emerald-400 hover:text-emerald-600 disabled:opacity-40 dark:border-slate-700 dark:text-slate-400"
                     >
                       <CheckCircle className="h-3.5 w-3.5" />
-                      Close
+                      {selected.thread_type === "task" ? "Mark done" : "Close"}
                     </button>
                   )}
                   {selected.status === "closed" && (
                     <button
                       onClick={() => handleSetStatus("open")}
                       disabled={closing}
-                      title="Reopen thread"
+                      title={selected.thread_type === "task" ? "Reopen task" : "Reopen thread"}
                       className="flex items-center gap-1 rounded-lg border border-slate-200 px-2 py-1 text-xs text-slate-500 hover:border-violet-400 hover:text-violet-600 disabled:opacity-40 dark:border-slate-700 dark:text-slate-400"
                     >
                       <RefreshCw className="h-3.5 w-3.5" />
-                      Reopen
+                      {selected.thread_type === "task" ? "Reopen task" : "Reopen"}
                     </button>
                   )}
                   <button
@@ -962,3 +983,4 @@ export default function ThreadsPage() {
     </>
   );
 }
+

@@ -24,6 +24,8 @@ export type Task = {
   proposer?: string;        // requestor name (set from auth user on create)
   requestor_org?: string;   // org of the requestor
   assignee?: string;
+  assignee_agent_id?: string | null;
+  assignee_user_id?: string | null;
   type?: string;
   estimated_sp?: number;    // kept for backwards compat, hidden from UI
   priority?: Priority;

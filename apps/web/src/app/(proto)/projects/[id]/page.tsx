@@ -83,6 +83,25 @@ function taskProjectId(t: Task): string {
   return t.projectId ?? (t as unknown as { project_id: string }).project_id ?? "";
 }
 
+function getTeamMemberLabel(member: TeamMemberWithAgent): string {
+  return member.agent?.name ?? member.agentId;
+}
+
+function getTaskAssigneeLabel(task: Task, team: TeamMemberWithAgent[]): string | undefined {
+  if (task.assignee?.trim()) return task.assignee;
+  if (task.assignee_agent_id) return team.find((member) => member.agentId === task.assignee_agent_id)?.agent?.name ?? task.assignee_agent_id;
+  if (task.assignee_user_id) return "User";
+  return undefined;
+}
+
+function getTaskAssigneeInitial(task: Task, team: TeamMemberWithAgent[]): string {
+  return getTaskAssigneeLabel(task, team)?.[0]?.toUpperCase() ?? "?";
+}
+
+function buildAgentAssigneePatch(agentId: string | null): Partial<Task> {
+  return { assignee_agent_id: agentId, assignee_user_id: null };
+}
+
 function formatDueDate(due?: string): { text: string; cls: string } | null {
   if (!due) return null;
   const d    = new Date(due);
@@ -205,9 +224,9 @@ function StatusPopover({ anchorEl, status, onSelect, onClose }: {
   );
 }
 
-function OwnerPopover({ anchorEl, assignee, team, onSelect, onClose }: {
-  anchorEl: HTMLElement | null; assignee?: string; team: TeamMemberWithAgent[];
-  onSelect: (name: string) => void; onClose: () => void;
+function OwnerPopover({ anchorEl, assigneeAgentId, team, onSelect, onClose }: {
+  anchorEl: HTMLElement | null; assigneeAgentId?: string | null; team: TeamMemberWithAgent[];
+  onSelect: (agentId: string | null) => void; onClose: () => void;
 }) {
   const ref = React.useRef<HTMLDivElement>(null);
   const [q, setQ] = React.useState("");
@@ -222,7 +241,7 @@ function OwnerPopover({ anchorEl, assignee, team, onSelect, onClose }: {
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, [onClose]);
-  const members = team.filter((m) => !q || (m.agent?.name ?? m.agentId).toLowerCase().includes(q.toLowerCase()));
+  const members = team.filter((m) => !q || getTeamMemberLabel(m).toLowerCase().includes(q.toLowerCase()));
   if (!pos || typeof document === "undefined") return null;
   return createPortal(
     <div ref={ref} style={{ position: "fixed", top: pos.top, left: pos.left, zIndex: 9999 }}
@@ -232,22 +251,22 @@ function OwnerPopover({ anchorEl, assignee, team, onSelect, onClose }: {
           placeholder="Search member…"
           className="w-full rounded-lg bg-zinc-100 px-2.5 py-1.5 text-xs outline-none dark:bg-white/10 dark:text-white" />
       </div>
-      <button onClick={() => { onSelect(""); onClose(); }}
+      <button onClick={() => { onSelect(null); onClose(); }}
         className="flex w-full items-center gap-2.5 px-3 py-2 text-xs text-zinc-500 hover:bg-zinc-50 dark:hover:bg-white/5">
-        <span className="grid h-6 w-6 place-items-center rounded-full bg-zinc-200 text-[10px]">—</span>
+        <span className="grid h-6 w-6 place-items-center rounded-full bg-zinc-200 text-[10px]">-</span>
         Unassigned
-        {!assignee && <span className="ml-auto text-zinc-400">✓</span>}
+        {!assigneeAgentId && <span className="ml-auto text-zinc-400">?</span>}
       </button>
       {members.map((m) => {
-        const name = m.agent?.name ?? m.agentId;
+        const name = getTeamMemberLabel(m);
         return (
-          <button key={m.agentId} onClick={() => { onSelect(name); onClose(); }}
+          <button key={m.agentId} onClick={() => { onSelect(m.agentId); onClose(); }}
             className="flex w-full items-center gap-2.5 px-3 py-2 text-xs transition-colors hover:bg-zinc-50 dark:hover:bg-white/5">
             <div className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-violet-600 text-[10px] font-bold text-white">
               {name[0]?.toUpperCase()}
             </div>
             <span className="flex-1 truncate font-medium text-zinc-800 dark:text-white">{name}</span>
-            {assignee === name && <span className="text-zinc-400">✓</span>}
+            {assigneeAgentId === m.agentId && <span className="text-zinc-400">?</span>}
           </button>
         );
       })}
@@ -416,7 +435,7 @@ function TaskDetailPanel({
     if (pid) fetchTaskActivity(pid, task.id).then(setActivity);
   }, [task.id]); // eslint-disable-line react-hooks/exhaustive-deps
   React.useEffect(() => { refreshActivity(); }, [refreshActivity]);
-  React.useEffect(() => { refreshActivity(); }, [task.status, task.assignee]); // eslint-disable-line react-hooks/exhaustive-deps
+  React.useEffect(() => { refreshActivity(); }, [task.status, task.assignee, task.assignee_agent_id, task.assignee_user_id]); // eslint-disable-line react-hooks/exhaustive-deps
   function openPopover(name: string, el: HTMLElement) { setOpenPop(name); setAnchorEl(el); }
   function closePopover() { setOpenPop(null); setAnchorEl(null); }
 
@@ -495,20 +514,20 @@ function TaskDetailPanel({
             <div className="relative">
               <button onClick={(e) => openPop === "owner" ? closePopover() : openPopover("owner", e.currentTarget as HTMLElement)}
                 className="flex items-center gap-1.5 rounded-full hover:opacity-80 transition-opacity">
-                {task.assignee ? (
+                {getTaskAssigneeLabel(task, team) ? (
                   <>
                     <div className="grid h-6 w-6 place-items-center rounded-full bg-brand-600 text-[10px] font-bold text-white">
-                      {task.assignee[0]?.toUpperCase()}
+                      {getTaskAssigneeInitial(task, team)}
                     </div>
-                    <span className="text-xs font-medium text-zinc-700 dark:text-zinc-300">{task.assignee}</span>
+                    <span className="text-xs font-medium text-zinc-700 dark:text-zinc-300">{getTaskAssigneeLabel(task, team)}</span>
                   </>
                 ) : (
                   <span className="text-xs text-zinc-400">Unassigned</span>
                 )}
               </button>
               {openPop === "owner" && (
-                <OwnerPopover anchorEl={anchorEl} assignee={task.assignee} team={team}
-                  onSelect={(name) => { onUpdate(task.id, { assignee: name }); closePopover(); }} onClose={closePopover} />
+                <OwnerPopover anchorEl={anchorEl} assigneeAgentId={task.assignee_agent_id} team={team}
+                  onSelect={(agentId) => { onUpdate(task.id, buildAgentAssigneePatch(agentId)); closePopover(); }} onClose={closePopover} />
               )}
             </div>
           )}
@@ -686,12 +705,12 @@ function TableRow({
         <div className="flex items-center gap-1.5 flex-wrap">
           <StatusPill status={task.status} />
           <PriorityPill priority={task.priority} />
-          {task.assignee && (
+          {getTaskAssigneeLabel(task, team) && (
             <div className="flex items-center gap-1">
               <div className="grid h-5 w-5 place-items-center rounded-full bg-brand-600 text-[9px] font-bold text-white">
-                {task.assignee[0]?.toUpperCase()}
+                {getTaskAssigneeInitial(task, team)}
               </div>
-              <span className="text-xs text-zinc-500">{task.assignee}</span>
+              <span className="text-xs text-zinc-500">{getTaskAssigneeLabel(task, team)}</span>
             </div>
           )}
         </div>
@@ -740,20 +759,20 @@ function TableRow({
       <div className="flex w-28 shrink-0 items-center px-3">
         <button onClick={(e) => { e.stopPropagation(); openPop === "owner" ? closePopover() : openPopover("owner", e.currentTarget as HTMLElement); }}
           className="flex items-center gap-1.5 hover:opacity-80 transition-opacity">
-          {task.assignee ? (
+          {getTaskAssigneeLabel(task, team) ? (
             <>
               <div className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-brand-600 text-[10px] font-bold text-white">
-                {task.assignee[0]?.toUpperCase()}
+                {getTaskAssigneeInitial(task, team)}
               </div>
-              <span className="truncate text-xs text-zinc-600 dark:text-zinc-400">{task.assignee}</span>
+              <span className="truncate text-xs text-zinc-600 dark:text-zinc-400">{getTaskAssigneeLabel(task, team)}</span>
             </>
           ) : (
             <span className="text-xs text-zinc-300 dark:text-zinc-700 group-hover:text-zinc-400">+ Assign</span>
           )}
         </button>
         {openPop === "owner" && (
-          <OwnerPopover anchorEl={anchorEl} assignee={task.assignee} team={team}
-            onSelect={(name) => { onUpdate(task.id, { assignee: name }); closePopover(); }}
+          <OwnerPopover anchorEl={anchorEl} assigneeAgentId={task.assignee_agent_id} team={team}
+            onSelect={(agentId) => { onUpdate(task.id, buildAgentAssigneePatch(agentId)); closePopover(); }}
             onClose={closePopover} />
         )}
       </div>
@@ -1008,7 +1027,7 @@ function BulkActionBar({
 }: {
   count: number; team: TeamMemberWithAgent[];
   onMove: (status: TaskStatus) => void;
-  onAssign: (name: string) => void;
+  onAssign: (agentId: string | null) => void;
   onDelete: () => void;
   onClear: () => void;
 }) {
@@ -1055,9 +1074,9 @@ function BulkActionBar({
           {showAssign && (
             <div className="absolute bottom-full mb-2 left-0 z-10 min-w-[180px] overflow-hidden rounded-xl border border-zinc-100 bg-white shadow-xl dark:border-white/10 dark:bg-[#1C1830]">
               {team.map((m) => {
-                const name = m.agent?.name ?? m.agentId;
+                const name = getTeamMemberLabel(m);
                 return (
-                  <button key={m.agentId} onClick={() => { onAssign(name); closeAll(); }}
+                  <button key={m.agentId} onClick={() => { onAssign(m.agentId); closeAll(); }}
                     className="flex w-full items-center gap-2 px-3 py-2 text-xs text-zinc-700 hover:bg-zinc-50 dark:text-zinc-300 dark:hover:bg-white/5">
                     <div className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-brand-600 text-[9px] font-bold text-white">
                       {name[0]?.toUpperCase()}
@@ -1145,12 +1164,12 @@ function CreateTaskModal({
   defaultStatus, team, onSave, onClose,
 }: {
   defaultStatus: TaskStatus; team: TeamMemberWithAgent[];
-  onSave: (p: { title: string; description: string; assignee: string; status: TaskStatus; type: string; priority: Priority }) => Promise<void>;
+  onSave: (p: { title: string; description: string; assigneeAgentId: string | null; status: TaskStatus; type: string; priority: Priority }) => Promise<void>;
   onClose: () => void;
 }) {
   const [title,       setTitle]       = React.useState("");
   const [description, setDescription] = React.useState("");
-  const [assignee,    setAssignee]    = React.useState("");
+  const [assigneeAgentId, setAssigneeAgentId] = React.useState("");
   const [status,      setStatus]      = React.useState<TaskStatus>(defaultStatus);
   const [type,        setType]        = React.useState("Task");
   const [priority,    setPriority]    = React.useState<Priority>("medium");
@@ -1161,7 +1180,7 @@ function CreateTaskModal({
     if (!title.trim()) { setTitleError(true); return; }
     setTitleError(false);
     setSaving(true);
-    await onSave({ title: title.trim(), description: description.trim(), assignee, status, type, priority });
+    await onSave({ title: title.trim(), description: description.trim(), assigneeAgentId: assigneeAgentId || null, status, type, priority });
     setSaving(false);
   }
 
@@ -1198,9 +1217,9 @@ function CreateTaskModal({
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="flex flex-col gap-1.5">
               <label className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">Assignee</label>
-              <select value={assignee} onChange={(e) => setAssignee(e.target.value)} className={sel}>
+              <select value={assigneeAgentId} onChange={(e) => setAssigneeAgentId(e.target.value)} className={sel}>
                 <option value="">Unassigned</option>
-                {team.map((m) => <option key={m.agentId} value={m.agent?.name ?? m.agentId}>{m.agent?.name ?? m.agentId}</option>)}
+                {team.map((m) => <option key={m.agentId} value={m.agentId}>{getTeamMemberLabel(m)}</option>)}
               </select>
             </div>
             <div className="flex flex-col gap-1.5">
@@ -1271,10 +1290,10 @@ function TaskBoardContent({
     setTasks((prev) => prev.map((t) => ids.includes(t.id) ? { ...t, status } : t));
     clearSelection();
   }
-  async function handleBulkAssign(name: string) {
+  async function handleBulkAssign(agentId: string | null) {
     const ids = [...selectedIds];
-    await Promise.all(ids.map((id) => updateTask(projectId, id, { assignee: name } as Record<string, unknown>)));
-    setTasks((prev) => prev.map((t) => ids.includes(t.id) ? { ...t, assignee: name } : t));
+    const updated = await Promise.all(ids.map((id) => updateTask(projectId, id, buildAgentAssigneePatch(agentId))));
+    setTasks((prev) => prev.map((t) => updated.find((item) => item?.id === t.id) ?? t));
     clearSelection();
   }
   async function handleBulkDelete() {
@@ -1318,8 +1337,8 @@ function TaskBoardContent({
     setActing(null);
   }
 
-  async function handleCreate(payload: { title: string; description: string; assignee: string; status: TaskStatus; type: string; priority: Priority }) {
-    await createTask(projectId, { ...payload });
+  async function handleCreate(payload: { title: string; description: string; assigneeAgentId: string | null; status: TaskStatus; type: string; priority: Priority }) {
+    await createTask(projectId, { ...payload, assignee_agent_id: payload.assigneeAgentId });
     // Do NOT optimistically add here — the WebSocket `task:created` event is the single source of truth.
     setCreateIn(null);
   }
@@ -2173,7 +2192,7 @@ function TeamMemberRow({ m, projectId, pinging, pingMeta, onPing, onRemove, canM
         {/* Model */}
         <div className="w-32 shrink-0">
           {model ? <span className="rounded bg-zinc-100 px-1.5 py-0.5 text-[11px] font-mono text-zinc-500 dark:bg-white/10">{model}</span>
-                 : <span className="text-xs text-zinc-300 dark:text-zinc-600">—</span>}
+                 : <span className="text-xs text-zinc-300 dark:text-zinc-600">-</span>}
         </div>
         {/* Org */}
         <div className="w-28 shrink-0 truncate text-[11px] text-zinc-500">{orgName ?? "—"}</div>
@@ -2616,8 +2635,8 @@ function SprintBoardTabWithSignal({ view, projectId, newTaskSignal }: { view: "t
     return () => { clearTimeout(retryTimeout); ws?.close(); };
   }, [projectId]);
 
-  async function handleCreate(payload: { title: string; description: string; assignee: string; status: TaskStatus; type: string; priority: Priority }) {
-    await createTask(projectId, { ...payload });
+  async function handleCreate(payload: { title: string; description: string; assigneeAgentId: string | null; status: TaskStatus; type: string; priority: Priority }) {
+    await createTask(projectId, { ...payload, assignee_agent_id: payload.assigneeAgentId });
     // WebSocket task:created is the single source of truth — no optimistic add here.
     setCreateIn(null);
   }
@@ -2631,3 +2650,4 @@ function SprintBoardTabWithSignal({ view, projectId, newTaskSignal }: { view: "t
     </>
   );
 }
+

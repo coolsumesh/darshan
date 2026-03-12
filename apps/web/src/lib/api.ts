@@ -192,6 +192,8 @@ function mapThreadToTask(thread: Thread & Record<string, unknown>): Task {
     description: typeof thread.description === "string" ? thread.description : "",
     status: rawStatus as Task["status"],
     assignee: typeof thread.assignee_name === "string" ? thread.assignee_name : undefined,
+    assignee_agent_id: typeof thread.assignee_agent_id === "string" ? thread.assignee_agent_id : null,
+    assignee_user_id: typeof thread.assignee_user_id === "string" ? thread.assignee_user_id : null,
     priority: priority as Task["priority"],
     completion_note: typeof thread.completion_note === "string" ? thread.completion_note : undefined,
     completed_at: typeof thread.done_at === "string" ? thread.done_at : undefined,
@@ -229,6 +231,8 @@ export async function createTask(projectId: string, payload: Partial<Task>): Pro
       thread_type: "task",
       task_status: payload.status === "done" ? undefined : payload.status,
       priority,
+      assignee_agent_id: payload.assignee_agent_id,
+      assignee_user_id: payload.assignee_user_id,
     }),
   });
   return data?.thread ? mapThreadToTask(data.thread as Thread & Record<string, unknown>) : null;
@@ -241,6 +245,14 @@ export async function updateTask(projectId: string, taskId: string, patch: Parti
   if (patch.status !== undefined) body.task_status = patch.status === "done" ? undefined : patch.status;
   if (patch.priority !== undefined) body.priority = patch.priority === "urgent" ? "high" : patch.priority;
   if (patch.completion_note !== undefined) body.completion_note = patch.completion_note;
+  if (patch.assignee_agent_id !== undefined) {
+    body.assignee_agent_id = patch.assignee_agent_id;
+    body.assignee_user_id = null;
+  }
+  if (patch.assignee_user_id !== undefined) {
+    body.assignee_user_id = patch.assignee_user_id;
+    body.assignee_agent_id = null;
+  }
 
   const data = await apiFetch<{ ok: boolean; thread: Thread }>(`/api/v1/threads/${taskId}`, {
     method: "PATCH",
