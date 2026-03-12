@@ -99,6 +99,15 @@ export type Thread = {
   deleted_at: string | null;
   my_removed_at: string | null;
   status: "open" | "closed" | "archived";
+  thread_type?: "conversation" | "feature" | "level_test" | "dm" | "task";
+  assignee_agent_id?: string | null;
+  assignee_user_id?: string | null;
+  assignee_name?: string | null;
+  priority?: "high" | "medium" | "normal" | "low" | null;
+  task_status?: "proposed" | "approved" | "in-progress" | "review" | "blocked" | null;
+  completion_note?: string | null;
+  done_at?: string | null;
+  description?: string | null;
 };
 
 export type ThreadMessage = {
@@ -168,6 +177,27 @@ export async function createThread(
   return data?.ok ? data.thread ?? null : null;
 }
 
+function mapThreadToTask(thread: Thread & Record<string, unknown>): Task {
+  const rawStatus = typeof thread.task_status === "string"
+    ? thread.task_status
+    : thread.status === "closed"
+      ? "done"
+      : "proposed";
+  const priority = thread.priority === "normal" ? "medium" : (thread.priority ?? "medium");
+
+  return {
+    id: thread.thread_id,
+    projectId: thread.project_id ?? "",
+    title: thread.subject,
+    description: typeof thread.description === "string" ? thread.description : "",
+    status: rawStatus as Task["status"],
+    assignee: typeof thread.assignee_name === "string" ? thread.assignee_name : undefined,
+    priority: priority as Task["priority"],
+    completion_note: typeof thread.completion_note === "string" ? thread.completion_note : undefined,
+    completed_at: typeof thread.done_at === "string" ? thread.done_at : undefined,
+  };
+}
+
 // ── Docs (Architecture + Tech Spec) ──────────────────────────────────────────
 
 export async function fetchArchitecture(projectId: string): Promise<string | null> {
@@ -183,29 +213,44 @@ export async function fetchTechSpec(projectId: string): Promise<string | null> {
 // ── Tasks ─────────────────────────────────────────────────────────────────────
 
 export async function fetchTasks(projectId: string): Promise<Task[]> {
-  const data = await apiFetch<{ ok: boolean; tasks: Task[] }>(`/api/v1/projects/${projectId}/tasks`);
-  if (data?.ok && data.tasks) return data.tasks;
+  const data = await apiFetch<{ ok: boolean; threads: Thread[] }>(`/api/v1/projects/${projectId}/threads?type=task`);
+  if (data?.ok && data.threads) return data.threads.map((thread) => mapThreadToTask(thread as Thread & Record<string, unknown>));
   return [];
 }
 
 export async function createTask(projectId: string, payload: Partial<Task>): Promise<Task | null> {
-  const data = await apiFetch<{ ok: boolean; task: Task }>(`/api/v1/projects/${projectId}/tasks`, {
+  const priority = payload.priority === "urgent" ? "high" : payload.priority;
+  const data = await apiFetch<{ ok: boolean; thread: Thread }>(`/api/v1/threads`, {
     method: "POST",
-    body: JSON.stringify(payload),
+    body: JSON.stringify({
+      project_id: projectId,
+      subject: payload.title,
+      description: payload.description,
+      thread_type: "task",
+      task_status: payload.status === "done" ? undefined : payload.status,
+      priority,
+    }),
   });
-  return data?.task ?? null;
+  return data?.thread ? mapThreadToTask(data.thread as Thread & Record<string, unknown>) : null;
 }
 
 export async function updateTask(projectId: string, taskId: string, patch: Partial<Task>): Promise<Task | null> {
-  const data = await apiFetch<{ ok: boolean; task: Task }>(`/api/v1/projects/${projectId}/tasks/${taskId}`, {
+  const body: Record<string, unknown> = {};
+  if (patch.title !== undefined) body.subject = patch.title;
+  if (patch.description !== undefined) body.description = patch.description;
+  if (patch.status !== undefined) body.task_status = patch.status === "done" ? undefined : patch.status;
+  if (patch.priority !== undefined) body.priority = patch.priority === "urgent" ? "high" : patch.priority;
+  if (patch.completion_note !== undefined) body.completion_note = patch.completion_note;
+
+  const data = await apiFetch<{ ok: boolean; thread: Thread }>(`/api/v1/threads/${taskId}`, {
     method: "PATCH",
-    body: JSON.stringify(patch),
+    body: JSON.stringify(body),
   });
-  return data?.task ?? null;
+  return data?.thread ? mapThreadToTask(data.thread as Thread & Record<string, unknown>) : null;
 }
 
 export async function deleteTask(projectId: string, taskId: string): Promise<boolean> {
-  const data = await apiFetch<{ ok: boolean }>(`/api/v1/projects/${projectId}/tasks/${taskId}`, {
+  const data = await apiFetch<{ ok: boolean }>(`/api/v1/threads/${taskId}`, {
     method: "DELETE",
   });
   return data?.ok ?? false;
@@ -799,10 +844,19 @@ export type TaskActivity = {
 };
 
 export async function fetchTaskActivity(projectId: string, taskId: string): Promise<TaskActivity[]> {
-  const data = await apiFetch<{ ok: boolean; activity: TaskActivity[] }>(
-    `/api/v1/projects/${projectId}/tasks/${taskId}/activity`
+  const data = await apiFetch<{ ok: boolean; messages: ThreadMessage[] }>(
+    `/api/v1/threads/${taskId}/messages?types=event`
   );
-  return data?.ok ? data.activity : [];
+  if (!data?.ok) return [];
+  return (data.messages ?? []).map((message) => ({
+    id: message.message_id,
+    actor_name: message.sender_slug,
+    actor_type: "system",
+    action: "status_changed",
+    from_value: null,
+    to_value: message.body,
+    created_at: message.sent_at,
+  }));
 }
 
 // ── Project group chat (MVP) ─────────────────────────────────────────────────

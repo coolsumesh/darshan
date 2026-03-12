@@ -92,9 +92,11 @@ POST ACK_URL: { inbox_id, callback_token: "${token}", response: "ack" }`;
     const { rows } = await db.query(`
       select a.*,
              case when a.last_ping_at > now() - interval '1 hour' then 'online' else 'offline' end as status,
-             (select count(*)::int from tasks t
-              where lower(t.assignee) = lower(a.name)
-                and t.status in ('proposed','approved','in-progress','review')
+             (select count(*)::int from threads t
+              where t.assignee_agent_id = a.id
+                and t.thread_type = 'task'
+                and t.status = 'open'
+                and t.task_status in ('proposed','approved','in-progress','review','blocked')
              ) as open_task_count
       from agents a
       where ($1::boolean or $2::uuid is null or a.owner_user_id = $2::uuid)
@@ -120,9 +122,11 @@ POST ACK_URL: { inbox_id, callback_token: "${token}", response: "ack" }`;
   server.get<{ Params: { id: string } }>("/agents/:id", async (req, reply) => {
     const { rows } = await db.query(
       `select a.*,
-              (select count(*)::int from tasks t
-               where lower(t.assignee) = lower(a.name)
-                 and t.status in ('proposed','approved','in-progress','review')
+              (select count(*)::int from threads t
+               where t.assignee_agent_id = a.id
+                 and t.thread_type = 'task'
+                 and t.status = 'open'
+                 and t.task_status in ('proposed','approved','in-progress','review','blocked')
               ) as open_task_count
        from agents a
        where a.id::text = $1`,
@@ -265,12 +269,20 @@ POST ACK_URL: { inbox_id, callback_token: "${token}", response: "ack" }`;
       );
       if (!agents[0]) return reply.status(401).send({ ok: false, error: "invalid token" });
 
-      const conditions = ["lower(t.assignee) = lower($1)"];
-      const vals: unknown[] = [agents[0].name];
+      const conditions = ["t.assignee_agent_id = $1", "t.thread_type = 'task'"];
+      const vals: unknown[] = [agents[0].id];
 
       if (req.query.status) {
-        vals.push(req.query.status);
-        conditions.push(`t.status = $${vals.length}`);
+        const requestedStatus = req.query.status.trim().toLowerCase();
+        if (requestedStatus === "done") {
+          conditions.push(`t.status = 'closed'`);
+        } else if (requestedStatus === "open") {
+          conditions.push(`t.status = 'open'`);
+        } else {
+          vals.push(requestedStatus);
+          conditions.push(`t.task_status = $${vals.length}`);
+          conditions.push(`t.status = 'open'`);
+        }
       }
       if (req.query.project_id) {
         vals.push(req.query.project_id);
@@ -280,8 +292,32 @@ POST ACK_URL: { inbox_id, callback_token: "${token}", response: "ack" }`;
       vals.push(Math.min(Math.max(Number(req.query.limit ?? 50), 1), 200));
 
       const { rows } = await db.query(
-        `select t.*
-         from tasks t
+        `select
+           t.thread_id as id,
+           t.thread_id,
+           t.project_id,
+           t.subject as title,
+           first_message.body as description,
+           coalesce(t.task_status, case when t.status = 'closed' then 'done' else t.status end) as status,
+           t.priority,
+           t.completion_note,
+           t.done_at as completed_at,
+           coalesce(last_message.sent_at, t.created_at) as last_activity
+         from threads t
+         left join lateral (
+           select tm.body
+           from thread_messages tm
+           where tm.thread_id = t.thread_id and tm.type = 'message'
+           order by tm.sent_at asc
+           limit 1
+         ) first_message on true
+         left join lateral (
+           select tm.sent_at
+           from thread_messages tm
+           where tm.thread_id = t.thread_id
+           order by tm.sent_at desc
+           limit 1
+         ) last_message on true
          where ${conditions.join(" and ")}
          order by
            case t.priority when 'high' then 1 when 'medium' then 2 when 'low' then 3 else 4 end,
