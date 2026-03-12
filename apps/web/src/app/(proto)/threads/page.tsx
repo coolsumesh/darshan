@@ -7,17 +7,22 @@ import remarkGfm from "remark-gfm";
 import {
   fetchThreads,
   fetchThread,
+  fetchThreadParticipants,
   fetchThreadMessages,
   fetchProjects,
   fetchTeam,
+  fetchAgentsDirectory,
   sendThreadMessage,
   setThreadStatus,
   createThread,
+  addThreadParticipant,
   type Thread,
   type ThreadMessage,
   type Project,
+  type ThreadParticipant,
+  type ThreadAccessRole,
 } from "@/lib/api";
-import { ChevronDown, Inbox, Send, RefreshCw, CheckCircle, ArchiveIcon, Plus, X, Mic, Square } from "lucide-react";
+import { ChevronDown, Inbox, Send, RefreshCw, CheckCircle, ArchiveIcon, Plus, X, Mic, Square, UserPlus } from "lucide-react";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -212,6 +217,34 @@ function MessageBubble({ msg, isMe, knownSlugs }: { msg: ThreadMessage; isMe: bo
 
 // ── New Thread Modal ──────────────────────────────────────────────────────────
 
+type ParticipantOption = {
+  id: string;
+  name: string;
+  slug: string;
+};
+
+function Toast({
+  tone,
+  message,
+}: {
+  tone: "success" | "error";
+  message: string;
+}) {
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className={`fixed right-6 top-20 z-50 rounded-xl border px-4 py-3 text-sm shadow-2xl ${
+        tone === "success"
+          ? "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-300"
+          : "border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/40 dark:text-rose-300"
+      }`}
+    >
+      {message}
+    </div>
+  );
+}
+
 function NewThreadModal({
   projects,
   defaultProjectId,
@@ -359,6 +392,15 @@ export default function ThreadsPage() {
   const [debouncedThreadSearch, setDebouncedThreadSearch] = React.useState("");
   const [closing, setClosing] = React.useState(false);
   const [composeOpen, setComposeOpen] = React.useState(false);
+  const [threadParticipants, setThreadParticipants] = React.useState<ThreadParticipant[]>([]);
+  const [threadRole, setThreadRole] = React.useState<ThreadAccessRole | null>(null);
+  const [participantOptions, setParticipantOptions] = React.useState<ParticipantOption[]>([]);
+  const [participantQuery, setParticipantQuery] = React.useState("");
+  const [selectedParticipantId, setSelectedParticipantId] = React.useState("");
+  const [participantOptionsLoading, setParticipantOptionsLoading] = React.useState(false);
+  const [addingParticipant, setAddingParticipant] = React.useState(false);
+  const [participantFeedback, setParticipantFeedback] = React.useState<{ tone: "success" | "error"; message: string } | null>(null);
+  const [toast, setToast] = React.useState<{ tone: "success" | "error"; message: string } | null>(null);
   const [mentionSlugs, setMentionSlugs] = React.useState<string[]>([]);
   const [mentionOpen, setMentionOpen] = React.useState(false);
   const [mentionIndex, setMentionIndex] = React.useState(0);
@@ -383,6 +425,12 @@ export default function ThreadsPage() {
     const t = setTimeout(() => setDebouncedThreadSearch(threadSearch.trim()), 250);
     return () => clearTimeout(t);
   }, [threadSearch]);
+
+  React.useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 2500);
+    return () => clearTimeout(t);
+  }, [toast]);
 
   // Load thread list
   const loadThreads = React.useCallback(async (
@@ -424,7 +472,11 @@ export default function ThreadsPage() {
     const pickThread = async () => {
       const existing = threads.find((t) => t.thread_id === threadId);
       if (existing) {
-        setSelected(existing);
+        const detail = await fetchThread(existing.thread_id);
+        if (!detail) return;
+        setSelected(detail.thread);
+        setThreadParticipants(detail.participants);
+        setThreadRole(detail.role);
         const msgs = await fetchThreadMessages(existing.thread_id, 200);
         setMessages(msgs);
         return;
@@ -433,11 +485,13 @@ export default function ThreadsPage() {
       const direct = await fetchThread(threadId);
       if (!direct) return;
 
-      setProjectId(direct.project_id ?? null);
-      setThreadStatusFilter(direct.status === "open" ? "open" : "closed");
-      setThreads((prev) => (prev.some((t) => t.thread_id === direct.thread_id) ? prev : [direct, ...prev]));
-      setSelected(direct);
-      const msgs = await fetchThreadMessages(direct.thread_id, 200);
+      setProjectId(direct.thread.project_id ?? null);
+      setThreadStatusFilter(direct.thread.status === "open" ? "open" : "closed");
+      setThreads((prev) => (prev.some((t) => t.thread_id === direct.thread.thread_id) ? prev : [direct.thread, ...prev]));
+      setSelected(direct.thread);
+      setThreadParticipants(direct.participants);
+      setThreadRole(direct.role);
+      const msgs = await fetchThreadMessages(direct.thread.thread_id, 200);
       setMessages(msgs);
     };
 
@@ -448,6 +502,8 @@ export default function ThreadsPage() {
     setProjectId(pid);
     setSelected(null);
     setMessages([]);
+    setThreadParticipants([]);
+    setThreadRole(null);
     setDropdownOpen(false);
   };
 
@@ -459,12 +515,21 @@ export default function ThreadsPage() {
 
   React.useEffect(() => {
     if (!selected) {
+      setThreadParticipants([]);
+      setThreadRole(null);
+      setParticipantOptions([]);
+      setParticipantQuery("");
+      setSelectedParticipantId("");
+      setParticipantFeedback(null);
       setMentionSlugs([]);
       return;
     }
 
+    const activeParticipantSlugs = threadParticipants
+      .filter((participant) => !participant.removed_at)
+      .map((participant) => participant.participant_slug.toUpperCase());
     const fromMessages = messages.map((m) => m.sender_slug.toUpperCase());
-    const fallback = Array.from(new Set([selected.created_slug.toUpperCase(), ...fromMessages]));
+    const fallback = Array.from(new Set([selected.created_slug.toUpperCase(), ...activeParticipantSlugs, ...fromMessages]));
 
     if (!selected.project_id) {
       setMentionSlugs(fallback);
@@ -474,11 +539,46 @@ export default function ThreadsPage() {
     fetchTeam(selected.project_id)
       .then((team) => {
         const fromTeam = team.map((m) => (m.agent?.name ?? "").toUpperCase()).filter(Boolean);
-        const merged = Array.from(new Set([selected.created_slug.toUpperCase(), ...fromTeam, ...fromMessages]));
+        const merged = Array.from(new Set([selected.created_slug.toUpperCase(), ...fromTeam, ...activeParticipantSlugs, ...fromMessages]));
         setMentionSlugs(merged);
       })
       .catch(() => setMentionSlugs(fallback));
-  }, [selected?.thread_id, selected?.project_id, messages]); // eslint-disable-line
+  }, [selected?.thread_id, selected?.project_id, messages, threadParticipants]); // eslint-disable-line
+
+  React.useEffect(() => {
+    if (!selected) return;
+    const thread = selected;
+
+    let cancelled = false;
+    async function loadParticipantOptions() {
+      setParticipantOptionsLoading(true);
+      const options = thread.project_id
+        ? (await fetchTeam(thread.project_id)).map((member) => ({
+            id: member.agentId,
+            name: member.agent?.name ?? member.agentId,
+            slug: (member.agent?.name ?? member.agentId).toUpperCase().replace(/[^A-Z0-9]/g, "_"),
+          }))
+        : (await fetchAgentsDirectory()).map((agent) => ({
+            id: agent.id,
+            name: agent.name,
+            slug: agent.name.toUpperCase().replace(/[^A-Z0-9]/g, "_"),
+          }));
+
+      if (cancelled) return;
+      setParticipantOptions(Array.from(new Map(options.map((option) => [option.id, option])).values()));
+      setParticipantOptionsLoading(false);
+    }
+
+    loadParticipantOptions().catch(() => {
+      if (cancelled) return;
+      setParticipantOptions([]);
+      setParticipantOptionsLoading(false);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selected?.thread_id, selected?.project_id]);
 
   // Push-based realtime updates (no polling fallback in UI)
   React.useEffect(() => {
@@ -528,7 +628,10 @@ export default function ThreadsPage() {
   }, [selected?.thread_id, projectId, threadStatusFilter, loadThreads]);
 
   const selectThread = React.useCallback(async (thread: Thread) => {
-    setSelected(thread);
+    const detail = await fetchThread(thread.thread_id);
+    setSelected(detail?.thread ?? thread);
+    setThreadParticipants(detail?.participants ?? []);
+    setThreadRole(detail?.role ?? null);
     setMessages([]);
     const msgs = await fetchThreadMessages(thread.thread_id, 200);
     setMessages(msgs);
@@ -658,13 +761,63 @@ export default function ThreadsPage() {
     setComposeOpen(false);
     // Reload list then open the new thread
     await loadThreads(thread.project_id, threadStatusFilter, { search: debouncedThreadSearch });
-    setSelected(thread);
+    const detail = await fetchThread(thread.thread_id);
+    setSelected(detail?.thread ?? thread);
+    setThreadParticipants(detail?.participants ?? []);
+    setThreadRole(detail?.role ?? null);
     const msgs = await fetchThreadMessages(thread.thread_id, 200);
     setMessages(msgs);
   };
 
+  const activeParticipants = React.useMemo(
+    () => threadParticipants.filter((participant) => !participant.removed_at),
+    [threadParticipants]
+  );
+  const canManageParticipants = threadRole === "creator" || threadRole === "owner";
+  const availableParticipantOptions = React.useMemo(() => {
+    const activeIds = new Set(activeParticipants.map((participant) => participant.participant_id));
+    const query = participantQuery.trim().toLowerCase();
+    return participantOptions.filter((option) => {
+      if (activeIds.has(option.id)) return false;
+      if (!query) return true;
+      return option.name.toLowerCase().includes(query) || option.slug.toLowerCase().includes(query);
+    });
+  }, [activeParticipants, participantOptions, participantQuery]);
+
+  React.useEffect(() => {
+    if (!availableParticipantOptions.some((option) => option.id === selectedParticipantId)) {
+      setSelectedParticipantId(availableParticipantOptions[0]?.id ?? "");
+    }
+  }, [availableParticipantOptions, selectedParticipantId]);
+
+  const handleAddParticipant = async () => {
+    if (!selected || !selectedParticipantId || addingParticipant) return;
+    setAddingParticipant(true);
+    setParticipantFeedback(null);
+    const result = await addThreadParticipant(selected.thread_id, selectedParticipantId);
+    if (!result.ok) {
+      const message = result.status === 403
+        ? (result.error ?? "You do not have permission to add participants to this thread.")
+        : (result.error ?? "Failed to add participant.");
+      setParticipantFeedback({ tone: "error", message });
+      setToast({ tone: "error", message });
+      setAddingParticipant(false);
+      return;
+    }
+
+    const refreshedParticipants = await fetchThreadParticipants(selected.thread_id);
+    setThreadParticipants(refreshedParticipants);
+    const message = `${result.participant_slug ?? "Participant"} added to the thread.`;
+    setParticipantFeedback({ tone: "success", message });
+    setToast({ tone: "success", message: `${result.participant_slug ?? "Participant"} added.` });
+    setParticipantQuery("");
+    setSelectedParticipantId("");
+    setAddingParticipant(false);
+  };
+
   return (
     <>
+    {toast && <Toast tone={toast.tone} message={toast.message} />}
     {composeOpen && (
       <NewThreadModal
         projects={projects}
@@ -835,6 +988,21 @@ export default function ThreadsPage() {
                   <div className="mt-0.5 text-xs text-slate-400">
                     Started by {selected.created_slug} · {relativeTime(selected.created_at)}
                   </div>
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    {activeParticipants.length > 0 ? (
+                      activeParticipants.map((participant) => (
+                        <span
+                          key={participant.participant_id}
+                          className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300"
+                        >
+                          <span className={`h-2 w-2 rounded-full ${slugColor(participant.participant_slug)}`} />
+                          {participant.participant_slug}
+                        </span>
+                      ))
+                    ) : (
+                      <span className="text-xs text-slate-400">No active participants</span>
+                    )}
+                  </div>
                   {selected.thread_type === "task" && (
                     <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
                       <span className="rounded-full bg-violet-100 px-2 py-0.5 font-medium text-violet-700 dark:bg-violet-950/40 dark:text-violet-300">
@@ -885,6 +1053,64 @@ export default function ThreadsPage() {
                   </button>
                 </div>
               </div>
+              {canManageParticipants && (
+                <div className="mt-3 flex flex-wrap items-end gap-2 rounded-xl border border-slate-200 bg-slate-50/80 p-3 dark:border-slate-800 dark:bg-slate-900/60">
+                  <div className="min-w-[11rem] flex-1">
+                    <label className="mb-1 block text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                      Add participant
+                    </label>
+                    <input
+                      value={participantQuery}
+                      onChange={(e) => setParticipantQuery(e.target.value)}
+                      placeholder="Search agents…"
+                      className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 placeholder-slate-400 outline-none focus:border-violet-400 focus:ring-1 focus:ring-violet-400 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                    />
+                  </div>
+                  <div className="min-w-[12rem] flex-1">
+                    <label className="mb-1 block text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                      Select participant
+                    </label>
+                    <select
+                      value={selectedParticipantId}
+                      onChange={(e) => setSelectedParticipantId(e.target.value)}
+                      disabled={participantOptionsLoading || availableParticipantOptions.length === 0}
+                      className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none focus:border-violet-400 focus:ring-1 focus:ring-violet-400 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                    >
+                      {participantOptionsLoading ? (
+                        <option value="">Loading participants…</option>
+                      ) : availableParticipantOptions.length === 0 ? (
+                        <option value="">No participants available</option>
+                      ) : (
+                        availableParticipantOptions.map((option) => (
+                          <option key={option.id} value={option.id}>
+                            {option.name}
+                          </option>
+                        ))
+                      )}
+                    </select>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleAddParticipant}
+                    disabled={!selectedParticipantId || addingParticipant || participantOptionsLoading}
+                    className="flex h-10 shrink-0 items-center gap-1.5 rounded-lg bg-violet-600 px-3 text-sm font-medium text-white transition hover:bg-violet-700 disabled:opacity-40"
+                  >
+                    <UserPlus className="h-4 w-4" />
+                    {addingParticipant ? "Adding…" : "Add"}
+                  </button>
+                  {participantFeedback && (
+                    <div
+                      className={`basis-full text-xs ${
+                        participantFeedback.tone === "success"
+                          ? "text-emerald-600 dark:text-emerald-300"
+                          : "text-rose-600 dark:text-rose-300"
+                      }`}
+                    >
+                      {participantFeedback.message}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Messages */}

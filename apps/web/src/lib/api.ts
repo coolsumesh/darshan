@@ -121,6 +121,32 @@ export type ThreadMessage = {
   sent_at: string;
 };
 
+export type ThreadParticipant = {
+  thread_id: string;
+  participant_id: string;
+  participant_slug: string;
+  added_by: string | null;
+  added_by_slug: string | null;
+  joined_at: string;
+  removed_at: string | null;
+};
+
+export type ThreadAccessRole = "creator" | "owner" | "participant" | "removed";
+
+export type ThreadDetail = {
+  thread: Thread;
+  participants: ThreadParticipant[];
+  role: ThreadAccessRole;
+};
+
+export type ThreadParticipantMutationResult = {
+  ok: boolean;
+  status: number;
+  error?: string;
+  participant_id?: string;
+  participant_slug?: string;
+};
+
 export async function fetchThreads(
   projectId?: string | null,
   status: "open" | "closed" | "archived" | "all" = "open",
@@ -133,9 +159,16 @@ export async function fetchThreads(
   return data?.ok ? (data.threads ?? []) : [];
 }
 
-export async function fetchThread(threadId: string): Promise<Thread | null> {
-  const data = await apiFetch<{ ok: boolean; thread: Thread }>(`/api/v1/threads/${threadId}`);
-  return data?.ok ? data.thread ?? null : null;
+export async function fetchThread(threadId: string): Promise<ThreadDetail | null> {
+  const data = await apiFetch<{ ok: boolean; thread: Thread; participants?: ThreadParticipant[]; role?: ThreadAccessRole }>(
+    `/api/v1/threads/${threadId}`
+  );
+  if (!data?.ok || !data.thread) return null;
+  return {
+    thread: data.thread,
+    participants: data.participants ?? [],
+    role: data.role ?? "participant",
+  };
 }
 
 export async function fetchThreadMessages(threadId: string, limit = 100): Promise<ThreadMessage[]> {
@@ -152,6 +185,40 @@ export async function sendThreadMessage(threadId: string, body: string): Promise
     { method: "POST", body: JSON.stringify({ body }) }
   );
   return data?.ok ? data.message ?? null : null;
+}
+
+export async function fetchThreadParticipants(threadId: string): Promise<ThreadParticipant[]> {
+  const data = await apiFetch<{ ok: boolean; participants: ThreadParticipant[] }>(
+    `/api/v1/threads/${threadId}/participants`
+  );
+  return data?.ok ? (data.participants ?? []) : [];
+}
+
+export async function addThreadParticipant(
+  threadId: string,
+  participantId: string
+): Promise<ThreadParticipantMutationResult> {
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/threads/${threadId}/participants`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ participant_id: participantId }),
+    });
+    const data = await res.json().catch(() => null) as
+      | { ok?: boolean; error?: string; participant_id?: string; participant_slug?: string }
+      | null;
+
+    return {
+      ok: res.ok && !!data?.ok,
+      status: res.status,
+      error: data?.error,
+      participant_id: data?.participant_id,
+      participant_slug: data?.participant_slug,
+    };
+  } catch {
+    return { ok: false, status: 0, error: "Network error while adding participant" };
+  }
 }
 
 export async function setThreadStatus(
