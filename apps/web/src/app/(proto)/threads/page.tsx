@@ -2,6 +2,8 @@
 
 import * as React from "react";
 import Link from "next/link";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import {
   fetchThreads,
   fetchThread,
@@ -61,31 +63,67 @@ function getMentionContext(text: string, cursor: number) {
   return { query: match[1] ?? "", start: atIndex, end: cursor };
 }
 
-function renderMentions(body: string, knownSlugs: Set<string>) {
+function highlightMentions(text: string, knownSlugs: Set<string>): React.ReactNode {
   const parts: React.ReactNode[] = [];
   const regex = /@([A-Za-z0-9_-]+)/g;
   let last = 0;
   let m: RegExpExecArray | null;
-
-  while ((m = regex.exec(body))) {
-    if (m.index > last) parts.push(body.slice(last, m.index));
+  while ((m = regex.exec(text))) {
+    if (m.index > last) parts.push(text.slice(last, m.index));
     const slug = m[1];
     const known = knownSlugs.has(slug.toUpperCase());
     parts.push(
       <span
-        key={`${slug}-${m.index}`}
+        key={`m${m.index}`}
         className={known
           ? "rounded bg-violet-100 px-1 py-0.5 font-semibold text-violet-700 dark:bg-violet-900/40 dark:text-violet-300"
-          : "rounded bg-slate-100 px-1 py-0.5 font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-300"}
+          : "rounded bg-slate-100 px-1 py-0.5 font-semibold text-slate-500 dark:bg-slate-700 dark:text-slate-300"}
       >
         @{slug}
       </span>
     );
     last = m.index + m[0].length;
   }
+  if (last < text.length) parts.push(text.slice(last));
+  return parts.length === 0 ? text : parts.length === 1 ? parts[0] : <>{parts}</>;
+}
 
-  if (last < body.length) parts.push(body.slice(last));
-  return parts;
+function processChildren(children: React.ReactNode, knownSlugs: Set<string>): React.ReactNode {
+  return React.Children.map(children, child =>
+    typeof child === "string" ? highlightMentions(child, knownSlugs) : child
+  );
+}
+
+function MarkdownMessage({ body, knownSlugs, isMe }: { body: string; knownSlugs: Set<string>; isMe: boolean }) {
+  const mc = (base: string) => `${base} ${isMe ? "[&_code]:bg-white/20 [&_pre]:bg-white/20" : ""}`;
+  return (
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm]}
+      components={{
+        p:          ({ children }) => <p className="my-0.5 leading-relaxed">{processChildren(children, knownSlugs)}</p>,
+        li:         ({ children }) => <li className="my-0.5">{processChildren(children, knownSlugs)}</li>,
+        ul:         ({ children }) => <ul className="my-1 list-disc space-y-0.5 pl-5">{children}</ul>,
+        ol:         ({ children }) => <ol className="my-1 list-decimal space-y-0.5 pl-5">{children}</ol>,
+        h1:         ({ children }) => <h1 className="mt-2 mb-1 text-base font-bold">{processChildren(children, knownSlugs)}</h1>,
+        h2:         ({ children }) => <h2 className="mt-2 mb-1 text-sm font-bold">{processChildren(children, knownSlugs)}</h2>,
+        h3:         ({ children }) => <h3 className="mt-1 mb-0.5 text-sm font-semibold">{processChildren(children, knownSlugs)}</h3>,
+        strong:     ({ children }) => <strong className="font-semibold">{children}</strong>,
+        em:         ({ children }) => <em className="italic">{children}</em>,
+        blockquote: ({ children }) => <blockquote className="my-1 border-l-2 border-current pl-3 opacity-70 italic">{children}</blockquote>,
+        code:       ({ children, className }) => {
+          const isBlock = className?.includes("language-");
+          return isBlock
+            ? <code className={mc("block rounded px-2 py-1 font-mono text-xs bg-black/10 dark:bg-white/10 whitespace-pre-wrap")}>{children}</code>
+            : <code className={mc("rounded px-1 py-0.5 font-mono text-xs bg-black/10 dark:bg-white/10")}>{children}</code>;
+        },
+        pre:        ({ children }) => <pre className={mc("my-1 overflow-x-auto rounded bg-black/10 dark:bg-white/10 p-2 text-xs")}>{children}</pre>,
+        input:      ({ checked }) => <input type="checkbox" checked={!!checked} readOnly className="mr-1.5 mt-0.5 align-middle accent-violet-500" />,
+        a:          ({ href, children }) => <a href={href} target="_blank" rel="noopener noreferrer" className="underline opacity-80 hover:opacity-100">{children}</a>,
+      }}
+    >
+      {body}
+    </ReactMarkdown>
+  );
 }
 
 // ── Thread list row ───────────────────────────────────────────────────────────
@@ -149,7 +187,7 @@ function MessageBubble({ msg, isMe, knownSlugs }: { msg: ThreadMessage; isMe: bo
           <span className="text-[10px] text-slate-400">{relativeTime(msg.sent_at)}</span>
         </div>
         <div
-          className={`rounded-2xl px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap ${
+          className={`rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
             isMe
               ? "rounded-tr-sm bg-violet-600 text-white"
               : msg.type === "event"
@@ -157,7 +195,9 @@ function MessageBubble({ msg, isMe, knownSlugs }: { msg: ThreadMessage; isMe: bo
               : "rounded-tl-sm bg-white text-slate-800 ring-1 ring-slate-200 dark:bg-slate-800 dark:text-slate-100 dark:ring-slate-700"
           }`}
         >
-          {renderMentions(msg.body, knownSlugs)}
+          {msg.type === "event"
+            ? highlightMentions(msg.body, knownSlugs)
+            : <MarkdownMessage body={msg.body} knownSlugs={knownSlugs} isMe={isMe} />}
         </div>
       </div>
     </div>
