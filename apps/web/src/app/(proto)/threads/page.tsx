@@ -828,14 +828,19 @@ export default function ThreadsPage() {
   const handleSend = async () => {
     if (!selected || sending || (!draft.trim() && draftAttachments.length === 0)) return;
     setSending(true);
-    const msg = await sendThreadMessage(selected.thread_id, draft.trim(), draftAttachments);
-    if (msg) {
-      // Do not append optimistically here.
-      // WebSocket thread.message_created is the single source of truth and avoids duplicate flashes.
-      setDraft("");
-      setDraftAttachments([]);
+    try {
+      const msg = await sendThreadMessage(selected.thread_id, draft.trim(), draftAttachments);
+      if (msg) {
+        // Do not append optimistically here.
+        // WebSocket thread.message_created is the single source of truth and avoids duplicate flashes.
+        setDraft("");
+        setDraftAttachments([]);
+      } else {
+        setToast({ tone: "error", message: "Failed to send message. Check permissions/next-reply state and try again." });
+      }
+    } finally {
+      setSending(false);
     }
-    setSending(false);
   };
 
   const handleAttach = async (ev: React.ChangeEvent<HTMLInputElement>) => {
@@ -848,7 +853,21 @@ export default function ThreadsPage() {
   };
 
   const handleKey = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); }
+    const composing = (e.nativeEvent as any)?.isComposing;
+    if (composing) return;
+
+    // Enter sends by default; Shift+Enter inserts newline.
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+      return;
+    }
+
+    // Explicit fallback shortcuts
+    if ((e.key === "Enter" && (e.metaKey || e.ctrlKey))) {
+      e.preventDefault();
+      handleSend();
+    }
   };
 
   React.useEffect(() => {
