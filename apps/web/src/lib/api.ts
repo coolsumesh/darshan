@@ -108,6 +108,7 @@ export type Thread = {
   completion_note?: string | null;
   done_at?: string | null;
   description?: string | null;
+  last_activity?: string | null;
 };
 
 export type ThreadMessage = {

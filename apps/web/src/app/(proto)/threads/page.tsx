@@ -750,11 +750,11 @@ export default function ThreadsPage() {
     setSelected(null);
   };
 
-  // Sort threads: most recent preview first
+  // Sort threads: most recent activity first (last_activity = COALESCE(last_message.sent_at, created_at))
   const sortedThreads = [...threads].sort((a, b) => {
-    const ta = previews[a.thread_id]?.time ?? a.created_at;
-    const tb = previews[b.thread_id]?.time ?? b.created_at;
-    return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+    const ta = a.last_activity ?? a.created_at;
+    const tb = b.last_activity ?? b.created_at;
+    return new Date(tb).getTime() - new Date(ta).getTime();
   });
 
   const handleThreadCreated = async (thread: Thread) => {
