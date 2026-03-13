@@ -403,6 +403,8 @@ export default function ThreadsPage() {
   const [participantOptionsLoading, setParticipantOptionsLoading] = React.useState(false);
   const [addingParticipant, setAddingParticipant] = React.useState(false);
   const [participantFeedback, setParticipantFeedback] = React.useState<{ tone: "success" | "error"; message: string } | null>(null);
+  const [addParticipantOpen, setAddParticipantOpen] = React.useState(false);
+  const addParticipantRef = React.useRef<HTMLDivElement>(null);
   const [toast, setToast] = React.useState<{ tone: "success" | "error"; message: string } | null>(null);
   const [mentionSlugs, setMentionSlugs] = React.useState<string[]>([]);
   const [mentionOpen, setMentionOpen] = React.useState(false);
@@ -793,11 +795,15 @@ export default function ThreadsPage() {
     }
   }, [availableParticipantOptions, selectedParticipantId]);
 
-  const handleAddParticipant = async () => {
-    if (!selected || !selectedParticipantId || addingParticipant) return;
+  const handleAddParticipant = async (directId?: string) => {
+    const pid = directId ?? selectedParticipantId;
+    if (!selected || !pid || addingParticipant) return;
     setAddingParticipant(true);
     setParticipantFeedback(null);
-    const result = await addThreadParticipant(selected.thread_id, selectedParticipantId);
+    const result = await addThreadParticipant(selected.thread_id, pid);
+    setAddParticipantOpen(false);
+    setParticipantQuery("");
+    setSelectedParticipantId("");
     if (!result.ok) {
       const message = result.status === 403
         ? (result.error ?? "You do not have permission to add participants to this thread.")
@@ -810,13 +816,21 @@ export default function ThreadsPage() {
 
     const refreshedParticipants = await fetchThreadParticipants(selected.thread_id);
     setThreadParticipants(refreshedParticipants);
-    const message = `${result.participant_slug ?? "Participant"} added to the thread.`;
-    setParticipantFeedback({ tone: "success", message });
     setToast({ tone: "success", message: `${result.participant_slug ?? "Participant"} added.` });
-    setParticipantQuery("");
-    setSelectedParticipantId("");
     setAddingParticipant(false);
   };
+
+  // Close add-participant popover on outside click
+  React.useEffect(() => {
+    if (!addParticipantOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (addParticipantRef.current && !addParticipantRef.current.contains(e.target as Node)) {
+        setAddParticipantOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [addParticipantOpen]);
 
   return (
     <>
@@ -992,18 +1006,66 @@ export default function ThreadsPage() {
                     Started by {selected.created_slug} · {relativeTime(selected.created_at)}
                   </div>
                   <div className="mt-2 flex flex-wrap items-center gap-2">
-                    {activeParticipants.length > 0 ? (
-                      activeParticipants.map((participant) => (
-                        <span
-                          key={participant.participant_id}
-                          className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300"
+                    {activeParticipants.map((participant) => (
+                      <span
+                        key={participant.participant_id}
+                        className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300"
+                      >
+                        <span className={`h-2 w-2 rounded-full ${slugColor(participant.participant_slug)}`} />
+                        {participant.participant_slug}
+                      </span>
+                    ))}
+
+                    {/* Inline add-participant button + popover */}
+                    {canManageParticipants && (
+                      <div ref={addParticipantRef} className="relative">
+                        <button
+                          onClick={() => setAddParticipantOpen(v => !v)}
+                          title="Add participant"
+                          className="inline-flex items-center gap-1 rounded-full border border-dashed border-slate-300 px-2.5 py-1 text-[11px] font-medium text-slate-400 transition hover:border-violet-400 hover:text-violet-600 dark:border-slate-600 dark:text-slate-500 dark:hover:border-violet-500 dark:hover:text-violet-400"
                         >
-                          <span className={`h-2 w-2 rounded-full ${slugColor(participant.participant_slug)}`} />
-                          {participant.participant_slug}
-                        </span>
-                      ))
-                    ) : (
-                      <span className="text-xs text-slate-400">No active participants</span>
+                          <UserPlus className="h-3 w-3" />
+                          {activeParticipants.length === 0 ? "Add participant" : "Add"}
+                        </button>
+
+                        {addParticipantOpen && (
+                          <div className="absolute left-0 top-full z-40 mt-1.5 w-60 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl dark:border-slate-700 dark:bg-slate-900">
+                            <div className="p-2 border-b border-slate-100 dark:border-slate-800">
+                              <input
+                                autoFocus
+                                value={participantQuery}
+                                onChange={(e) => setParticipantQuery(e.target.value)}
+                                placeholder="Search agents…"
+                                className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs text-slate-800 placeholder-slate-400 outline-none focus:border-violet-400 focus:ring-1 focus:ring-violet-400 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+                              />
+                            </div>
+                            <div className="max-h-52 overflow-y-auto py-1">
+                              {participantOptionsLoading ? (
+                                <div className="px-3 py-3 text-xs text-slate-400">Loading…</div>
+                              ) : availableParticipantOptions.length === 0 ? (
+                                <div className="px-3 py-3 text-xs text-slate-400">No agents to add</div>
+                              ) : (
+                                availableParticipantOptions.map((option) => (
+                                  <button
+                                    key={option.id}
+                                    type="button"
+                                    disabled={addingParticipant}
+                                    onClick={() => handleAddParticipant(option.id)}
+                                    className="flex w-full items-center gap-2.5 px-3 py-2 text-left hover:bg-violet-50 dark:hover:bg-violet-950/30 disabled:opacity-50"
+                                  >
+                                    <Avatar slug={option.slug} size="sm" />
+                                    <span className="text-sm text-slate-700 dark:text-slate-200">{option.name}</span>
+                                  </button>
+                                ))
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {participantFeedback?.tone === "error" && (
+                      <span className="text-xs text-rose-500">{participantFeedback.message}</span>
                     )}
                   </div>
                   {selected.thread_type === "task" && (
@@ -1056,64 +1118,7 @@ export default function ThreadsPage() {
                   </button>
                 </div>
               </div>
-              {canManageParticipants && (
-                <div className="mt-3 flex flex-wrap items-end gap-2 rounded-xl border border-slate-200 bg-slate-50/80 p-3 dark:border-slate-800 dark:bg-slate-900/60">
-                  <div className="min-w-[11rem] flex-1">
-                    <label className="mb-1 block text-[11px] font-medium text-slate-500 dark:text-slate-400">
-                      Add participant
-                    </label>
-                    <input
-                      value={participantQuery}
-                      onChange={(e) => setParticipantQuery(e.target.value)}
-                      placeholder="Search agents…"
-                      className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 placeholder-slate-400 outline-none focus:border-violet-400 focus:ring-1 focus:ring-violet-400 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
-                    />
-                  </div>
-                  <div className="min-w-[12rem] flex-1">
-                    <label className="mb-1 block text-[11px] font-medium text-slate-500 dark:text-slate-400">
-                      Select participant
-                    </label>
-                    <select
-                      value={selectedParticipantId}
-                      onChange={(e) => setSelectedParticipantId(e.target.value)}
-                      disabled={participantOptionsLoading || availableParticipantOptions.length === 0}
-                      className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none focus:border-violet-400 focus:ring-1 focus:ring-violet-400 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
-                    >
-                      {participantOptionsLoading ? (
-                        <option value="">Loading participants…</option>
-                      ) : availableParticipantOptions.length === 0 ? (
-                        <option value="">No participants available</option>
-                      ) : (
-                        availableParticipantOptions.map((option) => (
-                          <option key={option.id} value={option.id}>
-                            {option.name}
-                          </option>
-                        ))
-                      )}
-                    </select>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={handleAddParticipant}
-                    disabled={!selectedParticipantId || addingParticipant || participantOptionsLoading}
-                    className="flex h-10 shrink-0 items-center gap-1.5 rounded-lg bg-violet-600 px-3 text-sm font-medium text-white transition hover:bg-violet-700 disabled:opacity-40"
-                  >
-                    <UserPlus className="h-4 w-4" />
-                    {addingParticipant ? "Adding…" : "Add"}
-                  </button>
-                  {participantFeedback && (
-                    <div
-                      className={`basis-full text-xs ${
-                        participantFeedback.tone === "success"
-                          ? "text-emerald-600 dark:text-emerald-300"
-                          : "text-rose-600 dark:text-rose-300"
-                      }`}
-                    >
-                      {participantFeedback.message}
-                    </div>
-                  )}
-                </div>
-              )}
+
             </div>
 
             {/* Messages */}
