@@ -99,7 +99,7 @@ export type Thread = {
   deleted_at: string | null;
   my_removed_at: string | null;
   status: "open" | "closed" | "archived";
-  thread_type?: "conversation" | "feature" | "level_test" | "dm" | "task";
+  thread_type?: "conversation" | "feature" | "level_test" | "task";
   assignee_agent_id?: string | null;
   assignee_user_id?: string | null;
   assignee_name?: string | null;
@@ -109,6 +109,22 @@ export type Thread = {
   done_at?: string | null;
   description?: string | null;
   last_activity?: string | null;
+  has_reply_pending?: boolean;
+  next_reply?: ThreadNextReply | null;
+};
+
+export type ThreadNextReply = {
+  thread_id: string;
+  mode: "any" | "all";
+  pending_participant_ids: string[];
+  pending_participants: Array<{ participant_id: string; participant_slug: string }>;
+  pending_participant_slugs: string[];
+  reason: string | null;
+  set_by: string | null;
+  set_at: string;
+  expires_at: string | null;
+  cleared_at: string | null;
+  is_expired: boolean;
 };
 
 export type ThreadAttachment = {
@@ -249,6 +265,30 @@ export async function sendThreadMessage(
   return data?.ok ? data.message ?? null : null;
 }
 
+export async function updateThreadNextReply(
+  threadId: string,
+  payload: {
+    mode: "any" | "all";
+    pending_participant_ids: string[];
+    reason?: string | null;
+    expires_at?: string | null;
+  }
+): Promise<Thread | null> {
+  const data = await apiFetch<{ ok: boolean; thread: Thread }>(
+    `/api/v1/threads/${threadId}/next-reply`,
+    { method: "PATCH", body: JSON.stringify(payload) }
+  );
+  return data?.ok ? data.thread ?? null : null;
+}
+
+export async function clearThreadNextReply(threadId: string): Promise<Thread | null> {
+  const data = await apiFetch<{ ok: boolean; thread: Thread }>(
+    `/api/v1/threads/${threadId}/next-reply`,
+    { method: "DELETE" }
+  );
+  return data?.ok ? data.thread ?? null : null;
+}
+
 export async function fetchThreadParticipants(threadId: string): Promise<ThreadParticipant[]> {
   const data = await apiFetch<{ ok: boolean; participants: ThreadParticipant[] }>(
     `/api/v1/threads/${threadId}/participants`
@@ -303,7 +343,7 @@ export async function updateThread(
   threadId: string,
   patch: {
     subject?: string;
-    thread_type?: "conversation" | "feature" | "level_test" | "dm" | "task";
+    thread_type?: "conversation" | "feature" | "level_test" | "task";
     status?: "open" | "closed" | "archived";
     task_status?: "proposed" | "approved" | "in-progress" | "review" | "blocked";
     completion_note?: string | null;

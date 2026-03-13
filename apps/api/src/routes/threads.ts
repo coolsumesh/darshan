@@ -22,6 +22,8 @@ interface Caller {
   type: "user" | "agent";
 }
 
+type DbExecutor = Pick<pg.Pool, "query">;
+
 type AttachmentType = "image" | "video" | "audio" | "file";
 
 interface ThreadAttachment {
@@ -33,6 +35,119 @@ interface ThreadAttachment {
   duration?: number | null;
 }
 
+const THREAD_TYPES = new Set(["conversation", "feature", "level_test", "task"]);
+const THREAD_STATUSES = new Set(["open", "closed", "archived"]);
+const TASK_STATUSES = new Set(["proposed", "approved", "in-progress", "review", "blocked"]);
+const TASK_PRIORITIES = new Set(["high", "medium", "normal", "low"]);
+const ACTIVE_RESPONDERS_MAX_NEXT = Math.max(1, Number(process.env.ACTIVE_RESPONDERS_MAX_NEXT ?? 100));
+
+type ReplyPolicyMode = "all" | "restricted";
+
+type ThreadReplyPolicyRow = {
+  thread_id: string;
+  mode: ReplyPolicyMode;
+  allowed_participant_ids: string[];
+  next_message_limit: number | null;
+  expires_at: string | null;
+  updated_by: string | null;
+  updated_at: string;
+};
+
+type HydratedReplyPolicy = ThreadReplyPolicyRow & {
+  allowed_participants: Array<{ participant_id: string; participant_slug: string }>;
+};
+
+type NextReplyMode = "any" | "all";
+
+type ThreadNextReplyRow = {
+  thread_id: string;
+  mode: NextReplyMode;
+  pending_participant_ids: string[];
+  reason: string | null;
+  set_by: string | null;
+  set_at: string;
+  expires_at: string | null;
+  cleared_at: string | null;
+};
+
+type HydratedThreadNextReply = ThreadNextReplyRow & {
+  pending_participants: Array<{ participant_id: string; participant_slug: string }>;
+  pending_participant_slugs: string[];
+  is_expired: boolean;
+};
+
+type ActiveRespondersCommand =
+  | { action: "clear" | "status" }
+  | { action: "set"; slugs: string[]; nextMessageLimit: number | null };
+
+type TaskLifecycleEvent =
+  | "task.approved"
+  | "task.in_progress"
+  | "task.progress"
+  | "task.blocked"
+  | "task.review_requested"
+  | "task.done";
+
+type TaskSlaState = {
+  thread_id: string;
+  pickup_due_at: string | null;
+  progress_due_at: string | null;
+  last_progress_at: string | null;
+  last_event_type: string | null;
+  last_event_at: string | null;
+  stale_reason: string | null;
+};
+
+function normalizeSlug(value: string | null | undefined, fallback = "SYSTEM") {
+  const trimmed = value?.trim();
+  if (!trimmed) return fallback;
+  return trimmed.toUpperCase().replace(/[^A-Z0-9]/g, "_") || fallback;
+}
+
+function addMinutes(date: Date, minutes: number) {
+  return new Date(date.getTime() + minutes * 60_000).toISOString();
+}
+
+function normalizePriority(value: unknown): "high" | "medium" | "normal" | "low" | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().toLowerCase();
+  return TASK_PRIORITIES.has(normalized) ? (normalized as "high" | "medium" | "normal" | "low") : null;
+}
+
+function mapTaskEventForStatus(previousStatus: string | null, nextStatus: string | undefined) {
+  if (!nextStatus || previousStatus === nextStatus) return null;
+  switch (nextStatus) {
+    case "approved":
+      return "task.approved" as const;
+    case "in-progress":
+      return previousStatus === "in-progress" ? "task.progress" as const : "task.in_progress" as const;
+    case "review":
+      return "task.review_requested" as const;
+    case "blocked":
+      return "task.blocked" as const;
+    default:
+      return null;
+  }
+}
+
+function describeTaskLifecycleEvent(eventType: TaskLifecycleEvent, actorSlug: string) {
+  switch (eventType) {
+    case "task.approved":
+      return `${actorSlug} approved the task`;
+    case "task.in_progress":
+      return `${actorSlug} started work`;
+    case "task.progress":
+      return `${actorSlug} posted progress`;
+    case "task.blocked":
+      return `${actorSlug} marked the task blocked`;
+    case "task.review_requested":
+      return `${actorSlug} requested review`;
+    case "task.done":
+      return `${actorSlug} marked the task done`;
+    default:
+      return `${actorSlug} updated the task`;
+  }
+}
 const ATTACHMENTS_DIR = join(process.cwd(), "apps", "api", "uploads", "thread-attachments");
 mkdirSync(ATTACHMENTS_DIR, { recursive: true });
 
@@ -231,6 +346,132 @@ async function isThreadCoordinator(thread: Record<string, unknown>, caller: Call
   return !!rows[0];
 }
 
+async function loadThreadNextReply(db: DbExecutor, threadId: string): Promise<HydratedThreadNextReply | null> {
+  const { rows } = await db.query(
+    `SELECT *
+     FROM thread_next_reply
+     WHERE thread_id = $1
+       AND cleared_at IS NULL
+     LIMIT 1`,
+    [threadId]
+  );
+  const nextReply = rows[0] as ThreadNextReplyRow | undefined;
+  if (!nextReply) return null;
+
+  const participantIds = Array.isArray(nextReply.pending_participant_ids) ? nextReply.pending_participant_ids : [];
+  const { rows: pendingParticipants } = participantIds.length === 0
+    ? { rows: [] as Array<{ participant_id: string; participant_slug: string }> }
+    : await db.query(
+        `SELECT participant_id, participant_slug
+         FROM thread_participants
+         WHERE thread_id = $1
+           AND participant_id = ANY($2::uuid[])
+           AND removed_at IS NULL
+         ORDER BY participant_slug ASC`,
+        [threadId, participantIds]
+      );
+
+  return {
+    ...nextReply,
+    pending_participants: pendingParticipants,
+    pending_participant_slugs: pendingParticipants.map((participant: { participant_slug: string }) => participant.participant_slug),
+    is_expired: !!nextReply.expires_at && new Date(nextReply.expires_at).getTime() <= Date.now(),
+  };
+}
+
+async function setThreadHasReplyPending(db: DbExecutor, threadId: string, hasReplyPending: boolean) {
+  await db.query(
+    `UPDATE threads
+     SET has_reply_pending = $2
+     WHERE thread_id = $1`,
+    [threadId, hasReplyPending]
+  );
+}
+
+async function clearThreadNextReply(db: DbExecutor, threadId: string) {
+  await db.query(
+    `UPDATE thread_next_reply
+     SET cleared_at = now()
+     WHERE thread_id = $1
+       AND cleared_at IS NULL`,
+    [threadId]
+  );
+  await setThreadHasReplyPending(db, threadId, false);
+}
+
+async function upsertThreadNextReply(
+  db: DbExecutor,
+  threadId: string,
+  setBy: string,
+  mode: NextReplyMode,
+  pendingParticipantIds: string[],
+  reason: string | null,
+  expiresAt: string | null
+) {
+  await db.query(
+    `INSERT INTO thread_next_reply (
+       thread_id, mode, pending_participant_ids, reason, set_by, set_at, expires_at, cleared_at
+     )
+     VALUES ($1, $2, $3::uuid[], $4, $5, now(), $6, null)
+     ON CONFLICT (thread_id)
+     DO UPDATE SET mode = excluded.mode,
+                   pending_participant_ids = excluded.pending_participant_ids,
+                   reason = excluded.reason,
+                   set_by = excluded.set_by,
+                   set_at = now(),
+                   expires_at = excluded.expires_at,
+                   cleared_at = null`,
+    [threadId, mode, pendingParticipantIds, reason, setBy, expiresAt]
+  );
+  await setThreadHasReplyPending(db, threadId, pendingParticipantIds.length > 0);
+}
+
+async function resolveThreadNextReplyOnMessage(db: DbExecutor, threadId: string, senderId: string) {
+  const nextReply = await loadThreadNextReply(db, threadId);
+  if (!nextReply) return null;
+  if (!nextReply.pending_participant_ids.includes(senderId)) return nextReply;
+
+  if (nextReply.mode === "any") {
+    await clearThreadNextReply(db, threadId);
+    return null;
+  }
+
+  const remainingParticipantIds = nextReply.pending_participant_ids.filter((participantId) => participantId !== senderId);
+  if (remainingParticipantIds.length === 0) {
+    await clearThreadNextReply(db, threadId);
+    return null;
+  }
+
+  await db.query(
+    `UPDATE thread_next_reply
+     SET pending_participant_ids = $2::uuid[]
+     WHERE thread_id = $1
+       AND cleared_at IS NULL`,
+    [threadId, remainingParticipantIds]
+  );
+  await setThreadHasReplyPending(db, threadId, true);
+  return loadThreadNextReply(db, threadId);
+}
+
+async function removeParticipantFromNextReply(db: DbExecutor, threadId: string, participantId: string) {
+  const nextReply = await loadThreadNextReply(db, threadId);
+  if (!nextReply || !nextReply.pending_participant_ids.includes(participantId)) return;
+
+  const remainingParticipantIds = nextReply.pending_participant_ids.filter((id) => id !== participantId);
+  if (remainingParticipantIds.length === 0) {
+    await clearThreadNextReply(db, threadId);
+    return;
+  }
+
+  await db.query(
+    `UPDATE thread_next_reply
+     SET pending_participant_ids = $2::uuid[]
+     WHERE thread_id = $1
+       AND cleared_at IS NULL`,
+    [threadId, remainingParticipantIds]
+  );
+}
+
 async function loadReplyPolicy(db: DbExecutor, threadId: string): Promise<HydratedReplyPolicy | null> {
   const { rows } = await db.query(
     `SELECT *
@@ -414,7 +655,11 @@ async function hydrateThread(db: DbExecutor, threadId: string) {
      LIMIT 1`,
     [threadId]
   );
-  return rows[0];
+  if (!rows[0]) return null;
+  return {
+    ...rows[0],
+    next_reply: await loadThreadNextReply(db, threadId),
+  };
 }
 
 async function notifyTaskAssignee(threadId: string, db: pg.Pool) {
@@ -704,8 +949,8 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
     }
   );
 
-  // ── POST /threads/direct — one-call A2A send ─────────────────────────────
-  // Finds or creates a direct thread between caller and `to`, then posts body.
+  // ── POST /threads/direct — one-call 1:1 send (conversation thread) ──────
+  // Finds or creates a 1:1 conversation thread between caller and `to`, then posts body.
   // Replaces the old POST /a2a/send flow.
   server.post<{ Body: { to: string; body: string; subject?: string; priority?: string; project_id: string } }>(
     "/threads/direct",
@@ -734,12 +979,21 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
       try {
         await client.query("BEGIN");
 
-        // Find existing direct thread between caller and recipient within the same project
+        // Find existing 1:1 conversation thread between caller and recipient within the same project
         const { rows: [existing] } = await client.query(
-          `SELECT t.thread_id FROM threads t
+          `SELECT t.thread_id
+           FROM threads t
            JOIN thread_participants pa ON pa.thread_id = t.thread_id AND pa.participant_id = $1 AND pa.removed_at IS NULL
            JOIN thread_participants pb ON pb.thread_id = t.thread_id AND pb.participant_id = $2 AND pb.removed_at IS NULL
-           WHERE t.deleted_at IS NULL AND t.project_id = $3 AND t.status = 'open' AND t.thread_type = 'dm'
+           WHERE t.deleted_at IS NULL
+             AND t.project_id = $3
+             AND t.status = 'open'
+             AND t.thread_type = 'conversation'
+             AND 2 = (
+               SELECT count(*)
+               FROM thread_participants p
+               WHERE p.thread_id = t.thread_id AND p.removed_at IS NULL
+             )
            ORDER BY t.created_at DESC LIMIT 1`,
           [caller.id, recipient.id, project_id]
         );
@@ -749,11 +1003,11 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
         if (existing) {
           thread_id = existing.thread_id;
         } else {
-          // Create new direct thread
+          // Create new 1:1 conversation thread
           const autoSubject = subject?.trim() || `${caller.slug} ↔ ${recipient.slug}`;
           const { rows: [thread] } = await client.query(
             `INSERT INTO threads (subject, project_id, created_by, created_slug, thread_type)
-             VALUES ($1, $2, $3, $4, 'dm') RETURNING thread_id`,
+             VALUES ($1, $2, $3, $4, 'conversation') RETURNING thread_id`,
             [autoSubject, project_id, caller.id, caller.slug]
           );
           thread_id = thread.thread_id;
@@ -982,7 +1236,13 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
       }
 
       const { rows } = await db.query(query, params);
-      return { ok: true, threads: rows, limit: lim, offset: off };
+      const threads = await Promise.all(
+        rows.map(async (row) => ({
+          ...row,
+          next_reply: await loadThreadNextReply(db, row.thread_id as string),
+        }))
+      );
+      return { ok: true, threads, limit: lim, offset: off };
     }
   );
 
@@ -1025,6 +1285,91 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
       );
 
       return { ok: true, reply_policy: replyPolicy, sla_state: (slaState ?? null) as TaskSlaState | null };
+    }
+  );
+
+  server.patch<{
+    Params: { thread_id: string };
+    Body: {
+      mode?: NextReplyMode;
+      pending_participant_ids?: string[];
+      reason?: string | null;
+      expires_at?: string | null;
+    };
+  }>(
+    "/threads/:thread_id/next-reply",
+    async (req, reply) => {
+      const caller = await resolveCaller(req, db);
+      if (!caller) return reply.status(401).send({ ok: false, error: "not authenticated" });
+
+      const access = await checkThreadAccess(req.params.thread_id, caller, db);
+      if (!access) return reply.status(404).send({ ok: false, error: "thread not found" });
+
+      const isManager = access.role === "creator" || access.role === "owner";
+      const isCoordinator = await isThreadCoordinator(access.thread as Record<string, unknown>, caller, db);
+      if (!isManager && !isCoordinator) {
+        return reply.status(403).send({ ok: false, error: "only the thread creator, owner, or coordinator can set next reply" });
+      }
+
+      const mode = req.body?.mode;
+      const pendingParticipantIds = Array.isArray(req.body?.pending_participant_ids)
+        ? Array.from(new Set(req.body.pending_participant_ids.map((id) => String(id).trim()).filter(Boolean)))
+        : [];
+      const reason = typeof req.body?.reason === "string" ? req.body.reason.trim() || null : req.body?.reason === null ? null : null;
+      const expiresAt = typeof req.body?.expires_at === "string" ? req.body.expires_at : req.body?.expires_at === null ? null : null;
+
+      if (pendingParticipantIds.length === 0) {
+        await clearThreadNextReply(db, req.params.thread_id);
+        const thread = await hydrateThread(db, req.params.thread_id);
+        broadcast("thread.updated", { thread_id: req.params.thread_id, thread });
+        return { ok: true, thread, next_reply: null };
+      }
+
+      if (mode !== "any" && mode !== "all") {
+        return reply.status(400).send({ ok: false, error: "mode must be any or all" });
+      }
+      if (expiresAt && Number.isNaN(new Date(expiresAt).getTime())) {
+        return reply.status(400).send({ ok: false, error: "expires_at must be a valid ISO timestamp" });
+      }
+
+      const { rows: validParticipants } = await db.query(
+        `SELECT participant_id, participant_slug
+         FROM thread_participants
+         WHERE thread_id = $1
+           AND participant_id = ANY($2::uuid[])
+           AND removed_at IS NULL`,
+        [req.params.thread_id, pendingParticipantIds]
+      );
+      if (validParticipants.length !== pendingParticipantIds.length) {
+        return reply.status(400).send({ ok: false, error: "pending_participant_ids must all be active thread participants" });
+      }
+
+      await upsertThreadNextReply(db, req.params.thread_id, caller.id, mode, pendingParticipantIds, reason, expiresAt);
+      const thread = await hydrateThread(db, req.params.thread_id);
+      broadcast("thread.updated", { thread_id: req.params.thread_id, thread });
+      return { ok: true, thread, next_reply: thread?.next_reply ?? null };
+    }
+  );
+
+  server.delete<{ Params: { thread_id: string } }>(
+    "/threads/:thread_id/next-reply",
+    async (req, reply) => {
+      const caller = await resolveCaller(req, db);
+      if (!caller) return reply.status(401).send({ ok: false, error: "not authenticated" });
+
+      const access = await checkThreadAccess(req.params.thread_id, caller, db);
+      if (!access) return reply.status(404).send({ ok: false, error: "thread not found" });
+
+      const isManager = access.role === "creator" || access.role === "owner";
+      const isCoordinator = await isThreadCoordinator(access.thread as Record<string, unknown>, caller, db);
+      if (!isManager && !isCoordinator) {
+        return reply.status(403).send({ ok: false, error: "only the thread creator, owner, or coordinator can clear next reply" });
+      }
+
+      await clearThreadNextReply(db, req.params.thread_id);
+      const thread = await hydrateThread(db, req.params.thread_id);
+      broadcast("thread.updated", { thread_id: req.params.thread_id, thread });
+      return { ok: true, thread, next_reply: null };
     }
   );
 
@@ -1384,6 +1729,7 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
          WHERE thread_id = $1 AND participant_id = $2`,
         [req.params.thread_id, req.params.pid]
       );
+      await removeParticipantFromNextReply(db, req.params.thread_id, req.params.pid);
 
       // Auto event message
       await insertEventMessage(db, req.params.thread_id, caller.id, caller.slug,
@@ -1488,10 +1834,14 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
         [req.params.thread_id, reply_to ?? null, caller.id, caller.slug, cleanBody, JSON.stringify(safeAttachments)]
       );
 
+      await resolveThreadNextReplyOnMessage(db, req.params.thread_id, caller.id);
+
       // Fan out notifications to all active participants except sender
-      await fanOutNotifications(db, msg.message_id, req.params.thread_id, caller.id, caller.type, priority, trimmedBody);
+      await fanOutNotifications(db, msg.message_id, req.params.thread_id, caller.id, caller.type, priority, cleanBody);
 
       broadcast("thread.message_created", { thread_id: req.params.thread_id, message: msg });
+      const hydratedThread = await hydrateThread(db, req.params.thread_id);
+      broadcast("thread.updated", { thread_id: req.params.thread_id, thread: hydratedThread });
 
       return { ok: true, message_id: msg.message_id, message: msg };
     }
@@ -1579,3 +1929,4 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
     }
   );
 }
+
