@@ -281,6 +281,26 @@ export async function createThread(
   return data?.ok ? data.thread ?? null : null;
 }
 
+export async function sendDirectMessage(
+  toId: string,
+  body: string,
+  projectId: string,
+  subject?: string
+): Promise<{ thread_id: string; message_id: string } | null> {
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/threads/direct`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ to: toId, body, project_id: projectId, subject }),
+    });
+    const data = await res.json().catch(() => null) as { ok?: boolean; thread_id?: string; message_id?: string } | null;
+    return res.ok && data?.ok ? { thread_id: data.thread_id!, message_id: data.message_id! } : null;
+  } catch {
+    return null;
+  }
+}
+
 function mapThreadToTask(thread: Thread & Record<string, unknown>): Task {
   const rawStatus = typeof thread.task_status === "string"
     ? thread.task_status

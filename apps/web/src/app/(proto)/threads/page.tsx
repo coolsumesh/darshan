@@ -18,6 +18,7 @@ import {
   addThreadParticipant,
   removeThreadParticipant,
   updateThread,
+  sendDirectMessage,
   type Thread,
   type ThreadMessage,
   type Project,
@@ -301,20 +302,32 @@ function NewThreadModal({
   defaultProjectId,
   onClose,
   onCreate,
+  initialMode = "thread",
 }: {
   projects: Project[];
   defaultProjectId: string | null;
   onClose: () => void;
   onCreate: (thread: Thread) => void;
+  initialMode?: "thread" | "dm";
 }) {
+  const [mode, setMode] = React.useState<"thread" | "dm">(initialMode);
+
+  // Thread mode state
   const [subject, setSubject] = React.useState("");
   const [projectId, setProjectId] = React.useState(defaultProjectId ?? projects[0]?.id ?? "");
   const [agents, setAgents] = React.useState<{ agentId: string; agentName: string }[]>([]);
-  const [selected, setSelected] = React.useState<Set<string>>(new Set());
+  const [selectedParticipants, setSelectedParticipants] = React.useState<Set<string>>(new Set());
+
+  // DM mode state
+  const [dmProjectId, setDmProjectId] = React.useState(defaultProjectId ?? projects[0]?.id ?? "");
+  const [dmAgents, setDmAgents] = React.useState<{ agentId: string; agentName: string }[]>([]);
+  const [dmRecipientId, setDmRecipientId] = React.useState("");
+  const [dmBody, setDmBody] = React.useState("");
+
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState("");
 
-  // Load agents when project changes
+  // Load agents for thread mode
   React.useEffect(() => {
     if (!projectId) return;
     fetchTeam(projectId).then((team) => {
@@ -322,80 +335,155 @@ function NewThreadModal({
     });
   }, [projectId]);
 
-  const toggle = (id: string) =>
-    setSelected((prev) => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s; });
+  // Load agents for DM mode
+  React.useEffect(() => {
+    if (!dmProjectId) return;
+    fetchTeam(dmProjectId).then((team) => {
+      const list = team.map((m) => ({ agentId: m.agentId, agentName: m.agent?.name ?? m.agentId }));
+      setDmAgents(list);
+      if (!dmRecipientId && list[0]) setDmRecipientId(list[0].agentId);
+    });
+  }, [dmProjectId]); // eslint-disable-line
 
-  const handleCreate = async () => {
+  const toggle = (id: string) =>
+    setSelectedParticipants((prev) => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s; });
+
+  const handleCreateThread = async () => {
     if (!subject.trim()) { setError("Subject is required"); return; }
     if (!projectId)       { setError("Select a project");    return; }
     setSaving(true); setError("");
-    const thread = await createThread(subject.trim(), projectId, Array.from(selected).map(String));
+    const thread = await createThread(subject.trim(), projectId, Array.from(selectedParticipants));
     setSaving(false);
     if (!thread) { setError("Failed to create thread"); return; }
     onCreate(thread);
   };
 
+  const handleSendDm = async () => {
+    if (!dmRecipientId) { setError("Select a recipient"); return; }
+    if (!dmBody.trim()) { setError("Message cannot be empty"); return; }
+    if (!dmProjectId)   { setError("Select a project"); return; }
+    setSaving(true); setError("");
+    const result = await sendDirectMessage(dmRecipientId, dmBody.trim(), dmProjectId);
+    setSaving(false);
+    if (!result) { setError("Failed to send message"); return; }
+    // Fetch the created/existing thread and open it
+    const detail = await import("@/lib/api").then(m => m.fetchThread(result.thread_id));
+    if (detail?.thread) onCreate(detail.thread);
+    else onClose();
+  };
+
+  const tabCls = (t: "thread" | "dm") =>
+    `flex-1 py-2 text-xs font-semibold transition rounded-lg ${
+      mode === t
+        ? "bg-violet-600 text-white"
+        : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
+    }`;
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
       <div className="w-full max-w-md rounded-2xl bg-white shadow-2xl dark:bg-slate-900 ring-1 ring-slate-200 dark:ring-slate-700">
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 px-5 py-4">
-          <span className="text-sm font-semibold text-slate-800 dark:text-slate-100">New Thread</span>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300">
+        <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 px-5 py-3">
+          <div className="flex gap-1 rounded-xl bg-slate-100 dark:bg-slate-800 p-1">
+            <button className={tabCls("thread")} onClick={() => { setMode("thread"); setError(""); }}>
+              New Thread
+            </button>
+            <button className={tabCls("dm")} onClick={() => { setMode("dm"); setError(""); }}>
+              Direct Message
+            </button>
+          </div>
+          <button onClick={onClose} className="ml-3 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300">
             <X className="h-4 w-4" />
           </button>
         </div>
 
         {/* Body */}
         <div className="space-y-4 px-5 py-4">
-          {/* Subject */}
-          <div>
-            <label className="mb-1 block text-xs font-medium text-slate-500 dark:text-slate-400">Subject</label>
-            <input
-              autoFocus
-              value={subject}
-              onChange={(e) => setSubject(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleCreate()}
-              placeholder="What is this thread about?"
-              className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800 placeholder-slate-400 outline-none focus:border-violet-400 focus:ring-1 focus:ring-violet-400 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
-            />
-          </div>
-
-          {/* Project */}
-          <div>
-            <label className="mb-1 block text-xs font-medium text-slate-500 dark:text-slate-400">Project</label>
-            <select
-              value={projectId}
-              onChange={(e) => setProjectId(e.target.value)}
-              className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800 outline-none focus:border-violet-400 focus:ring-1 focus:ring-violet-400 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
-            >
-              {projects.map((p) => (
-                <option key={p.id} value={p.id}>{p.name}</option>
-              ))}
-            </select>
-          </div>
-
-          {/* Participants */}
-          {agents.length > 0 && (
-            <div>
-              <label className="mb-1.5 block text-xs font-medium text-slate-500 dark:text-slate-400">
-                Participants <span className="text-slate-400">(optional)</span>
-              </label>
-              <div className="space-y-1.5 max-h-40 overflow-y-auto">
-                {agents.map((a) => (
-                  <label key={a.agentId} className="flex items-center gap-2.5 cursor-pointer rounded-lg px-2 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800">
-                    <input
-                      type="checkbox"
-                      checked={selected.has(a.agentId)}
-                      onChange={() => toggle(a.agentId)}
-                      className="accent-violet-600"
-                    />
-                    <Avatar slug={a.agentName.toUpperCase().slice(0, 8)} size="sm" />
-                    <span className="text-sm text-slate-700 dark:text-slate-300">{a.agentName}</span>
-                  </label>
-                ))}
+          {mode === "thread" ? (
+            <>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-slate-500 dark:text-slate-400">Subject</label>
+                <input
+                  autoFocus
+                  value={subject}
+                  onChange={(e) => setSubject(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleCreateThread()}
+                  placeholder="What is this thread about?"
+                  className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800 placeholder-slate-400 outline-none focus:border-violet-400 focus:ring-1 focus:ring-violet-400 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+                />
               </div>
-            </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-slate-500 dark:text-slate-400">Project</label>
+                <select
+                  value={projectId}
+                  onChange={(e) => setProjectId(e.target.value)}
+                  className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800 outline-none focus:border-violet-400 focus:ring-1 focus:ring-violet-400 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+                >
+                  {projects.map((p) => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
+              </div>
+              {agents.length > 0 && (
+                <div>
+                  <label className="mb-1.5 block text-xs font-medium text-slate-500 dark:text-slate-400">
+                    Participants <span className="text-slate-400">(optional)</span>
+                  </label>
+                  <div className="space-y-1.5 max-h-40 overflow-y-auto">
+                    {agents.map((a) => (
+                      <label key={a.agentId} className="flex items-center gap-2.5 cursor-pointer rounded-lg px-2 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800">
+                        <input type="checkbox" checked={selectedParticipants.has(a.agentId)} onChange={() => toggle(a.agentId)} className="accent-violet-600" />
+                        <Avatar slug={a.agentName.toUpperCase().slice(0, 8)} size="sm" />
+                        <span className="text-sm text-slate-700 dark:text-slate-300">{a.agentName}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-slate-500 dark:text-slate-400">Project</label>
+                <select
+                  value={dmProjectId}
+                  onChange={(e) => setDmProjectId(e.target.value)}
+                  className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800 outline-none focus:border-violet-400 focus:ring-1 focus:ring-violet-400 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+                >
+                  {projects.map((p) => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-slate-500 dark:text-slate-400">To</label>
+                {dmAgents.length === 0 ? (
+                  <p className="text-xs text-slate-400">No agents in this project</p>
+                ) : (
+                  <div className="space-y-1.5 max-h-44 overflow-y-auto rounded-lg border border-slate-200 dark:border-slate-700 p-1">
+                    {dmAgents.map((a) => (
+                      <label key={a.agentId} className={`flex items-center gap-2.5 cursor-pointer rounded-lg px-2 py-1.5 transition ${dmRecipientId === a.agentId ? "bg-violet-50 dark:bg-violet-950/30" : "hover:bg-slate-50 dark:hover:bg-slate-800"}`}>
+                        <input type="radio" name="dm-recipient" value={a.agentId} checked={dmRecipientId === a.agentId} onChange={() => setDmRecipientId(a.agentId)} className="accent-violet-600" />
+                        <Avatar slug={a.agentName.toUpperCase().slice(0, 8)} size="sm" />
+                        <span className="text-sm font-medium text-slate-700 dark:text-slate-300">{a.agentName}</span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-slate-500 dark:text-slate-400">Message</label>
+                <textarea
+                  autoFocus={mode === "dm"}
+                  rows={3}
+                  value={dmBody}
+                  onChange={(e) => setDmBody(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter" && e.metaKey) handleSendDm(); }}
+                  placeholder="Type your message… (Cmd+Enter to send)"
+                  className="w-full resize-none rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800 placeholder-slate-400 outline-none focus:border-violet-400 focus:ring-1 focus:ring-violet-400 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+                />
+              </div>
+            </>
           )}
 
           {error && <p className="text-xs text-rose-500">{error}</p>}
@@ -403,19 +491,27 @@ function NewThreadModal({
 
         {/* Footer */}
         <div className="flex justify-end gap-2 border-t border-slate-200 dark:border-slate-800 px-5 py-3">
-          <button
-            onClick={onClose}
-            className="rounded-lg px-3 py-1.5 text-sm text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
-          >
+          <button onClick={onClose} className="rounded-lg px-3 py-1.5 text-sm text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800">
             Cancel
           </button>
-          <button
-            onClick={handleCreate}
-            disabled={saving || !subject.trim()}
-            className="rounded-lg bg-violet-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-violet-700 disabled:opacity-40"
-          >
-            {saving ? "Creating…" : "Create Thread"}
-          </button>
+          {mode === "thread" ? (
+            <button
+              onClick={handleCreateThread}
+              disabled={saving || !subject.trim()}
+              className="rounded-lg bg-violet-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-violet-700 disabled:opacity-40"
+            >
+              {saving ? "Creating…" : "Create Thread"}
+            </button>
+          ) : (
+            <button
+              onClick={handleSendDm}
+              disabled={saving || !dmBody.trim() || !dmRecipientId}
+              className="flex items-center gap-1.5 rounded-lg bg-violet-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-violet-700 disabled:opacity-40"
+            >
+              <Send className="h-3.5 w-3.5" />
+              {saving ? "Sending…" : "Send"}
+            </button>
+          )}
         </div>
       </div>
     </div>
