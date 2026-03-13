@@ -1028,7 +1028,7 @@ export default function ThreadsPage() {
         onCreate={handleThreadCreated}
       />
     )}
-    <div className="flex h-[calc(100vh-5rem)] overflow-hidden rounded-2xl ring-1 ring-line dark:ring-slate-800">
+    <div className="flex h-full overflow-hidden">
 
       {/* ── Left: thread list ─────────────────────────────────────────────── */}
       <div className="flex w-80 shrink-0 flex-col border-r border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">

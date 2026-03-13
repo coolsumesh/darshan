@@ -646,10 +646,17 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         </div>
 
         {/* Main content area */}
-        <main className="flex min-w-0 flex-1 flex-col overflow-y-auto" role="main">
-          <div className="flex-1 px-6 pt-4 pb-6">
-            {children}
-          </div>
+        <main className="flex min-w-0 flex-1 flex-col overflow-hidden" role="main">
+          {/* Full-height pages (threads, chat-style) get no padding and fill the container */}
+          {pathname.startsWith("/threads") || pathname.startsWith("/agents/chat") ? (
+            <div className="flex flex-1 flex-col overflow-hidden">
+              {children}
+            </div>
+          ) : (
+            <div className="flex-1 overflow-y-auto px-6 pt-4 pb-6">
+              {children}
+            </div>
+          )}
         </main>
       </div>
     </div>
