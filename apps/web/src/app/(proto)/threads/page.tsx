@@ -16,6 +16,8 @@ import {
   setThreadStatus,
   createThread,
   addThreadParticipant,
+  removeThreadParticipant,
+  updateThread,
   type Thread,
   type ThreadMessage,
   type Project,
@@ -128,6 +130,52 @@ function MarkdownMessage({ body, knownSlugs, isMe }: { body: string; knownSlugs:
     >
       {body}
     </ReactMarkdown>
+  );
+}
+
+// ── Completion note inline editor ────────────────────────────────────────────
+
+function CompletionNote({ value, onSave, disabled }: { value: string; onSave: (v: string) => void; disabled?: boolean }) {
+  const [editing, setEditing] = React.useState(false);
+  const [draft, setDraft] = React.useState(value);
+
+  React.useEffect(() => { if (!editing) setDraft(value); }, [value, editing]);
+
+  if (!editing) {
+    return (
+      <button
+        onClick={() => { setDraft(value); setEditing(true); }}
+        className="flex items-center gap-1 text-[11px] text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+      >
+        <svg className="h-3 w-3 shrink-0" viewBox="0 0 16 16" fill="currentColor"><path d="M11.013 1.427a1.75 1.75 0 0 1 2.474 0l1.086 1.086a1.75 1.75 0 0 1 0 2.474l-8.61 8.61c-.21.21-.47.364-.756.445l-3.251.93a.75.75 0 0 1-.927-.928l.929-3.25c.081-.286.235-.547.445-.758l8.61-8.61zm1.414 1.06a.25.25 0 0 0-.354 0L10.811 3.75l1.439 1.44 1.263-1.263a.25.25 0 0 0 0-.354l-1.086-1.086zM11.189 6.25 9.75 4.81l-6.286 6.287a.25.25 0 0 0-.064.108l-.558 1.953 1.953-.558a.25.25 0 0 0 .108-.064z"/></svg>
+        {value ? <span className="truncate max-w-xs italic">{value}</span> : <span>Add completion note…</span>}
+      </button>
+    );
+  }
+
+  return (
+    <div className="flex items-start gap-1.5">
+      <textarea
+        autoFocus
+        rows={2}
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") setEditing(false);
+          if (e.key === "Enter" && e.metaKey) { onSave(draft); setEditing(false); }
+        }}
+        placeholder="Completion note (Cmd+Enter to save)…"
+        className="flex-1 resize-none rounded-lg border border-violet-400 bg-white px-2 py-1 text-xs text-slate-800 outline-none focus:ring-1 focus:ring-violet-400 dark:bg-slate-900 dark:text-slate-100"
+      />
+      <div className="flex flex-col gap-1">
+        <button
+          onClick={() => { onSave(draft); setEditing(false); }}
+          disabled={disabled}
+          className="rounded px-2 py-0.5 text-[11px] font-medium bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-40"
+        >Save</button>
+        <button onClick={() => setEditing(false)} className="rounded px-2 py-0.5 text-[11px] text-slate-400 hover:text-slate-600">Cancel</button>
+      </div>
+    </div>
   );
 }
 
@@ -405,6 +453,9 @@ export default function ThreadsPage() {
   const [participantFeedback, setParticipantFeedback] = React.useState<{ tone: "success" | "error"; message: string } | null>(null);
   const [addParticipantOpen, setAddParticipantOpen] = React.useState(false);
   const addParticipantRef = React.useRef<HTMLDivElement>(null);
+  const [editingSubject, setEditingSubject] = React.useState(false);
+  const [subjectDraft, setSubjectDraft] = React.useState("");
+  const [updatingThread, setUpdatingThread] = React.useState(false);
   const [toast, setToast] = React.useState<{ tone: "success" | "error"; message: string } | null>(null);
   const [mentionSlugs, setMentionSlugs] = React.useState<string[]>([]);
   const [mentionOpen, setMentionOpen] = React.useState(false);
@@ -832,6 +883,44 @@ export default function ThreadsPage() {
     return () => document.removeEventListener("mousedown", handler);
   }, [addParticipantOpen]);
 
+  const handleRemoveParticipant = async (participantId: string, slug: string) => {
+    if (!selected) return;
+    const result = await removeThreadParticipant(selected.thread_id, participantId);
+    if (!result.ok) {
+      setToast({ tone: "error", message: result.error ?? "Failed to remove participant" });
+      return;
+    }
+    const refreshed = await fetchThreadParticipants(selected.thread_id);
+    setThreadParticipants(refreshed);
+    setToast({ tone: "success", message: `${slug} removed.` });
+  };
+
+  const handleSaveSubject = async () => {
+    if (!selected || !subjectDraft.trim() || updatingThread) return;
+    setUpdatingThread(true);
+    const updated = await updateThread(selected.thread_id, { subject: subjectDraft.trim() });
+    setUpdatingThread(false);
+    if (updated) {
+      setSelected(updated);
+      setEditingSubject(false);
+      setToast({ tone: "success", message: "Subject updated." });
+    } else {
+      setToast({ tone: "error", message: "Failed to update subject." });
+    }
+  };
+
+  const handleUpdateTaskField = async (patch: Parameters<typeof updateThread>[1]) => {
+    if (!selected || updatingThread) return;
+    setUpdatingThread(true);
+    const updated = await updateThread(selected.thread_id, patch);
+    setUpdatingThread(false);
+    if (updated) {
+      setSelected(updated);
+    } else {
+      setToast({ tone: "error", message: "Failed to update thread." });
+    }
+  };
+
   return (
     <>
     {toast && <Toast tone={toast.tone} message={toast.message} />}
@@ -995,12 +1084,40 @@ export default function ThreadsPage() {
               <div className="flex items-start justify-between gap-2">
                 <div>
                   <div className="flex items-center gap-2">
-                    <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-                      {selected.subject}
-                    </div>
-                    <span className="font-mono text-[10px] text-slate-400" title={selected.thread_id}>
-                      {selected.thread_id}
-                    </span>
+                    {editingSubject ? (
+                      <div className="flex items-center gap-1.5 flex-1">
+                        <input
+                          autoFocus
+                          value={subjectDraft}
+                          onChange={(e) => setSubjectDraft(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") handleSaveSubject();
+                            if (e.key === "Escape") setEditingSubject(false);
+                          }}
+                          className="flex-1 rounded-lg border border-violet-400 bg-white px-2 py-0.5 text-sm font-semibold text-slate-900 outline-none focus:ring-1 focus:ring-violet-400 dark:bg-slate-900 dark:text-slate-100"
+                        />
+                        <button onClick={handleSaveSubject} disabled={updatingThread} className="rounded px-2 py-0.5 text-xs font-medium bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-40">Save</button>
+                        <button onClick={() => setEditingSubject(false)} className="rounded px-2 py-0.5 text-xs text-slate-400 hover:text-slate-600">Cancel</button>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                          {selected.subject}
+                        </div>
+                        {(threadRole === "creator" || threadRole === "owner") && (
+                          <button
+                            onClick={() => { setSubjectDraft(selected.subject); setEditingSubject(true); }}
+                            title="Edit subject"
+                            className="text-slate-300 hover:text-slate-500 dark:text-slate-600 dark:hover:text-slate-400"
+                          >
+                            <svg className="h-3 w-3" viewBox="0 0 16 16" fill="currentColor"><path d="M11.013 1.427a1.75 1.75 0 0 1 2.474 0l1.086 1.086a1.75 1.75 0 0 1 0 2.474l-8.61 8.61c-.21.21-.47.364-.756.445l-3.251.93a.75.75 0 0 1-.927-.928l.929-3.25c.081-.286.235-.547.445-.758l8.61-8.61zm1.414 1.06a.25.25 0 0 0-.354 0L10.811 3.75l1.439 1.44 1.263-1.263a.25.25 0 0 0 0-.354l-1.086-1.086zM11.189 6.25 9.75 4.81l-6.286 6.287a.25.25 0 0 0-.064.108l-.558 1.953 1.953-.558a.25.25 0 0 0 .108-.064z"/></svg>
+                          </button>
+                        )}
+                        <span className="font-mono text-[10px] text-slate-400" title={selected.thread_id}>
+                          {selected.thread_id.slice(0, 8)}
+                        </span>
+                      </>
+                    )}
                   </div>
                   <div className="mt-0.5 text-xs text-slate-400">
                     Started by {selected.created_slug} · {relativeTime(selected.created_at)}
@@ -1009,10 +1126,19 @@ export default function ThreadsPage() {
                     {activeParticipants.map((participant) => (
                       <span
                         key={participant.participant_id}
-                        className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300"
+                        className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 pl-2.5 pr-1.5 py-1 text-[11px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300"
                       >
                         <span className={`h-2 w-2 rounded-full ${slugColor(participant.participant_slug)}`} />
                         {participant.participant_slug}
+                        {canManageParticipants && (
+                          <button
+                            onClick={() => handleRemoveParticipant(participant.participant_id, participant.participant_slug)}
+                            title={`Remove ${participant.participant_slug}`}
+                            className="ml-0.5 rounded-full p-0.5 text-slate-400 hover:bg-slate-200 hover:text-rose-500 dark:hover:bg-slate-700"
+                          >
+                            <X className="h-2.5 w-2.5" />
+                          </button>
+                        )}
                       </span>
                     ))}
 
@@ -1069,18 +1195,43 @@ export default function ThreadsPage() {
                     )}
                   </div>
                   {selected.thread_type === "task" && (
-                    <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
-                      <span className="rounded-full bg-violet-100 px-2 py-0.5 font-medium text-violet-700 dark:bg-violet-950/40 dark:text-violet-300">
-                        Task
-                      </span>
-                      {selected.task_status && (
-                        <span className="rounded-full bg-slate-100 px-2 py-0.5 font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-                          {formatTaskStatus(selected.task_status)}
+                    <div className="mt-2.5 space-y-1.5">
+                      {/* Status + Priority row */}
+                      <div className="flex flex-wrap items-center gap-2 text-[11px]">
+                        <span className="rounded-full bg-violet-100 px-2 py-0.5 font-semibold text-violet-700 dark:bg-violet-950/40 dark:text-violet-300">Task</span>
+                        <select
+                          value={selected.task_status ?? "proposed"}
+                          disabled={updatingThread}
+                          onChange={(e) => handleUpdateTaskField({ task_status: e.target.value as "proposed" | "approved" | "in-progress" | "review" | "blocked" })}
+                          className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-600 outline-none focus:border-violet-400 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 disabled:opacity-50"
+                        >
+                          <option value="proposed">Proposed</option>
+                          <option value="approved">Approved</option>
+                          <option value="in-progress">In Progress</option>
+                          <option value="review">Review</option>
+                          <option value="blocked">Blocked</option>
+                        </select>
+                        <select
+                          value={selected.priority ?? "normal"}
+                          disabled={updatingThread}
+                          onChange={(e) => handleUpdateTaskField({ priority: e.target.value as "high" | "medium" | "normal" | "low" })}
+                          className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-600 outline-none focus:border-violet-400 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 disabled:opacity-50"
+                        >
+                          <option value="high">⬆ High</option>
+                          <option value="medium">● Medium</option>
+                          <option value="normal">○ Normal</option>
+                          <option value="low">⬇ Low</option>
+                        </select>
+                        <span className="text-slate-400">
+                          {selected.assignee_name ? `→ ${selected.assignee_name}` : "Unassigned"}
                         </span>
-                      )}
-                      <span className="rounded-full bg-slate-100 px-2 py-0.5 font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-                        {selected.assignee_name ? `Assignee: ${selected.assignee_name}` : "Unassigned"}
-                      </span>
+                      </div>
+                      {/* Completion note */}
+                      <CompletionNote
+                        value={selected.completion_note ?? ""}
+                        onSave={(note) => handleUpdateTaskField({ completion_note: note })}
+                        disabled={updatingThread}
+                      />
                     </div>
                   )}
                 </div>

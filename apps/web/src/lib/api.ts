@@ -222,6 +222,42 @@ export async function addThreadParticipant(
   }
 }
 
+export async function removeThreadParticipant(
+  threadId: string,
+  participantId: string
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/threads/${threadId}/participants/${participantId}`, {
+      method: "DELETE",
+      credentials: "include",
+    });
+    const data = await res.json().catch(() => null) as { ok?: boolean; error?: string } | null;
+    return { ok: res.ok && !!data?.ok, error: data?.error };
+  } catch {
+    return { ok: false, error: "Network error" };
+  }
+}
+
+export async function updateThread(
+  threadId: string,
+  patch: {
+    subject?: string;
+    status?: "open" | "closed" | "archived";
+    task_status?: "proposed" | "approved" | "in-progress" | "review" | "blocked";
+    completion_note?: string | null;
+    assignee_agent_id?: string | null;
+    assignee_user_id?: string | null;
+    priority?: "high" | "medium" | "normal" | "low";
+    description?: string;
+  }
+): Promise<Thread | null> {
+  const data = await apiFetch<{ ok: boolean; thread: Thread }>(
+    `/api/v1/threads/${threadId}`,
+    { method: "PATCH", body: JSON.stringify(patch) }
+  );
+  return data?.ok ? (data.thread ?? null) : null;
+}
+
 export async function setThreadStatus(
   threadId: string,
   status: "open" | "closed" | "archived"
