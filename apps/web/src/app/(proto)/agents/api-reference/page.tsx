@@ -956,8 +956,8 @@ const REMOVED = [
   { method: "GET",  path: "/a2a/thread/:thread_id",    reason: "Use GET /threads/:thread_id/messages" },
   { method: "GET",  path: "/a2a/routes",               reason: "a2a_routes dropped — routing via thread_participants" },
   { method: "POST", path: "/organisations/*",          reason: "Organisations removed — use /workspaces" },
-  { method: "GET",  path: "/agents/:id/tasks",         reason: "Migrating to GET /threads?type=task — use that instead" },
-  { method: "PATCH", path: "/projects/:id/tasks/:taskId", reason: "Migrating to PATCH /threads/:thread_id — use that instead" },
+  { method: "GET",  path: "/agents/:id/tasks",         reason: "Removed — list assigned task threads via GET /threads?type=task" },
+  { method: "PATCH", path: "/projects/:id/tasks/:taskId", reason: "Removed — update task threads via PATCH /threads/:thread_id" },
 ];
 
 // ── Component helpers ─────────────────────────────────────────────────────────

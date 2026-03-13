@@ -893,7 +893,7 @@ function TableSection({
         </span>
         <button onClick={(e) => { e.stopPropagation(); onAddTask(); }}
           className="ml-2 flex items-center gap-1 text-xs text-zinc-400 opacity-0 group-hover/sh:opacity-100 transition-opacity hover:text-zinc-600">
-          <Plus className="h-3 w-3" /> Add task
+          <Plus className="h-3 w-3" /> Add item
         </button>
 
       </button>
@@ -925,7 +925,7 @@ function TableSection({
 
           {/* Rows */}
           {tasks.length === 0 ? (
-            <div className="px-8 py-5 text-center text-sm text-zinc-400">No tasks here.</div>
+            <div className="px-8 py-5 text-center text-sm text-zinc-400">No items here.</div>
           ) : tasks.map((task, i) => (
             <TableRow
               key={task.id} task={task} taskNumber={startIndex + i + 1}
@@ -974,7 +974,7 @@ function TableSection({
               onClick={() => setQuickAdding(true)}
               className="flex w-full items-center gap-2 border-t border-dashed border-zinc-200 px-8 py-2.5 text-xs text-zinc-400 hover:bg-zinc-50 hover:text-zinc-600 dark:border-[#2D2A45] dark:hover:bg-white/5 transition-colors"
             >
-              <Plus className="h-3.5 w-3.5" /> Add task
+              <Plus className="h-3.5 w-3.5" /> Add item
             </button>
           )}
 
@@ -1191,7 +1191,7 @@ function CreateTaskModal({
       <button className="absolute inset-0 bg-zinc-950/40 backdrop-blur-[2px]" onClick={onClose} />
       <div className="relative z-10 flex w-full max-w-md flex-col rounded-2xl bg-white shadow-soft ring-1 ring-zinc-200 dark:bg-[#16132A] dark:ring-[#2D2A45] max-h-[90vh]">
         <div className="flex shrink-0 items-center justify-between border-b border-zinc-200 px-5 py-4 dark:border-[#2D2A45]">
-          <div className="font-display text-sm font-semibold text-zinc-900 dark:text-white">New task</div>
+          <div className="font-display text-sm font-semibold text-zinc-900 dark:text-white">New item</div>
           <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800">
             <X className="h-4 w-4" />
           </button>
@@ -2375,7 +2375,7 @@ function ProjectStatsBar({ projectId }: { projectId: string }) {
   const pct      = total > 0 ? Math.round((done / total) * 100) : 0;
 
   const stats: { label: string; value: React.ReactNode; accent?: string }[] = [
-    { label: "Tasks",       value: total,    accent: "text-zinc-900 dark:text-white"      },
+    { label: "Items",       value: total,    accent: "text-zinc-900 dark:text-white"      },
     { label: "Done",        value: done,     accent: "text-emerald-600 dark:text-emerald-400" },
     { label: "In Progress", value: inProg,   accent: "text-brand-600 dark:text-brand-400" },
     { label: "Review",      value: inReview, accent: "text-sky-600 dark:text-sky-400"     },
@@ -2472,7 +2472,7 @@ function ProjectHeader({
 
 // ─── Tab Bar ──────────────────────────────────────────────────────────────────
 const TABS: { id: Tab; label: string; icon: React.ElementType }[] = [
-  { id: "table",          label: "Task List",      icon: LayoutList },
+  { id: "table",          label: "Work List",      icon: LayoutList },
   { id: "team",           label: "Team",           icon: Users      },
   { id: "chat",           label: "Chat",           icon: MessageSquare },
   { id: "architecture",   label: "Architecture",   icon: BookOpen   },
@@ -2486,7 +2486,7 @@ function Toolbar({ onNewTask }: { onNewTask: () => void }) {
     <div className="flex h-10 shrink-0 items-center gap-1 border-b border-zinc-100 bg-white px-1 dark:border-[#2D2A45] dark:bg-transparent sm:gap-2">
       <Button variant="primary" size="sm" onClick={onNewTask}>
         <Plus className="h-3.5 w-3.5 sm:mr-1.5" />
-        <span className="hidden sm:inline">New task</span>
+        <span className="hidden sm:inline">New item</span>
       </Button>
       <div className="mx-1 h-4 w-px bg-zinc-200 dark:bg-white/10" />
       {[

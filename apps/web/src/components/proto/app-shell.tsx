@@ -18,7 +18,6 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
-  ClipboardList,
   Code2,
   FileText,
   FolderKanban,
@@ -51,7 +50,6 @@ const PRIMARY_NAV = [
 const AGENTS_NAV = [
   { href: "/agents",          label: "Registry",  icon: Users          },
   { href: "/agents/onboard",  label: "Onboard",   icon: Terminal       },
-  { href: "/agents/tasks",    label: "Tasks",     icon: ClipboardList  },
   { href: "/agents/chat",     label: "Chat",      icon: MessageSquareText },
   { href: "/agents/levels",   label: "Levels",    icon: Award          },
   { href: "/agents/activity",      label: "Activity",  icon: Zap   },
