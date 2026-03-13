@@ -2,6 +2,12 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import type pg from "pg";
 import { getRequestUser } from "./auth.js";
 import { broadcast, pushToAgent } from "../broadcast.js";
+import {
+  TASK_PICKUP_SLA_MINUTES,
+  TASK_PROGRESS_SLA_MINUTES,
+  syncTaskSlaJobs,
+  type TaskSlaStateRow,
+} from "../workers/taskSlaQueue.js";
 
 // ── Caller resolution ─────────────────────────────────────────────────────────
 // Resolves the calling identity from either JWT cookie (user) or agent
@@ -19,6 +25,45 @@ const THREAD_TYPES = new Set(["conversation", "feature", "level_test", "dm", "ta
 const THREAD_STATUSES = new Set(["open", "closed", "archived"]);
 const TASK_STATUSES = new Set(["proposed", "approved", "in-progress", "review", "blocked"]);
 const TASK_PRIORITIES = new Set(["high", "medium", "normal", "low"]);
+const ACTIVE_RESPONDERS_MAX_NEXT = Math.max(1, Number(process.env.ACTIVE_RESPONDERS_MAX_NEXT ?? 100));
+
+type ReplyPolicyMode = "all" | "restricted";
+
+type ThreadReplyPolicyRow = {
+  thread_id: string;
+  mode: ReplyPolicyMode;
+  allowed_participant_ids: string[];
+  next_message_limit: number | null;
+  expires_at: string | null;
+  updated_by: string | null;
+  updated_at: string;
+};
+
+type HydratedReplyPolicy = ThreadReplyPolicyRow & {
+  allowed_participants: Array<{ participant_id: string; participant_slug: string }>;
+};
+
+type ActiveRespondersCommand =
+  | { action: "clear" | "status" }
+  | { action: "set"; slugs: string[]; nextMessageLimit: number | null };
+
+type TaskLifecycleEvent =
+  | "task.approved"
+  | "task.in_progress"
+  | "task.progress"
+  | "task.blocked"
+  | "task.review_requested"
+  | "task.done";
+
+type TaskSlaState = {
+  thread_id: string;
+  pickup_due_at: string | null;
+  progress_due_at: string | null;
+  last_progress_at: string | null;
+  last_event_type: string | null;
+  last_event_at: string | null;
+  stale_reason: string | null;
+};
 
 function normalizeSlug(value: string | null | undefined, fallback = "SYSTEM") {
   const trimmed = value?.trim();
@@ -31,6 +76,65 @@ function normalizePriority(value: unknown): "high" | "medium" | "normal" | "low"
   const normalized = value.trim().toLowerCase();
   if (normalized === "urgent") return "high";
   return TASK_PRIORITIES.has(normalized) ? (normalized as "high" | "medium" | "normal" | "low") : null;
+}
+
+function parseActiveRespondersCommand(body: string): ActiveRespondersCommand | null {
+  const trimmed = body.trim();
+  if (!trimmed.toLowerCase().startsWith("/active-responders")) return null;
+
+  const rest = trimmed.slice("/active-responders".length).trim();
+  if (!rest) return { action: "status" };
+  if (rest === "clear") return { action: "clear" };
+  if (rest === "status") return { action: "status" };
+
+  const nextMatch = rest.match(/(?:^|\s)--next\s+(\d+)(?:\s|$)/i);
+  const nextMessageLimit = nextMatch ? Number(nextMatch[1]) : null;
+  const slugs = Array.from(
+    new Set((rest.match(/@([A-Za-z0-9_]+)/g) ?? []).map((token) => token.slice(1).toUpperCase()))
+  );
+
+  if (slugs.length === 0) return null;
+  return { action: "set", slugs, nextMessageLimit };
+}
+
+function describeReplyPolicy(policy: HydratedReplyPolicy | null) {
+  if (!policy || policy.mode === "all") return "Active responders: all participants";
+  const names = policy.allowed_participants.map((participant) => `@${participant.participant_slug}`).join(", ") || "(none)";
+  const next = policy.next_message_limit !== null ? ` for next ${policy.next_message_limit} user message${policy.next_message_limit === 1 ? "" : "s"}` : "";
+  const expiry = policy.expires_at ? ` until ${new Date(policy.expires_at).toISOString()}` : "";
+  return `Active responders: ${names}${next}${expiry}`;
+}
+
+function mapTaskEventForStatus(previousStatus: unknown, nextStatus: string | undefined): TaskLifecycleEvent | null {
+  if (!nextStatus) return null;
+  if (nextStatus === "approved") return "task.approved";
+  if (nextStatus === "blocked") return "task.blocked";
+  if (nextStatus === "review") return "task.review_requested";
+  if (nextStatus === "in-progress") {
+    return previousStatus === "in-progress" ? "task.progress" : "task.in_progress";
+  }
+  return null;
+}
+
+function addMinutes(base: Date, minutes: number) {
+  return new Date(base.getTime() + minutes * 60_000).toISOString();
+}
+
+function describeTaskLifecycleEvent(eventType: TaskLifecycleEvent, actorSlug: string) {
+  switch (eventType) {
+    case "task.approved":
+      return `${actorSlug} marked this task approved`;
+    case "task.in_progress":
+      return `${actorSlug} moved this task to in-progress`;
+    case "task.progress":
+      return `${actorSlug} posted a progress update`;
+    case "task.blocked":
+      return `${actorSlug} marked this task blocked`;
+    case "task.review_requested":
+      return `${actorSlug} requested review`;
+    case "task.done":
+      return `${actorSlug} marked this task done`;
+  }
 }
 
 async function resolveCaller(req: FastifyRequest, db: pg.Pool): Promise<Caller | null> {
@@ -201,6 +305,163 @@ async function canCloseTaskThread(threadId: string, caller: Caller, db: DbExecut
   return !!rows[0];
 }
 
+async function isThreadCoordinator(thread: Record<string, unknown>, caller: Caller, db: DbExecutor) {
+  if (caller.type !== "agent" || !thread.project_id) return false;
+  const { rows } = await db.query(
+    `SELECT 1
+     FROM project_agent_roles
+     WHERE project_id = $1 AND agent_id = $2 AND agent_role = 'coordinator'
+     LIMIT 1`,
+    [thread.project_id, caller.id]
+  );
+  return !!rows[0];
+}
+
+async function loadReplyPolicy(db: DbExecutor, threadId: string): Promise<HydratedReplyPolicy | null> {
+  const { rows } = await db.query(
+    `SELECT *
+     FROM thread_reply_policy
+     WHERE thread_id = $1
+     LIMIT 1`,
+    [threadId]
+  );
+  const policy = rows[0] as ThreadReplyPolicyRow | undefined;
+  if (!policy) return null;
+
+  if (policy.mode === "restricted" && policy.expires_at && new Date(policy.expires_at).getTime() <= Date.now()) {
+    await db.query(
+      `UPDATE thread_reply_policy
+       SET mode = 'all',
+           allowed_participant_ids = '{}',
+           next_message_limit = null,
+           expires_at = null,
+           updated_at = now()
+       WHERE thread_id = $1`,
+      [threadId]
+    );
+    return null;
+  }
+
+  const participantIds = Array.isArray(policy.allowed_participant_ids) ? policy.allowed_participant_ids : [];
+  const { rows: allowedParticipants } = participantIds.length === 0
+    ? { rows: [] as Array<{ participant_id: string; participant_slug: string }> }
+    : await db.query(
+        `SELECT participant_id, participant_slug
+         FROM thread_participants
+         WHERE thread_id = $1
+           AND participant_id = ANY($2::uuid[])
+           AND removed_at IS NULL
+         ORDER BY participant_slug ASC`,
+        [threadId, participantIds]
+      );
+
+  return {
+    ...policy,
+    allowed_participants: allowedParticipants,
+  };
+}
+
+async function writeReplyPolicy(
+  db: DbExecutor,
+  threadId: string,
+  updatedBy: string,
+  mode: ReplyPolicyMode,
+  allowedParticipantIds: string[],
+  nextMessageLimit: number | null
+) {
+  await db.query(
+    `INSERT INTO thread_reply_policy (
+       thread_id, mode, allowed_participant_ids, next_message_limit, expires_at, updated_by, updated_at
+     )
+     VALUES ($1, $2, $3::uuid[], $4, null, $5, now())
+     ON CONFLICT (thread_id)
+     DO UPDATE SET mode = excluded.mode,
+                   allowed_participant_ids = excluded.allowed_participant_ids,
+                   next_message_limit = excluded.next_message_limit,
+                   expires_at = excluded.expires_at,
+                   updated_by = excluded.updated_by,
+                   updated_at = now()`,
+    [threadId, mode, allowedParticipantIds, nextMessageLimit, updatedBy]
+  );
+}
+
+async function decrementReplyPolicyWindow(db: DbExecutor, threadId: string) {
+  const { rows } = await db.query(
+    `UPDATE thread_reply_policy
+     SET next_message_limit = next_message_limit - 1,
+         updated_at = now()
+     WHERE thread_id = $1
+       AND mode = 'restricted'
+       AND next_message_limit IS NOT NULL
+       AND next_message_limit > 0
+     RETURNING next_message_limit`,
+    [threadId]
+  );
+  if (!rows[0]) return;
+  if (rows[0].next_message_limit <= 0) {
+    await db.query(
+      `UPDATE thread_reply_policy
+       SET mode = 'all',
+           allowed_participant_ids = '{}',
+           next_message_limit = null,
+           expires_at = null,
+           updated_at = now()
+       WHERE thread_id = $1`,
+      [threadId]
+    );
+  }
+}
+
+async function upsertTaskSlaState(
+  db: pg.Pool,
+  threadId: string,
+  eventType: TaskLifecycleEvent,
+  occurredAt = new Date()
+) {
+  const nowIso = occurredAt.toISOString();
+  let pickupDueAt: string | null = null;
+  let progressDueAt: string | null = null;
+  let lastProgressAt: string | null = null;
+  let staleReason: string | null = null;
+
+  switch (eventType) {
+    case "task.approved":
+      pickupDueAt = addMinutes(occurredAt, TASK_PICKUP_SLA_MINUTES);
+      break;
+    case "task.in_progress":
+      progressDueAt = addMinutes(occurredAt, TASK_PROGRESS_SLA_MINUTES);
+      lastProgressAt = nowIso;
+      break;
+    case "task.progress":
+      progressDueAt = addMinutes(occurredAt, TASK_PROGRESS_SLA_MINUTES);
+      lastProgressAt = nowIso;
+      break;
+    case "task.blocked":
+    case "task.review_requested":
+    case "task.done":
+      staleReason = null;
+      break;
+  }
+
+  const { rows } = await db.query(
+    `INSERT INTO task_sla_state (
+       thread_id, pickup_due_at, progress_due_at, last_progress_at, last_event_type, last_event_at, stale_reason
+     )
+     VALUES ($1, $2, $3, $4, $5, $6, null)
+     ON CONFLICT (thread_id)
+     DO UPDATE SET pickup_due_at = excluded.pickup_due_at,
+                   progress_due_at = excluded.progress_due_at,
+                   last_progress_at = COALESCE(excluded.last_progress_at, task_sla_state.last_progress_at),
+                   last_event_type = excluded.last_event_type,
+                   last_event_at = excluded.last_event_at,
+                   stale_reason = $7
+     RETURNING thread_id, pickup_due_at, progress_due_at`,
+    [threadId, pickupDueAt, progressDueAt, lastProgressAt, eventType, nowIso, staleReason]
+  );
+
+  await syncTaskSlaJobs(rows[0] as TaskSlaStateRow);
+}
+
 async function closeTaskThread(threadId: string, caller: Caller, db: DbExecutor) {
   const doneByUserId = caller.type === "user" ? caller.id : null;
   const doneByAgentId = caller.type === "agent" ? caller.id : null;
@@ -296,6 +557,7 @@ async function fanOutNotifications(
   messageId: string,
   threadId: string,
   senderId: string,
+  senderType: Caller["type"],
   priority: string = "normal",
   messageBody: string = ""
 ) {
@@ -315,7 +577,15 @@ async function fanOutNotifications(
     ? allRecipients.filter(r => mentionedSlugs.includes((r.participant_slug ?? "").toLowerCase()))
     : allRecipients;
 
-  for (const r of recipients) {
+  const policy = await loadReplyPolicy(db, threadId);
+  const allowedIds = policy?.mode === "restricted"
+    ? new Set(policy.allowed_participant_ids)
+    : null;
+  const routedRecipients = allowedIds
+    ? recipients.filter((recipient) => allowedIds.has(recipient.participant_id))
+    : recipients;
+
+  for (const r of routedRecipients) {
     const { rows: [notif] } = await db.query(
       `INSERT INTO notifications
          (recipient_id, recipient_slug, message_id, priority)
@@ -356,6 +626,10 @@ async function fanOutNotifications(
       });
     });
   }
+
+  if (senderType === "user" && policy?.mode === "restricted" && policy.next_message_limit !== null) {
+    await decrementReplyPolicyWindow(db, threadId);
+  }
 }
 
 async function insertEventMessage(
@@ -365,12 +639,14 @@ async function insertEventMessage(
   senderSlug: string,
   body: string
 ) {
-  await db.query(
+  const { rows: [message] } = await db.query(
     `INSERT INTO thread_messages (thread_id, sender_id, sender_slug, type, body)
-     VALUES ($1, $2, $3, 'event', $4)`,
+     VALUES ($1, $2, $3, 'event', $4)
+     RETURNING *`,
     [threadId, senderId, senderSlug, body]
   );
-  // Event messages do not generate notifications
+  broadcast("thread.message_created", { thread_id: threadId, message });
+  return message;
 }
 
 // ── Routes ────────────────────────────────────────────────────────────────────
@@ -816,6 +1092,28 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
     }
   );
 
+  server.get<{ Params: { thread_id: string } }>(
+    "/threads/:thread_id/sla",
+    async (req, reply) => {
+      const caller = await resolveCaller(req, db);
+      if (!caller) return reply.status(401).send({ ok: false, error: "not authenticated" });
+
+      const access = await checkThreadAccess(req.params.thread_id, caller, db);
+      if (!access) return reply.status(404).send({ ok: false, error: "thread not found or no access" });
+
+      const replyPolicy = await loadReplyPolicy(db, req.params.thread_id);
+      const { rows: [slaState] } = await db.query(
+        `SELECT *
+         FROM task_sla_state
+         WHERE thread_id = $1
+         LIMIT 1`,
+        [req.params.thread_id]
+      );
+
+      return { ok: true, reply_policy: replyPolicy, sla_state: (slaState ?? null) as TaskSlaState | null };
+    }
+  );
+
   server.patch<{ Params: { thread_id: string }; Body: Record<string, unknown> }>(
     "/threads/:thread_id",
     async (req, reply) => {
@@ -882,11 +1180,14 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
           return reply.status(403).send({ ok: false, error: "only the coordinator or project owner can close a task thread" });
         }
         await closeTaskThread(req.params.thread_id, caller, db);
-        await insertEventMessage(db, req.params.thread_id, caller.id, caller.slug, `${caller.slug} closed this task thread`);
+        await insertEventMessage(db, req.params.thread_id, caller.id, caller.slug, describeTaskLifecycleEvent("task.done", caller.slug));
+        await upsertTaskSlaState(db, req.params.thread_id, "task.done");
         const closed = await hydrateThread(db, req.params.thread_id);
         broadcast("thread.status_changed", { thread_id: req.params.thread_id, status: "closed" });
         return { ok: true, thread: closed };
       }
+
+      const previousTaskStatus = typeof thread.task_status === "string" ? thread.task_status : null;
 
       const sets: string[] = [];
       const values: unknown[] = [];
@@ -975,6 +1276,11 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
           await insertEventMessage(db, req.params.thread_id, caller.id, caller.slug, `${resolved.slug} was assigned by ${caller.slug}`);
         }
       }
+      const taskEvent = mapTaskEventForStatus(previousTaskStatus, requestedTaskStatus);
+      if (taskEvent) {
+        await insertEventMessage(db, req.params.thread_id, caller.id, caller.slug, describeTaskLifecycleEvent(taskEvent, caller.slug));
+        await upsertTaskSlaState(db, req.params.thread_id, taskEvent);
+      }
       if (requestedTaskStatus === "approved" && (updatedThread as Record<string, unknown>).assignee_agent_id) {
         await notifyTaskAssignee(req.params.thread_id, db);
       }
@@ -1003,7 +1309,8 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
       }
 
       await closeTaskThread(req.params.thread_id, caller, db);
-      await insertEventMessage(db, req.params.thread_id, caller.id, caller.slug, `${caller.slug} closed this task thread`);
+      await insertEventMessage(db, req.params.thread_id, caller.id, caller.slug, describeTaskLifecycleEvent("task.done", caller.slug));
+      await upsertTaskSlaState(db, req.params.thread_id, "task.done");
       const thread = await hydrateThread(db, req.params.thread_id);
       broadcast("thread.status_changed", { thread_id: req.params.thread_id, status: "closed" });
       return { ok: true, thread };
@@ -1052,7 +1359,8 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
           return reply.status(403).send({ ok: false, error: "only the coordinator or project owner can close a task thread" });
         }
         const thread = await closeTaskThread(req.params.thread_id, caller, db);
-        await insertEventMessage(db, req.params.thread_id, caller.id, caller.slug, `${caller.slug} closed this task thread`);
+        await insertEventMessage(db, req.params.thread_id, caller.id, caller.slug, describeTaskLifecycleEvent("task.done", caller.slug));
+        await upsertTaskSlaState(db, req.params.thread_id, "task.done");
         broadcast("thread.status_changed", { thread_id: req.params.thread_id, status });
         return { ok: true, status, thread };
       }
@@ -1192,6 +1500,69 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
 
       const { body, reply_to, priority = "normal" } = req.body ?? {};
       if (!body?.trim()) return reply.status(400).send({ ok: false, error: "body is required" });
+      const trimmedBody = body.trim();
+
+      const activeRespondersCommand = parseActiveRespondersCommand(trimmedBody);
+      if (!activeRespondersCommand && trimmedBody.toLowerCase().startsWith("/active-responders")) {
+        return reply.status(400).send({ ok: false, error: "invalid /active-responders command" });
+      }
+      if (activeRespondersCommand) {
+        const canManageReplyPolicy =
+          access.role === "creator" ||
+          access.role === "owner" ||
+          await isThreadCoordinator(access.thread as Record<string, unknown>, caller, db);
+
+        if (activeRespondersCommand.action !== "status" && !canManageReplyPolicy) {
+          return reply.status(403).send({ ok: false, error: "only the thread creator, owner, or coordinator can change active responders" });
+        }
+
+        if (
+          activeRespondersCommand.action === "set" &&
+          activeRespondersCommand.nextMessageLimit !== null &&
+          (activeRespondersCommand.nextMessageLimit < 1 || activeRespondersCommand.nextMessageLimit > ACTIVE_RESPONDERS_MAX_NEXT)
+        ) {
+          return reply.status(400).send({ ok: false, error: `--next must be between 1 and ${ACTIVE_RESPONDERS_MAX_NEXT}` });
+        }
+
+        let replyPolicy = await loadReplyPolicy(db, req.params.thread_id);
+        let eventBody = describeReplyPolicy(replyPolicy);
+
+        if (activeRespondersCommand.action === "clear") {
+          await writeReplyPolicy(db, req.params.thread_id, caller.id, "all", [], null);
+          replyPolicy = null;
+          eventBody = `${caller.slug} cleared active responders`;
+        } else if (activeRespondersCommand.action === "set") {
+          const { rows: participants } = await db.query(
+            `SELECT participant_id, participant_slug
+             FROM thread_participants
+             WHERE thread_id = $1 AND removed_at IS NULL`,
+            [req.params.thread_id]
+          );
+
+          const bySlug = new Map<string, { participant_id: string; participant_slug: string }>(
+            participants.map((participant) => [String(participant.participant_slug).toUpperCase(), participant])
+          );
+          const missing = activeRespondersCommand.slugs.filter((slug) => !bySlug.has(slug));
+          if (missing.length > 0) {
+            return reply.status(400).send({ ok: false, error: `participants not in thread: ${missing.map((slug) => `@${slug}`).join(", ")}` });
+          }
+
+          const allowedParticipantIds = activeRespondersCommand.slugs.map((slug) => bySlug.get(slug)!.participant_id);
+          await writeReplyPolicy(
+            db,
+            req.params.thread_id,
+            caller.id,
+            "restricted",
+            allowedParticipantIds,
+            activeRespondersCommand.nextMessageLimit
+          );
+          replyPolicy = await loadReplyPolicy(db, req.params.thread_id);
+          eventBody = `${caller.slug} set ${describeReplyPolicy(replyPolicy).replace("Active responders:", "active responders:")}`;
+        }
+
+        const event = await insertEventMessage(db, req.params.thread_id, caller.id, caller.slug, eventBody);
+        return { ok: true, message_id: event.message_id, message: event, reply_policy: replyPolicy };
+      }
 
       // Validate reply_to belongs to same thread
       if (reply_to) {
@@ -1205,11 +1576,11 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
       const { rows: [msg] } = await db.query(
         `INSERT INTO thread_messages (thread_id, reply_to, sender_id, sender_slug, body)
          VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-        [req.params.thread_id, reply_to ?? null, caller.id, caller.slug, body.trim()]
+        [req.params.thread_id, reply_to ?? null, caller.id, caller.slug, trimmedBody]
       );
 
       // Fan out notifications to all active participants except sender
-      await fanOutNotifications(db, msg.message_id, req.params.thread_id, caller.id, priority, body.trim());
+      await fanOutNotifications(db, msg.message_id, req.params.thread_id, caller.id, caller.type, priority, trimmedBody);
 
       broadcast("thread.message_created", { thread_id: req.params.thread_id, message: msg });
 

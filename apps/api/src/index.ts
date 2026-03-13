@@ -29,6 +29,7 @@ import { registerInvites } from "./routes/invites.js";
 import { registerWorkspaces } from "./routes/workspaces.js";
 import { registerAuth, verifyToken } from "./routes/auth.js";
 import { registerUsage } from "./routes/usage.js";
+import { startTaskSlaWorker } from "./workers/taskSlaWorker.js";
 
 const PORT = Number(process.env.PORT ?? 4000);
 const HOST = process.env.HOST ?? "0.0.0.0";
@@ -122,5 +123,6 @@ await server.register(async (app) => {
 }, { prefix: "/api/v1" });
 
 startConnector(db);
+await startTaskSlaWorker(db);
 
 await server.listen({ port: PORT, host: HOST });

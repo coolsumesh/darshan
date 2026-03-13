@@ -140,6 +140,27 @@ export type ThreadDetail = {
   role: ThreadAccessRole;
 };
 
+export type ThreadReplyPolicy = {
+  thread_id: string;
+  mode: "all" | "restricted";
+  allowed_participant_ids: string[];
+  allowed_participants: Array<{ participant_id: string; participant_slug: string }>;
+  next_message_limit: number | null;
+  expires_at: string | null;
+  updated_by: string | null;
+  updated_at: string;
+};
+
+export type ThreadSlaState = {
+  thread_id: string;
+  pickup_due_at: string | null;
+  progress_due_at: string | null;
+  last_progress_at: string | null;
+  last_event_type: string | null;
+  last_event_at: string | null;
+  stale_reason: string | null;
+};
+
 export type ThreadParticipantMutationResult = {
   ok: boolean;
   status: number;
@@ -169,6 +190,19 @@ export async function fetchThread(threadId: string): Promise<ThreadDetail | null
     thread: data.thread,
     participants: data.participants ?? [],
     role: data.role ?? "participant",
+  };
+}
+
+export async function fetchThreadSla(threadId: string): Promise<{ reply_policy: ThreadReplyPolicy | null; sla_state: ThreadSlaState | null } | null> {
+  const data = await apiFetch<{
+    ok: boolean;
+    reply_policy: ThreadReplyPolicy | null;
+    sla_state: ThreadSlaState | null;
+  }>(`/api/v1/threads/${threadId}/sla`);
+  if (!data?.ok) return null;
+  return {
+    reply_policy: data.reply_policy ?? null,
+    sla_state: data.sla_state ?? null,
   };
 }
 

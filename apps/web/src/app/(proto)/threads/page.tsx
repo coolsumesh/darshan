@@ -9,6 +9,7 @@ import {
   fetchThread,
   fetchThreadParticipants,
   fetchThreadMessages,
+  fetchThreadSla,
   fetchProjects,
   fetchTeam,
   fetchAgentsDirectory,
@@ -24,6 +25,8 @@ import {
   type Project,
   type ThreadParticipant,
   type ThreadAccessRole,
+  type ThreadReplyPolicy,
+  type ThreadSlaState,
 } from "@/lib/api";
 import { ChevronDown, Inbox, Send, RefreshCw, CheckCircle, ArchiveIcon, Plus, X, Mic, Square, UserPlus } from "lucide-react";
 
@@ -243,6 +246,15 @@ function formatTaskStatus(status: Thread["task_status"]): string {
   if (!status) return "No task status";
   if (status === "in-progress") return "In Progress";
   return status.charAt(0).toUpperCase() + status.slice(1);
+}
+
+function formatCountdown(targetIso: string | null, nowMs: number): string {
+  if (!targetIso) return "--:--";
+  const diff = Math.max(0, new Date(targetIso).getTime() - nowMs);
+  const totalSeconds = Math.floor(diff / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }
 
 // ── Message bubble ────────────────────────────────────────────────────────────
@@ -571,6 +583,9 @@ export default function ThreadsPage() {
   const [mentionOpen, setMentionOpen] = React.useState(false);
   const [mentionIndex, setMentionIndex] = React.useState(0);
   const [mentionCtx, setMentionCtx] = React.useState<{ query: string; start: number; end: number } | null>(null);
+  const [threadReplyPolicy, setThreadReplyPolicy] = React.useState<ThreadReplyPolicy | null>(null);
+  const [threadSlaState, setThreadSlaState] = React.useState<ThreadSlaState | null>(null);
+  const [countdownNow, setCountdownNow] = React.useState(() => Date.now());
   const bottomRef = React.useRef<HTMLDivElement>(null);
   const recognitionRef = React.useRef<any>(null);
   const voiceBaseDraftRef = React.useRef("");
@@ -686,6 +701,29 @@ export default function ThreadsPage() {
 
   React.useEffect(() => {
     if (!selected) {
+      setThreadReplyPolicy(null);
+      setThreadSlaState(null);
+      return;
+    }
+    fetchThreadSla(selected.thread_id)
+      .then((state) => {
+        setThreadReplyPolicy(state?.reply_policy ?? null);
+        setThreadSlaState(state?.sla_state ?? null);
+      })
+      .catch(() => {
+        setThreadReplyPolicy(null);
+        setThreadSlaState(null);
+      });
+  }, [selected?.thread_id]);
+
+  React.useEffect(() => {
+    if (!threadSlaState?.pickup_due_at && !threadSlaState?.progress_due_at) return;
+    const timer = window.setInterval(() => setCountdownNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [threadSlaState?.pickup_due_at, threadSlaState?.progress_due_at]);
+
+  React.useEffect(() => {
+    if (!selected) {
       setThreadParticipants([]);
       setThreadRole(null);
       setParticipantOptions([]);
@@ -773,6 +811,12 @@ export default function ThreadsPage() {
 
             if (selected && selected.thread_id === threadId) {
               setMessages((prev) => prev.some((m) => m.message_id === msg.message_id) ? prev : [...prev, msg]);
+              fetchThreadSla(threadId)
+                .then((state) => {
+                  setThreadReplyPolicy(state?.reply_policy ?? null);
+                  setThreadSlaState(state?.sla_state ?? null);
+                })
+                .catch(() => {});
             }
             loadThreads(projectId, threadStatusFilter, { silent: true, search: debouncedThreadSearch });
             return;
@@ -782,6 +826,14 @@ export default function ThreadsPage() {
             const thread = data?.thread as Thread | undefined;
             if (!thread?.thread_id) return;
             reconcileThread(thread);
+            if (selected?.thread_id === thread.thread_id) {
+              fetchThreadSla(thread.thread_id)
+                .then((state) => {
+                  setThreadReplyPolicy(state?.reply_policy ?? null);
+                  setThreadSlaState(state?.sla_state ?? null);
+                })
+                .catch(() => {});
+            }
             return;
           }
 
@@ -952,6 +1004,25 @@ export default function ThreadsPage() {
     [threadParticipants]
   );
   const canManageParticipants = threadRole === "creator" || threadRole === "owner";
+  const replyPolicySummary = React.useMemo(() => {
+    if (!threadReplyPolicy || threadReplyPolicy.mode !== "restricted") return null;
+    const names = threadReplyPolicy.allowed_participants.map((participant) => participant.participant_slug).join(", ");
+    const remaining = threadReplyPolicy.next_message_limit !== null ? ` · next ${threadReplyPolicy.next_message_limit}` : "";
+    return names ? `${names}${remaining}` : `Restricted${remaining}`;
+  }, [threadReplyPolicy]);
+  const slaSummary = React.useMemo(() => {
+    if (selected?.thread_type !== "task" || !threadSlaState) return null;
+    if (threadSlaState.stale_reason) {
+      return { label: "SLA missed", value: threadSlaState.stale_reason.replace("-", " ") };
+    }
+    if (threadSlaState.pickup_due_at) {
+      return { label: "Waiting pickup", value: formatCountdown(threadSlaState.pickup_due_at, countdownNow) };
+    }
+    if (threadSlaState.progress_due_at) {
+      return { label: "Next update due", value: formatCountdown(threadSlaState.progress_due_at, countdownNow) };
+    }
+    return null;
+  }, [selected?.thread_type, threadSlaState, countdownNow]);
   const availableParticipantOptions = React.useMemo(() => {
     const activeIds = new Set(activeParticipants.map((participant) => participant.participant_id));
     const query = participantQuery.trim().toLowerCase();
@@ -1283,6 +1354,22 @@ export default function ThreadsPage() {
                     Started by {selected.created_slug} · {relativeTime(selected.created_at)}
                   </div>
                   <div className="mt-2 flex flex-wrap items-center gap-2">
+                    {replyPolicySummary && (
+                      <span className="rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-semibold text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
+                        Active Responders · {replyPolicySummary}
+                      </span>
+                    )}
+                    {slaSummary && (
+                      <span
+                        className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
+                          threadSlaState?.stale_reason
+                            ? "bg-rose-100 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300"
+                            : "bg-sky-100 text-sky-700 dark:bg-sky-950/40 dark:text-sky-300"
+                        }`}
+                      >
+                        {slaSummary.label} · {slaSummary.value}
+                      </span>
+                    )}
                     {activeParticipants.map((participant) => (
                       <span
                         key={participant.participant_id}
