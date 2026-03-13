@@ -641,12 +641,12 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         )}
 
         {/* Desktop sidebar */}
-        <div className="hidden lg:flex">
+        <div className="relative z-30 hidden lg:flex">
           <Sidebar pathname={pathname} collapsed={collapsed} setCollapsed={handleCollapse} me={me} />
         </div>
 
         {/* Main content area */}
-        <main className="flex min-w-0 flex-1 flex-col overflow-hidden" role="main">
+        <main className="relative z-10 flex min-w-0 flex-1 flex-col overflow-hidden" role="main">
           {/* Full-height pages (threads, chat-style) get no padding and fill the container */}
           {pathname.startsWith("/threads") || pathname.startsWith("/agents/chat") ? (
             <div className="flex flex-1 flex-col overflow-hidden">

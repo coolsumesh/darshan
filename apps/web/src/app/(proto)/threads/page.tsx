@@ -312,7 +312,7 @@ function Toast({
     <div
       role="status"
       aria-live="polite"
-      className={`fixed right-6 top-20 z-50 rounded-xl border px-4 py-3 text-sm shadow-2xl ${
+      className={`fixed right-6 top-20 z-20 rounded-xl border px-4 py-3 text-sm shadow-2xl ${
         tone === "success"
           ? "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-300"
           : "border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/40 dark:text-rose-300"
@@ -406,7 +406,7 @@ function NewThreadModal({
     }`;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+    <div className="fixed inset-0 z-20 flex items-center justify-center bg-black/40 backdrop-blur-sm">
       <div className="w-full max-w-md rounded-2xl bg-white shadow-2xl dark:bg-slate-900 ring-1 ring-slate-200 dark:ring-slate-700">
         {/* Header */}
         <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 px-5 py-3">
