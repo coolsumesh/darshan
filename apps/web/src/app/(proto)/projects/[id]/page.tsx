@@ -397,7 +397,7 @@ function TaskDetailPanel({
   task: Task; team: TeamMemberWithAgent[]; taskNumber: number;
   onClose: () => void; onUpdate: (id: string, patch: Partial<Task>) => void; onDelete: (id: string) => void;
 }) {
-  const taskIdStr = `DSH-${String(taskNumber).padStart(3, "0")}`;
+  const taskIdStr = task.id;
   const [editingTitle,    setEditingTitle]    = React.useState(false);
   const [title,           setTitle]           = React.useState(task.title);
   const [editingDesc,     setEditingDesc]     = React.useState(false);
@@ -658,7 +658,7 @@ function TableRow({
   onUpdate: (id: string, patch: Partial<Task>) => void;
   onDelete: () => void; onOpen: () => void;
 }) {
-  const taskIdStr = `DSH-${String(taskNumber).padStart(3, "0")}`;
+  const taskIdStr = task.id;
   const [openPop, setOpenPop] = React.useState<string | null>(null);
   const [anchorEl, setAnchorEl] = React.useState<HTMLElement | null>(null);
   function openPopover(name: string, el: HTMLElement) { setOpenPop(name); setAnchorEl(el); }

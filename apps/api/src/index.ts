@@ -41,7 +41,7 @@ mkdirSync(uploadsDir, { recursive: true });
 await server.register(cors, { origin: true, credentials: true });
 await server.register(cookie);
 await server.register(websocket);
-await server.register(multipart, { limits: { fileSize: 2 * 1024 * 1024 } });
+await server.register(multipart, { limits: { fileSize: 10 * 1024 * 1024 } });
 await server.register(fastifyStatic, {
   root: join(__dirname, "..", "uploads"),
   prefix: "/uploads/",

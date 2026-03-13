@@ -10,11 +10,13 @@ import {
   sendThreadMessage,
   setThreadStatus,
   createThread,
+  uploadThreadAttachment,
   type Thread,
   type ThreadMessage,
+  type ThreadAttachment,
   type Project,
 } from "@/lib/api";
-import { ChevronDown, Inbox, Send, RefreshCw, CheckCircle, ArchiveIcon, Plus, X } from "lucide-react";
+import { ChevronDown, Inbox, Send, RefreshCw, CheckCircle, ArchiveIcon, Plus, X, Paperclip } from "lucide-react";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -99,7 +101,14 @@ function ThreadRow({
 
 // ── Message bubble ────────────────────────────────────────────────────────────
 
+function attachmentUrl(url: string): string {
+  if (url.startsWith("http://") || url.startsWith("https://")) return url;
+  const base = process.env.NEXT_PUBLIC_API_BASE_URL || "";
+  return `${base}${url}`;
+}
+
 function MessageBubble({ msg, isMe }: { msg: ThreadMessage; isMe: boolean }) {
+  const atts = Array.isArray(msg.attachments) ? msg.attachments : [];
   return (
     <div className={`flex items-start gap-3 ${isMe ? "flex-row-reverse" : ""}`}>
       <Avatar slug={msg.sender_slug} size="sm" />
@@ -121,7 +130,22 @@ function MessageBubble({ msg, isMe }: { msg: ThreadMessage; isMe: boolean }) {
               : "rounded-tl-sm bg-white text-slate-800 ring-1 ring-slate-200 dark:bg-slate-800 dark:text-slate-100 dark:ring-slate-700"
           }`}
         >
-          {msg.body}
+          {msg.body && <div>{msg.body}</div>}
+          {atts.length > 0 && (
+            <div className="mt-2 space-y-2">
+              {atts.map((a, idx) => (
+                <a
+                  key={`${a.url}-${idx}`}
+                  href={attachmentUrl(a.url)}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="block rounded-lg border border-slate-300/50 bg-slate-50/70 px-2 py-1 text-xs hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-700/40 dark:hover:bg-slate-700"
+                >
+                  {a.type === "image" ? "🖼️" : a.type === "audio" ? "🎤" : a.type === "video" ? "🎬" : "📎"} {a.filename}
+                </a>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -266,6 +290,8 @@ export default function ThreadsPage() {
   const [loading, setLoading] = React.useState(true);
   const [sending, setSending] = React.useState(false);
   const [draft, setDraft] = React.useState("");
+  const [draftAttachments, setDraftAttachments] = React.useState<ThreadAttachment[]>([]);
+  const fileInputRef = React.useRef<HTMLInputElement | null>(null);
   const [projects, setProjects] = React.useState<Project[]>([]);
   const [projectId, setProjectId] = React.useState<string | null>(null);
   const [dropdownOpen, setDropdownOpen] = React.useState(false);
@@ -357,14 +383,24 @@ export default function ThreadsPage() {
   }, [messages]);
 
   const handleSend = async () => {
-    if (!selected || !draft.trim() || sending) return;
+    if (!selected || sending || (!draft.trim() && draftAttachments.length === 0)) return;
     setSending(true);
-    const msg = await sendThreadMessage(selected.thread_id, draft.trim());
+    const msg = await sendThreadMessage(selected.thread_id, draft.trim(), draftAttachments);
     if (msg) {
       setMessages((prev) => [...prev, msg]);
       setDraft("");
+      setDraftAttachments([]);
     }
     setSending(false);
+  };
+
+  const handleAttach = async (ev: React.ChangeEvent<HTMLInputElement>) => {
+    if (!selected) return;
+    const file = ev.target.files?.[0];
+    if (!file) return;
+    const uploaded = await uploadThreadAttachment(selected.thread_id, file);
+    if (uploaded) setDraftAttachments((prev) => [...prev, uploaded]);
+    ev.target.value = "";
   };
 
   const handleKey = (e: React.KeyboardEvent) => {
@@ -611,7 +647,29 @@ export default function ThreadsPage() {
 
             {/* Reply input */}
             <div className="border-t border-slate-200 bg-white px-4 py-3 dark:border-slate-800 dark:bg-slate-950">
+              {draftAttachments.length > 0 && (
+                <div className="mb-2 flex flex-wrap gap-2">
+                  {draftAttachments.map((a, idx) => (
+                    <button
+                      key={`${a.url}-${idx}`}
+                      onClick={() => setDraftAttachments((prev) => prev.filter((_, i) => i !== idx))}
+                      className="rounded-full border border-slate-300 px-2 py-0.5 text-xs text-slate-600 hover:bg-slate-100 dark:border-slate-600 dark:text-slate-300"
+                      title="Remove attachment"
+                    >
+                      {a.filename} ×
+                    </button>
+                  ))}
+                </div>
+              )}
               <div className="flex items-end gap-2">
+                <input ref={fileInputRef} type="file" className="hidden" onChange={handleAttach} />
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 text-slate-500 hover:border-violet-300 hover:text-violet-600 dark:border-slate-700 dark:text-slate-400"
+                  title="Attach file"
+                >
+                  <Paperclip className="h-4 w-4" />
+                </button>
                 <textarea
                   rows={2}
                   value={draft}
@@ -622,7 +680,7 @@ export default function ThreadsPage() {
                 />
                 <button
                   onClick={handleSend}
-                  disabled={!draft.trim() || sending}
+                  disabled={(!draft.trim() && draftAttachments.length === 0) || sending}
                   className="flex h-10 w-10 items-center justify-center rounded-xl bg-violet-600 text-white transition hover:bg-violet-700 disabled:opacity-40"
                 >
                   <Send className="h-4 w-4" />

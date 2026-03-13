@@ -1,5 +1,8 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import type pg from "pg";
+import { randomUUID } from "crypto";
+import { mkdirSync, writeFileSync } from "fs";
+import { join } from "path";
 import { getRequestUser } from "./auth.js";
 import { pushToAgent } from "../broadcast.js";
 
@@ -11,6 +14,35 @@ interface Caller {
   id:   string;
   slug: string;
   type: "user" | "agent";
+}
+
+type AttachmentType = "image" | "video" | "audio" | "file";
+
+interface ThreadAttachment {
+  type: AttachmentType;
+  mime: string;
+  size: number;
+  url: string;
+  filename: string;
+  duration?: number | null;
+}
+
+const ATTACHMENTS_DIR = join(process.cwd(), "apps", "api", "uploads", "thread-attachments");
+mkdirSync(ATTACHMENTS_DIR, { recursive: true });
+
+const ALLOWED_MIME = new Set([
+  "image/jpeg", "image/png", "image/webp", "image/gif",
+  "video/mp4", "video/webm", "video/quicktime",
+  "audio/mpeg", "audio/mp4", "audio/ogg", "audio/webm", "audio/wav",
+  "application/pdf", "text/plain", "application/zip",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+]);
+
+function classifyAttachment(mime: string): AttachmentType {
+  if (mime.startsWith("image/")) return "image";
+  if (mime.startsWith("video/")) return "video";
+  if (mime.startsWith("audio/")) return "audio";
+  return "file";
 }
 
 async function resolveCaller(req: FastifyRequest, db: pg.Pool): Promise<Caller | null> {
@@ -578,10 +610,57 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
     }
   );
 
+  // ── POST /api/v1/threads/:thread_id/attachments/upload ───────────────────
+  server.post<{ Params: { thread_id: string } }>(
+    "/threads/:thread_id/attachments/upload",
+    async (req, reply) => {
+      const caller = await resolveCaller(req, db);
+      if (!caller) return reply.status(401).send({ ok: false, error: "not authenticated" });
+
+      const access = await checkThreadAccess(req.params.thread_id, caller, db);
+      if (!access) return reply.status(404).send({ ok: false, error: "thread not found or no access" });
+      if (access.role === "removed") return reply.status(403).send({ ok: false, error: "removed participants cannot upload" });
+
+      const part = await (req as any).file();
+      if (!part) return reply.status(400).send({ ok: false, error: "file is required" });
+
+      const mime = String(part.mimetype || "application/octet-stream");
+      const filename = String(part.filename || "attachment");
+      if (!ALLOWED_MIME.has(mime)) {
+        return reply.status(400).send({ ok: false, error: `unsupported mime type: ${mime}` });
+      }
+
+      const chunks: Buffer[] = [];
+      let total = 0;
+      for await (const chunk of part.file) {
+        total += chunk.length;
+        if (total > 10 * 1024 * 1024) {
+          return reply.status(413).send({ ok: false, error: "attachment too large (max 10MB)" });
+        }
+        chunks.push(chunk);
+      }
+
+      const safeBase = filename.replace(/[^A-Za-z0-9._-]/g, "_");
+      const storageName = `${Date.now()}_${randomUUID()}_${safeBase}`;
+      const outPath = join(ATTACHMENTS_DIR, storageName);
+      writeFileSync(outPath, Buffer.concat(chunks));
+
+      const attachment: ThreadAttachment = {
+        type: classifyAttachment(mime),
+        mime,
+        size: total,
+        url: `/uploads/thread-attachments/${storageName}`,
+        filename,
+      };
+
+      return { ok: true, attachment };
+    }
+  );
+
   // ── POST /api/v1/threads/:thread_id/messages — send message ───────────────
   server.post<{
     Params: { thread_id: string };
-    Body: { body: string; reply_to?: string; priority?: string };
+    Body: { body?: string; reply_to?: string; priority?: string; attachments?: ThreadAttachment[] };
   }>(
     "/threads/:thread_id/messages",
     async (req, reply) => {
@@ -597,8 +676,19 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
         return reply.status(410).send({ ok: false, error: "thread has been deleted" });
       }
 
-      const { body, reply_to, priority = "normal" } = req.body ?? {};
-      if (!body?.trim()) return reply.status(400).send({ ok: false, error: "body is required" });
+      const { body = "", reply_to, priority = "normal", attachments = [] } = req.body ?? {};
+      const cleanBody = body.trim();
+      const safeAttachments = Array.isArray(attachments) ? attachments.filter(Boolean).slice(0, 8) : [];
+
+      for (const a of safeAttachments) {
+        if (!a || typeof a !== "object" || typeof a.url !== "string") {
+          return reply.status(400).send({ ok: false, error: "invalid attachments payload" });
+        }
+      }
+
+      if (!cleanBody && safeAttachments.length === 0) {
+        return reply.status(400).send({ ok: false, error: "body or attachments required" });
+      }
 
       // Validate reply_to belongs to same thread
       if (reply_to) {
@@ -610,9 +700,9 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
       }
 
       const { rows: [msg] } = await db.query(
-        `INSERT INTO thread_messages (thread_id, reply_to, sender_id, sender_slug, body)
-         VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-        [req.params.thread_id, reply_to ?? null, caller.id, caller.slug, body.trim()]
+        `INSERT INTO thread_messages (thread_id, reply_to, sender_id, sender_slug, body, attachments)
+         VALUES ($1, $2, $3, $4, $5, $6::jsonb) RETURNING *`,
+        [req.params.thread_id, reply_to ?? null, caller.id, caller.slug, cleanBody, JSON.stringify(safeAttachments)]
       );
 
       // Fan out notifications to all active participants except sender

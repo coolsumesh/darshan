@@ -101,6 +101,15 @@ export type Thread = {
   status: "open" | "closed" | "archived";
 };
 
+export type ThreadAttachment = {
+  type: "image" | "video" | "audio" | "file";
+  mime: string;
+  size: number;
+  url: string;
+  filename: string;
+  duration?: number | null;
+};
+
 export type ThreadMessage = {
   message_id: string;
   thread_id: string;
@@ -109,6 +118,7 @@ export type ThreadMessage = {
   sender_slug: string;
   type: string;
   body: string;
+  attachments?: ThreadAttachment[];
   sent_at: string;
 };
 
@@ -126,10 +136,27 @@ export async function fetchThreadMessages(threadId: string): Promise<ThreadMessa
   return data?.ok ? (data.messages ?? []) : [];
 }
 
-export async function sendThreadMessage(threadId: string, body: string): Promise<ThreadMessage | null> {
+export async function uploadThreadAttachment(threadId: string, file: File): Promise<ThreadAttachment | null> {
+  const fd = new FormData();
+  fd.append("file", file);
+  const res = await fetch(`/api/v1/threads/${threadId}/attachments/upload`, {
+    method: "POST",
+    credentials: "include",
+    body: fd,
+  });
+  if (!res.ok) return null;
+  const data = await res.json();
+  return data?.ok ? (data.attachment ?? null) : null;
+}
+
+export async function sendThreadMessage(
+  threadId: string,
+  body: string,
+  attachments: ThreadAttachment[] = []
+): Promise<ThreadMessage | null> {
   const data = await apiFetch<{ ok: boolean; message: ThreadMessage }>(
     `/api/v1/threads/${threadId}/messages`,
-    { method: "POST", body: JSON.stringify({ body }) }
+    { method: "POST", body: JSON.stringify({ body, attachments }) }
   );
   return data?.ok ? data.message ?? null : null;
 }
