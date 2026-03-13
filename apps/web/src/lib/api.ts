@@ -242,6 +242,7 @@ export async function updateThread(
   threadId: string,
   patch: {
     subject?: string;
+    thread_type?: "conversation" | "feature" | "level_test" | "dm" | "task";
     status?: "open" | "closed" | "archived";
     task_status?: "proposed" | "approved" | "in-progress" | "review" | "blocked";
     completion_note?: string | null;

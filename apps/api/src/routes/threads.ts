@@ -833,6 +833,7 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
       }
 
       const requestedStatus = typeof req.body.status === "string" ? req.body.status.trim() : undefined;
+      const requestedThreadType = typeof req.body.thread_type === "string" ? req.body.thread_type.trim() : undefined;
       const requestedTaskStatus = typeof req.body.task_status === "string" ? req.body.task_status.trim() : undefined;
       const requestedSubject = typeof req.body.subject === "string" ? req.body.subject.trim() : undefined;
       const requestedDescription = typeof req.body.description === "string" ? req.body.description.trim() : undefined;
@@ -849,6 +850,9 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
       if (requestedStatus !== undefined && !THREAD_STATUSES.has(requestedStatus)) {
         return reply.status(400).send({ ok: false, error: "invalid status" });
       }
+      if (requestedThreadType !== undefined && !THREAD_TYPES.has(requestedThreadType)) {
+        return reply.status(400).send({ ok: false, error: "invalid thread_type" });
+      }
       if (requestedTaskStatus !== undefined && !TASK_STATUSES.has(requestedTaskStatus)) {
         return reply.status(400).send({ ok: false, error: "invalid task_status" });
       }
@@ -858,7 +862,8 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
       if (requestedAssigneeAgentId && requestedAssigneeUserId) {
         return reply.status(400).send({ ok: false, error: "only one assignee may be set" });
       }
-      if (thread.thread_type !== "task" && (requestedTaskStatus !== undefined || requestedCompletionNote !== undefined || requestedAssigneeAgentId !== undefined || requestedAssigneeUserId !== undefined || requestedPriority !== undefined)) {
+      const effectiveThreadType = requestedThreadType ?? String(thread.thread_type ?? "conversation");
+      if (effectiveThreadType !== "task" && (requestedTaskStatus !== undefined || requestedCompletionNote !== undefined || requestedAssigneeAgentId !== undefined || requestedAssigneeUserId !== undefined || requestedPriority !== undefined)) {
         return reply.status(400).send({ ok: false, error: "task fields require thread_type=task" });
       }
 
@@ -890,6 +895,21 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
         if (!isManager || !requestedSubject) return reply.status(403).send({ ok: false, error: "only the thread creator or owner can update subject" });
         values.push(requestedSubject);
         sets.push(`subject = $${values.length}`);
+      }
+      if (requestedThreadType !== undefined) {
+        if (!isManager) return reply.status(403).send({ ok: false, error: "only the thread creator or owner can update thread_type" });
+        values.push(requestedThreadType);
+        sets.push(`thread_type = $${values.length}`);
+        if (requestedThreadType === "task" && thread.thread_type !== "task") {
+          if (requestedPriority === undefined && !thread.priority) {
+            values.push("normal");
+            sets.push(`priority = $${values.length}`);
+          }
+          if (requestedTaskStatus === undefined && !thread.task_status) {
+            values.push("proposed");
+            sets.push(`task_status = $${values.length}`);
+          }
+        }
       }
       if (requestedStatus !== undefined) {
         if (!isManager) return reply.status(403).send({ ok: false, error: "only the thread creator or owner can update status" });

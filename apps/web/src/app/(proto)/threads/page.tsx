@@ -41,6 +41,20 @@ function relativeTime(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
+const THREAD_TYPE_OPTIONS = [
+  { value: "conversation", label: "Conversation" },
+  { value: "feature", label: "Feature" },
+  { value: "level_test", label: "Level test" },
+  { value: "dm", label: "DM" },
+  { value: "task", label: "Task" },
+] as const;
+
+type ThreadTypeValue = (typeof THREAD_TYPE_OPTIONS)[number]["value"];
+
+function formatThreadType(type: Thread["thread_type"]): string {
+  return THREAD_TYPE_OPTIONS.find((option) => option.value === type)?.label ?? "Conversation";
+}
+
 const SLUG_COLORS: Record<string, string> = {};
 const PALETTE = [
   "bg-violet-500", "bg-sky-500", "bg-emerald-500",
@@ -562,6 +576,11 @@ export default function ThreadsPage() {
   const voiceBaseDraftRef = React.useRef("");
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
 
+  const reconcileThread = React.useCallback((thread: Thread) => {
+    setThreads((prev) => prev.map((item) => (item.thread_id === thread.thread_id ? { ...item, ...thread } : item)));
+    setSelected((prev) => (prev?.thread_id === thread.thread_id ? { ...prev, ...thread } : prev));
+  }, []);
+
   React.useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const tid = params.get("thread_id");
@@ -759,6 +778,13 @@ export default function ThreadsPage() {
             return;
           }
 
+          if (type === "thread.updated") {
+            const thread = data?.thread as Thread | undefined;
+            if (!thread?.thread_id) return;
+            reconcileThread(thread);
+            return;
+          }
+
           if (type === "thread.created" || type === "thread.status_changed" || type === "thread.deleted") {
             loadThreads(projectId, threadStatusFilter, { silent: true, search: debouncedThreadSearch });
           }
@@ -777,7 +803,7 @@ export default function ThreadsPage() {
       clearTimeout(retryTimeout);
       ws?.close();
     };
-  }, [selected?.thread_id, projectId, threadStatusFilter, loadThreads]);
+  }, [selected?.thread_id, projectId, threadStatusFilter, loadThreads, debouncedThreadSearch, reconcileThread]);
 
   const selectThread = React.useCallback(async (thread: Thread) => {
     const detail = await fetchThread(thread.thread_id);
@@ -997,7 +1023,7 @@ export default function ThreadsPage() {
     const updated = await updateThread(selected.thread_id, { subject: subjectDraft.trim() });
     setUpdatingThread(false);
     if (updated) {
-      setSelected(updated);
+      reconcileThread(updated);
       setEditingSubject(false);
       setToast({ tone: "success", message: "Subject updated." });
     } else {
@@ -1011,10 +1037,48 @@ export default function ThreadsPage() {
     const updated = await updateThread(selected.thread_id, patch);
     setUpdatingThread(false);
     if (updated) {
-      setSelected(updated);
+      reconcileThread(updated);
     } else {
       setToast({ tone: "error", message: "Failed to update thread." });
     }
+  };
+
+  const handleThreadTypeChange = async (nextType: ThreadTypeValue) => {
+    if (!selected || updatingThread) return;
+    const currentType = selected.thread_type ?? "conversation";
+    if (currentType === nextType) return;
+
+    if (
+      nextType === "task" &&
+      currentType !== "task" &&
+      !window.confirm("Switch this thread to a task? Missing task fields will default to Proposed status and Normal priority.")
+    ) {
+      return;
+    }
+
+    const previousSelected = selected;
+    const previousThreads = threads;
+    const optimisticThread: Thread = {
+      ...selected,
+      thread_type: nextType,
+      task_status: nextType === "task" ? (selected.task_status ?? "proposed") : selected.task_status,
+      priority: nextType === "task" ? (selected.priority ?? "normal") : selected.priority,
+    };
+
+    reconcileThread(optimisticThread);
+    setUpdatingThread(true);
+    const updated = await updateThread(selected.thread_id, { thread_type: nextType });
+    setUpdatingThread(false);
+
+    if (updated) {
+      reconcileThread(updated);
+      setToast({ tone: "success", message: "Thread type updated." });
+      return;
+    }
+
+    setThreads(previousThreads);
+    setSelected(previousSelected);
+    setToast({ tone: "error", message: "Failed to update thread type." });
   };
 
   return (
@@ -1332,6 +1396,28 @@ export default function ThreadsPage() {
                   )}
                 </div>
                 <div className="flex shrink-0 items-center gap-1.5">
+                  {threadRole === "creator" || threadRole === "owner" ? (
+                    <select
+                      value={selected.thread_type ?? "conversation"}
+                      disabled={updatingThread}
+                      onChange={(e) => handleThreadTypeChange(e.target.value as ThreadTypeValue)}
+                      title="Thread type"
+                      className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-500 outline-none hover:border-violet-400 hover:text-violet-600 focus:border-violet-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400 disabled:opacity-40"
+                    >
+                      {THREAD_TYPE_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <span
+                      title="Thread type"
+                      className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-xs font-medium text-slate-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400"
+                    >
+                      {formatThreadType(selected.thread_type)}
+                    </span>
+                  )}
                   {selected.status !== "closed" && (
                     <button
                       onClick={() => handleSetStatus("closed")}
@@ -1464,4 +1550,3 @@ export default function ThreadsPage() {
     </>
   );
 }
-
