@@ -85,11 +85,12 @@ export async function registerInvites(server: FastifyInstance, db: pg.Pool) {
         return reply.status(403).send({ ok: false, error: "this invite is for a different email" });
       }
 
+      const normalizedRole = inv.role === "member" ? "contributor" : inv.role;
       await db.query(
         `insert into project_users (project_id, user_id, role, invited_by)
          values ($1, $2, $3, $4)
          on conflict (project_id, user_id) do update set role = excluded.role`,
-        [inv.project_id, user.userId, inv.role, inv.invited_by]
+        [inv.project_id, user.userId, normalizedRole, inv.invited_by]
       );
 
       await db.query(

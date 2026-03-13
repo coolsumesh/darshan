@@ -2,11 +2,17 @@
 
 import * as React from "react";
 import Link from "next/link";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import {
   fetchThreads,
+  fetchThread,
+  fetchThreadParticipants,
   fetchThreadMessages,
+  fetchThreadSla,
   fetchProjects,
   fetchTeam,
+  fetchAgentsDirectory,
   sendThreadMessage,
   setThreadStatus,
   createThread,
@@ -15,6 +21,10 @@ import {
   type ThreadMessage,
   type ThreadAttachment,
   type Project,
+  type ThreadParticipant,
+  type ThreadAccessRole,
+  type ThreadReplyPolicy,
+  type ThreadSlaState,
 } from "@/lib/api";
 import { ChevronDown, Inbox, Send, RefreshCw, CheckCircle, ArchiveIcon, Plus, X, Paperclip } from "lucide-react";
 
@@ -30,6 +40,20 @@ function relativeTime(iso: string): string {
   const d = Math.floor(h / 24);
   if (d < 7)  return `${d}d ago`;
   return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+const THREAD_TYPE_OPTIONS = [
+  { value: "conversation", label: "Conversation" },
+  { value: "feature", label: "Feature" },
+  { value: "level_test", label: "Level test" },
+  { value: "dm", label: "DM" },
+  { value: "task", label: "Task" },
+] as const;
+
+type ThreadTypeValue = (typeof THREAD_TYPE_OPTIONS)[number]["value"];
+
+function formatThreadType(type: Thread["thread_type"]): string {
+  return THREAD_TYPE_OPTIONS.find((option) => option.value === type)?.label ?? "Conversation";
 }
 
 const SLUG_COLORS: Record<string, string> = {};
@@ -50,6 +74,123 @@ function Avatar({ slug, size = "md" }: { slug: string; size?: "sm" | "md" }) {
   return (
     <div className={`${dim} ${slugColor(slug)} flex shrink-0 items-center justify-center rounded-full font-bold text-white`}>
       {slug.slice(0, 2).toUpperCase()}
+    </div>
+  );
+}
+
+function getMentionContext(text: string, cursor: number) {
+  const uptoCursor = text.slice(0, cursor);
+  const match = uptoCursor.match(/(?:^|\s)@([A-Za-z0-9_-]*)$/);
+  if (!match) return null;
+  const atIndex = uptoCursor.lastIndexOf("@");
+  return { query: match[1] ?? "", start: atIndex, end: cursor };
+}
+
+function highlightMentions(text: string, knownSlugs: Set<string>): React.ReactNode {
+  const parts: React.ReactNode[] = [];
+  const regex = /@([A-Za-z0-9_-]+)/g;
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = regex.exec(text))) {
+    if (m.index > last) parts.push(text.slice(last, m.index));
+    const slug = m[1];
+    const known = knownSlugs.has(slug.toUpperCase());
+    parts.push(
+      <span
+        key={`m${m.index}`}
+        className={known
+          ? "rounded bg-violet-100 px-1 py-0.5 font-semibold text-violet-700 dark:bg-violet-900/40 dark:text-violet-300"
+          : "rounded bg-slate-100 px-1 py-0.5 font-semibold text-slate-500 dark:bg-slate-700 dark:text-slate-300"}
+      >
+        @{slug}
+      </span>
+    );
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) parts.push(text.slice(last));
+  return parts.length === 0 ? text : parts.length === 1 ? parts[0] : <>{parts}</>;
+}
+
+function processChildren(children: React.ReactNode, knownSlugs: Set<string>): React.ReactNode {
+  return React.Children.map(children, child =>
+    typeof child === "string" ? highlightMentions(child, knownSlugs) : child
+  );
+}
+
+function MarkdownMessage({ body, knownSlugs, isMe }: { body: string; knownSlugs: Set<string>; isMe: boolean }) {
+  const mc = (base: string) => `${base} ${isMe ? "[&_code]:bg-white/20 [&_pre]:bg-white/20" : ""}`;
+  return (
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm]}
+      components={{
+        p:          ({ children }) => <p className="my-0.5 leading-relaxed">{processChildren(children, knownSlugs)}</p>,
+        li:         ({ children }) => <li className="my-0.5">{processChildren(children, knownSlugs)}</li>,
+        ul:         ({ children }) => <ul className="my-1 list-disc space-y-0.5 pl-5">{children}</ul>,
+        ol:         ({ children }) => <ol className="my-1 list-decimal space-y-0.5 pl-5">{children}</ol>,
+        h1:         ({ children }) => <h1 className="mt-2 mb-1 text-base font-bold">{processChildren(children, knownSlugs)}</h1>,
+        h2:         ({ children }) => <h2 className="mt-2 mb-1 text-sm font-bold">{processChildren(children, knownSlugs)}</h2>,
+        h3:         ({ children }) => <h3 className="mt-1 mb-0.5 text-sm font-semibold">{processChildren(children, knownSlugs)}</h3>,
+        strong:     ({ children }) => <strong className="font-semibold">{children}</strong>,
+        em:         ({ children }) => <em className="italic">{children}</em>,
+        blockquote: ({ children }) => <blockquote className="my-1 border-l-2 border-current pl-3 opacity-70 italic">{children}</blockquote>,
+        code:       ({ children, className }) => {
+          const isBlock = className?.includes("language-");
+          return isBlock
+            ? <code className={mc("block rounded px-2 py-1 font-mono text-xs bg-black/10 dark:bg-white/10 whitespace-pre-wrap")}>{children}</code>
+            : <code className={mc("rounded px-1 py-0.5 font-mono text-xs bg-black/10 dark:bg-white/10")}>{children}</code>;
+        },
+        pre:        ({ children }) => <pre className={mc("my-1 overflow-x-auto rounded bg-black/10 dark:bg-white/10 p-2 text-xs")}>{children}</pre>,
+        input:      ({ checked }) => <input type="checkbox" checked={!!checked} readOnly className="mr-1.5 mt-0.5 align-middle accent-violet-500" />,
+        a:          ({ href, children }) => <a href={href} target="_blank" rel="noopener noreferrer" className="underline opacity-80 hover:opacity-100">{children}</a>,
+      }}
+    >
+      {body}
+    </ReactMarkdown>
+  );
+}
+
+// ── Completion note inline editor ────────────────────────────────────────────
+
+function CompletionNote({ value, onSave, disabled }: { value: string; onSave: (v: string) => void; disabled?: boolean }) {
+  const [editing, setEditing] = React.useState(false);
+  const [draft, setDraft] = React.useState(value);
+
+  React.useEffect(() => { if (!editing) setDraft(value); }, [value, editing]);
+
+  if (!editing) {
+    return (
+      <button
+        onClick={() => { setDraft(value); setEditing(true); }}
+        className="flex items-center gap-1 text-[11px] text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+      >
+        <svg className="h-3 w-3 shrink-0" viewBox="0 0 16 16" fill="currentColor"><path d="M11.013 1.427a1.75 1.75 0 0 1 2.474 0l1.086 1.086a1.75 1.75 0 0 1 0 2.474l-8.61 8.61c-.21.21-.47.364-.756.445l-3.251.93a.75.75 0 0 1-.927-.928l.929-3.25c.081-.286.235-.547.445-.758l8.61-8.61zm1.414 1.06a.25.25 0 0 0-.354 0L10.811 3.75l1.439 1.44 1.263-1.263a.25.25 0 0 0 0-.354l-1.086-1.086zM11.189 6.25 9.75 4.81l-6.286 6.287a.25.25 0 0 0-.064.108l-.558 1.953 1.953-.558a.25.25 0 0 0 .108-.064z"/></svg>
+        {value ? <span className="truncate max-w-xs italic">{value}</span> : <span>Add completion note…</span>}
+      </button>
+    );
+  }
+
+  return (
+    <div className="flex items-start gap-1.5">
+      <textarea
+        autoFocus
+        rows={2}
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") setEditing(false);
+          if (e.key === "Enter" && e.metaKey) { onSave(draft); setEditing(false); }
+        }}
+        placeholder="Completion note (Cmd+Enter to save)…"
+        className="flex-1 resize-none rounded-lg border border-violet-400 bg-white px-2 py-1 text-xs text-slate-800 outline-none focus:ring-1 focus:ring-violet-400 dark:bg-slate-900 dark:text-slate-100"
+      />
+      <div className="flex flex-col gap-1">
+        <button
+          onClick={() => { onSave(draft); setEditing(false); }}
+          disabled={disabled}
+          className="rounded px-2 py-0.5 text-[11px] font-medium bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-40"
+        >Save</button>
+        <button onClick={() => setEditing(false)} className="rounded px-2 py-0.5 text-[11px] text-slate-400 hover:text-slate-600">Cancel</button>
+      </div>
     </div>
   );
 }
@@ -99,6 +240,21 @@ function ThreadRow({
   );
 }
 
+function formatTaskStatus(status: Thread["task_status"]): string {
+  if (!status) return "No task status";
+  if (status === "in-progress") return "In Progress";
+  return status.charAt(0).toUpperCase() + status.slice(1);
+}
+
+function formatCountdown(targetIso: string | null, nowMs: number): string {
+  if (!targetIso) return "--:--";
+  const diff = Math.max(0, new Date(targetIso).getTime() - nowMs);
+  const totalSeconds = Math.floor(diff / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
+
 // ── Message bubble ────────────────────────────────────────────────────────────
 
 function attachmentUrl(url: string): string {
@@ -120,6 +276,9 @@ function MessageBubble({ msg, isMe }: { msg: ThreadMessage; isMe: boolean }) {
             </span>
           )}
           <span className="text-[10px] text-slate-400">{relativeTime(msg.sent_at)}</span>
+          <span className="text-[10px] font-mono text-slate-300 dark:text-slate-600 select-all" title={msg.message_id}>
+            {msg.message_id.slice(0, 8)}
+          </span>
         </div>
         <div
           className={`rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
@@ -154,25 +313,65 @@ function MessageBubble({ msg, isMe }: { msg: ThreadMessage; isMe: boolean }) {
 
 // ── New Thread Modal ──────────────────────────────────────────────────────────
 
+type ParticipantOption = {
+  id: string;
+  name: string;
+  slug: string;
+};
+
+function Toast({
+  tone,
+  message,
+}: {
+  tone: "success" | "error";
+  message: string;
+}) {
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className={`fixed right-6 top-20 z-20 rounded-xl border px-4 py-3 text-sm shadow-2xl ${
+        tone === "success"
+          ? "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-300"
+          : "border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/40 dark:text-rose-300"
+      }`}
+    >
+      {message}
+    </div>
+  );
+}
+
 function NewThreadModal({
   projects,
   defaultProjectId,
   onClose,
   onCreate,
+  initialMode = "thread",
 }: {
   projects: Project[];
   defaultProjectId: string | null;
   onClose: () => void;
   onCreate: (thread: Thread) => void;
+  initialMode?: "thread" | "dm";
 }) {
+  const [mode, setMode] = React.useState<"thread" | "dm">(initialMode);
+
+  // Thread mode state
   const [subject, setSubject] = React.useState("");
   const [projectId, setProjectId] = React.useState(defaultProjectId ?? projects[0]?.id ?? "");
   const [agents, setAgents] = React.useState<{ agentId: string; agentName: string }[]>([]);
-  const [selected, setSelected] = React.useState<Set<string>>(new Set());
+  const [selectedParticipants, setSelectedParticipants] = React.useState<Set<string>>(new Set());
+
+  // DM mode state
+  const [dmProjectId, setDmProjectId] = React.useState(defaultProjectId ?? projects[0]?.id ?? "");
+  const [dmAgents, setDmAgents] = React.useState<{ agentId: string; agentName: string }[]>([]);
+  const [dmRecipientId, setDmRecipientId] = React.useState("");
+  const [dmBody, setDmBody] = React.useState("");
+
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState("");
 
-  // Load agents when project changes
+  // Load agents for thread mode
   React.useEffect(() => {
     if (!projectId) return;
     fetchTeam(projectId).then((team) => {
@@ -180,80 +379,155 @@ function NewThreadModal({
     });
   }, [projectId]);
 
-  const toggle = (id: string) =>
-    setSelected((prev) => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s; });
+  // Load agents for DM mode
+  React.useEffect(() => {
+    if (!dmProjectId) return;
+    fetchTeam(dmProjectId).then((team) => {
+      const list = team.map((m) => ({ agentId: m.agentId, agentName: m.agent?.name ?? m.agentId }));
+      setDmAgents(list);
+      if (!dmRecipientId && list[0]) setDmRecipientId(list[0].agentId);
+    });
+  }, [dmProjectId]); // eslint-disable-line
 
-  const handleCreate = async () => {
+  const toggle = (id: string) =>
+    setSelectedParticipants((prev) => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s; });
+
+  const handleCreateThread = async () => {
     if (!subject.trim()) { setError("Subject is required"); return; }
     if (!projectId)       { setError("Select a project");    return; }
     setSaving(true); setError("");
-    const thread = await createThread(subject.trim(), projectId, Array.from(selected).map(String));
+    const thread = await createThread(subject.trim(), projectId, Array.from(selectedParticipants));
     setSaving(false);
     if (!thread) { setError("Failed to create thread"); return; }
     onCreate(thread);
   };
 
+  const handleSendDm = async () => {
+    if (!dmRecipientId) { setError("Select a recipient"); return; }
+    if (!dmBody.trim()) { setError("Message cannot be empty"); return; }
+    if (!dmProjectId)   { setError("Select a project"); return; }
+    setSaving(true); setError("");
+    const result = await sendDirectMessage(dmRecipientId, dmBody.trim(), dmProjectId);
+    setSaving(false);
+    if (!result) { setError("Failed to send message"); return; }
+    // Fetch the created/existing thread and open it
+    const detail = await import("@/lib/api").then(m => m.fetchThread(result.thread_id));
+    if (detail?.thread) onCreate(detail.thread);
+    else onClose();
+  };
+
+  const tabCls = (t: "thread" | "dm") =>
+    `flex-1 py-2 text-xs font-semibold transition rounded-lg ${
+      mode === t
+        ? "bg-violet-600 text-white"
+        : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
+    }`;
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+    <div className="fixed inset-0 z-20 flex items-center justify-center bg-black/40 backdrop-blur-sm">
       <div className="w-full max-w-md rounded-2xl bg-white shadow-2xl dark:bg-slate-900 ring-1 ring-slate-200 dark:ring-slate-700">
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 px-5 py-4">
-          <span className="text-sm font-semibold text-slate-800 dark:text-slate-100">New Thread</span>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300">
+        <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 px-5 py-3">
+          <div className="flex gap-1 rounded-xl bg-slate-100 dark:bg-slate-800 p-1">
+            <button className={tabCls("thread")} onClick={() => { setMode("thread"); setError(""); }}>
+              New Thread
+            </button>
+            <button className={tabCls("dm")} onClick={() => { setMode("dm"); setError(""); }}>
+              Direct Message
+            </button>
+          </div>
+          <button onClick={onClose} className="ml-3 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300">
             <X className="h-4 w-4" />
           </button>
         </div>
 
         {/* Body */}
         <div className="space-y-4 px-5 py-4">
-          {/* Subject */}
-          <div>
-            <label className="mb-1 block text-xs font-medium text-slate-500 dark:text-slate-400">Subject</label>
-            <input
-              autoFocus
-              value={subject}
-              onChange={(e) => setSubject(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleCreate()}
-              placeholder="What is this thread about?"
-              className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800 placeholder-slate-400 outline-none focus:border-violet-400 focus:ring-1 focus:ring-violet-400 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
-            />
-          </div>
-
-          {/* Project */}
-          <div>
-            <label className="mb-1 block text-xs font-medium text-slate-500 dark:text-slate-400">Project</label>
-            <select
-              value={projectId}
-              onChange={(e) => setProjectId(e.target.value)}
-              className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800 outline-none focus:border-violet-400 focus:ring-1 focus:ring-violet-400 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
-            >
-              {projects.map((p) => (
-                <option key={p.id} value={p.id}>{p.name}</option>
-              ))}
-            </select>
-          </div>
-
-          {/* Participants */}
-          {agents.length > 0 && (
-            <div>
-              <label className="mb-1.5 block text-xs font-medium text-slate-500 dark:text-slate-400">
-                Participants <span className="text-slate-400">(optional)</span>
-              </label>
-              <div className="space-y-1.5 max-h-40 overflow-y-auto">
-                {agents.map((a) => (
-                  <label key={a.agentId} className="flex items-center gap-2.5 cursor-pointer rounded-lg px-2 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800">
-                    <input
-                      type="checkbox"
-                      checked={selected.has(a.agentId)}
-                      onChange={() => toggle(a.agentId)}
-                      className="accent-violet-600"
-                    />
-                    <Avatar slug={a.agentName.toUpperCase().slice(0, 8)} size="sm" />
-                    <span className="text-sm text-slate-700 dark:text-slate-300">{a.agentName}</span>
-                  </label>
-                ))}
+          {mode === "thread" ? (
+            <>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-slate-500 dark:text-slate-400">Subject</label>
+                <input
+                  autoFocus
+                  value={subject}
+                  onChange={(e) => setSubject(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleCreateThread()}
+                  placeholder="What is this thread about?"
+                  className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800 placeholder-slate-400 outline-none focus:border-violet-400 focus:ring-1 focus:ring-violet-400 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+                />
               </div>
-            </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-slate-500 dark:text-slate-400">Project</label>
+                <select
+                  value={projectId}
+                  onChange={(e) => setProjectId(e.target.value)}
+                  className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800 outline-none focus:border-violet-400 focus:ring-1 focus:ring-violet-400 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+                >
+                  {projects.map((p) => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
+              </div>
+              {agents.length > 0 && (
+                <div>
+                  <label className="mb-1.5 block text-xs font-medium text-slate-500 dark:text-slate-400">
+                    Participants <span className="text-slate-400">(optional)</span>
+                  </label>
+                  <div className="space-y-1.5 max-h-40 overflow-y-auto">
+                    {agents.map((a) => (
+                      <label key={a.agentId} className="flex items-center gap-2.5 cursor-pointer rounded-lg px-2 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800">
+                        <input type="checkbox" checked={selectedParticipants.has(a.agentId)} onChange={() => toggle(a.agentId)} className="accent-violet-600" />
+                        <Avatar slug={a.agentName.toUpperCase().slice(0, 8)} size="sm" />
+                        <span className="text-sm text-slate-700 dark:text-slate-300">{a.agentName}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-slate-500 dark:text-slate-400">Project</label>
+                <select
+                  value={dmProjectId}
+                  onChange={(e) => setDmProjectId(e.target.value)}
+                  className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800 outline-none focus:border-violet-400 focus:ring-1 focus:ring-violet-400 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+                >
+                  {projects.map((p) => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-slate-500 dark:text-slate-400">To</label>
+                {dmAgents.length === 0 ? (
+                  <p className="text-xs text-slate-400">No agents in this project</p>
+                ) : (
+                  <div className="space-y-1.5 max-h-44 overflow-y-auto rounded-lg border border-slate-200 dark:border-slate-700 p-1">
+                    {dmAgents.map((a) => (
+                      <label key={a.agentId} className={`flex items-center gap-2.5 cursor-pointer rounded-lg px-2 py-1.5 transition ${dmRecipientId === a.agentId ? "bg-violet-50 dark:bg-violet-950/30" : "hover:bg-slate-50 dark:hover:bg-slate-800"}`}>
+                        <input type="radio" name="dm-recipient" value={a.agentId} checked={dmRecipientId === a.agentId} onChange={() => setDmRecipientId(a.agentId)} className="accent-violet-600" />
+                        <Avatar slug={a.agentName.toUpperCase().slice(0, 8)} size="sm" />
+                        <span className="text-sm font-medium text-slate-700 dark:text-slate-300">{a.agentName}</span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-slate-500 dark:text-slate-400">Message</label>
+                <textarea
+                  autoFocus={mode === "dm"}
+                  rows={3}
+                  value={dmBody}
+                  onChange={(e) => setDmBody(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter" && e.metaKey) handleSendDm(); }}
+                  placeholder="Type your message… (Cmd+Enter to send)"
+                  className="w-full resize-none rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800 placeholder-slate-400 outline-none focus:border-violet-400 focus:ring-1 focus:ring-violet-400 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+                />
+              </div>
+            </>
           )}
 
           {error && <p className="text-xs text-rose-500">{error}</p>}
@@ -261,19 +535,27 @@ function NewThreadModal({
 
         {/* Footer */}
         <div className="flex justify-end gap-2 border-t border-slate-200 dark:border-slate-800 px-5 py-3">
-          <button
-            onClick={onClose}
-            className="rounded-lg px-3 py-1.5 text-sm text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
-          >
+          <button onClick={onClose} className="rounded-lg px-3 py-1.5 text-sm text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800">
             Cancel
           </button>
-          <button
-            onClick={handleCreate}
-            disabled={saving || !subject.trim()}
-            className="rounded-lg bg-violet-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-violet-700 disabled:opacity-40"
-          >
-            {saving ? "Creating…" : "Create Thread"}
-          </button>
+          {mode === "thread" ? (
+            <button
+              onClick={handleCreateThread}
+              disabled={saving || !subject.trim()}
+              className="rounded-lg bg-violet-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-violet-700 disabled:opacity-40"
+            >
+              {saving ? "Creating…" : "Create Thread"}
+            </button>
+          ) : (
+            <button
+              onClick={handleSendDm}
+              disabled={saving || !dmBody.trim() || !dmRecipientId}
+              className="flex items-center gap-1.5 rounded-lg bg-violet-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-violet-700 disabled:opacity-40"
+            >
+              <Send className="h-3.5 w-3.5" />
+              {saving ? "Sending…" : "Send"}
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -283,6 +565,7 @@ function NewThreadModal({
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function ThreadsPage() {
+  const [deepLinkThreadId, setDeepLinkThreadId] = React.useState<string | null>(null);
   const [threads, setThreads] = React.useState<Thread[]>([]);
   const [messages, setMessages] = React.useState<ThreadMessage[]>([]);
   const [selected, setSelected] = React.useState<Thread | null>(null);
@@ -296,33 +579,81 @@ export default function ThreadsPage() {
   const [projectId, setProjectId] = React.useState<string | null>(null);
   const [dropdownOpen, setDropdownOpen] = React.useState(false);
   const [threadStatusFilter, setThreadStatusFilter] = React.useState<"open" | "closed">("open");
+  const [threadSearch, setThreadSearch] = React.useState("");
+  const [debouncedThreadSearch, setDebouncedThreadSearch] = React.useState("");
   const [closing, setClosing] = React.useState(false);
   const [composeOpen, setComposeOpen] = React.useState(false);
+  const [threadParticipants, setThreadParticipants] = React.useState<ThreadParticipant[]>([]);
+  const [threadRole, setThreadRole] = React.useState<ThreadAccessRole | null>(null);
+  const [participantOptions, setParticipantOptions] = React.useState<ParticipantOption[]>([]);
+  const [participantQuery, setParticipantQuery] = React.useState("");
+  const [selectedParticipantId, setSelectedParticipantId] = React.useState("");
+  const [participantOptionsLoading, setParticipantOptionsLoading] = React.useState(false);
+  const [addingParticipant, setAddingParticipant] = React.useState(false);
+  const [participantFeedback, setParticipantFeedback] = React.useState<{ tone: "success" | "error"; message: string } | null>(null);
+  const [addParticipantOpen, setAddParticipantOpen] = React.useState(false);
+  const addParticipantRef = React.useRef<HTMLDivElement>(null);
+  const [editingSubject, setEditingSubject] = React.useState(false);
+  const [subjectDraft, setSubjectDraft] = React.useState("");
+  const [updatingThread, setUpdatingThread] = React.useState(false);
+  const [toast, setToast] = React.useState<{ tone: "success" | "error"; message: string } | null>(null);
+  const [mentionSlugs, setMentionSlugs] = React.useState<string[]>([]);
+  const [mentionOpen, setMentionOpen] = React.useState(false);
+  const [mentionIndex, setMentionIndex] = React.useState(0);
+  const [mentionCtx, setMentionCtx] = React.useState<{ query: string; start: number; end: number } | null>(null);
+  const [threadReplyPolicy, setThreadReplyPolicy] = React.useState<ThreadReplyPolicy | null>(null);
+  const [threadSlaState, setThreadSlaState] = React.useState<ThreadSlaState | null>(null);
+  const [countdownNow, setCountdownNow] = React.useState(() => Date.now());
   const bottomRef = React.useRef<HTMLDivElement>(null);
+  const recognitionRef = React.useRef<any>(null);
+  const voiceBaseDraftRef = React.useRef("");
+  const textareaRef = React.useRef<HTMLTextAreaElement>(null);
+
+  const reconcileThread = React.useCallback((thread: Thread) => {
+    setThreads((prev) => prev.map((item) => (item.thread_id === thread.thread_id ? { ...item, ...thread } : item)));
+    setSelected((prev) => (prev?.thread_id === thread.thread_id ? { ...prev, ...thread } : prev));
+  }, []);
+
+  React.useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const tid = params.get("thread_id");
+    setDeepLinkThreadId(tid && tid.trim() ? tid.trim() : null);
+  }, []);
 
   // Load projects once
   React.useEffect(() => {
     fetchProjects().then(setProjects);
   }, []);
 
+  React.useEffect(() => {
+    const t = setTimeout(() => setDebouncedThreadSearch(threadSearch.trim()), 250);
+    return () => clearTimeout(t);
+  }, [threadSearch]);
+
+  React.useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 2500);
+    return () => clearTimeout(t);
+  }, [toast]);
+
   // Load thread list
   const loadThreads = React.useCallback(async (
     pid?: string | null,
     statusFilter?: "open" | "closed",
-    opts?: { silent?: boolean }
+    opts?: { silent?: boolean; search?: string }
   ) => {
     const silent = opts?.silent ?? false;
     if (!silent) setLoading(true);
 
     const s = statusFilter ?? threadStatusFilter;
-    const data = await fetchThreads(pid ?? projectId, s);
+    const data = await fetchThreads(pid ?? projectId, s, opts?.search ?? debouncedThreadSearch);
     setThreads(data);
 
     // Load last message preview for each thread
     const previewMap: Record<string, { text: string; time: string }> = {};
     await Promise.all(
       data.map(async (t) => {
-        const msgs = await fetchThreadMessages(t.thread_id);
+        const msgs = await fetchThreadMessages(t.thread_id, 20);
         const last = msgs.filter((m) => m.type === "message").at(-1);
         previewMap[t.thread_id] = {
           text: last ? last.body.slice(0, 80) : "",
@@ -335,45 +666,222 @@ export default function ThreadsPage() {
     if (!silent) setLoading(false);
   }, []);
 
-  React.useEffect(() => { loadThreads(projectId, threadStatusFilter); }, [projectId, threadStatusFilter]); // eslint-disable-line
+  React.useEffect(() => { loadThreads(projectId, threadStatusFilter, { search: debouncedThreadSearch }); }, [projectId, threadStatusFilter, debouncedThreadSearch]); // eslint-disable-line
+
+  React.useEffect(() => {
+    const threadId = deepLinkThreadId?.trim();
+    if (!threadId) return;
+    if (selected?.thread_id === threadId) return;
+
+    const pickThread = async () => {
+      const existing = threads.find((t) => t.thread_id === threadId);
+      if (existing) {
+        const detail = await fetchThread(existing.thread_id);
+        if (!detail) return;
+        setSelected(detail.thread);
+        setThreadParticipants(detail.participants);
+        setThreadRole(detail.role);
+        const msgs = await fetchThreadMessages(existing.thread_id, 200);
+        setMessages(msgs);
+        return;
+      }
+
+      const direct = await fetchThread(threadId);
+      if (!direct) return;
+
+      setProjectId(direct.thread.project_id ?? null);
+      setThreadStatusFilter(direct.thread.status === "open" ? "open" : "closed");
+      setThreads((prev) => (prev.some((t) => t.thread_id === direct.thread.thread_id) ? prev : [direct.thread, ...prev]));
+      setSelected(direct.thread);
+      setThreadParticipants(direct.participants);
+      setThreadRole(direct.role);
+      const msgs = await fetchThreadMessages(direct.thread.thread_id, 200);
+      setMessages(msgs);
+    };
+
+    pickThread().catch(() => {});
+  }, [deepLinkThreadId, threads, selected?.thread_id]);
 
   const handleProjectChange = (pid: string | null) => {
     setProjectId(pid);
     setSelected(null);
     setMessages([]);
+    setThreadParticipants([]);
+    setThreadRole(null);
     setDropdownOpen(false);
   };
 
   // Load messages when thread selected
-  // Real-time message polling for the open thread (every 3s)
   React.useEffect(() => {
     if (!selected) return;
-    const interval = setInterval(async () => {
-      const msgs = await fetchThreadMessages(selected.thread_id);
-      setMessages((prev) => {
-        // Guard against transient fetch failures that return [] and cause visible flicker.
-        if (msgs.length === 0 && prev.length > 0) return prev;
-        // Only update if something changed (avoid unnecessary re-renders)
-        if (prev.length === msgs.length && prev.at(-1)?.message_id === msgs.at(-1)?.message_id) return prev;
-        bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-        return msgs;
-      });
-    }, 3000);
-    return () => clearInterval(interval);
+    fetchThreadMessages(selected.thread_id, 200).then(setMessages).catch(() => {});
   }, [selected?.thread_id]); // eslint-disable-line
 
-  // Real-time thread list refresh (every 10s — catches new threads + new preview messages)
   React.useEffect(() => {
-    const interval = setInterval(() => {
-      loadThreads(projectId, threadStatusFilter, { silent: true });
-    }, 10000);
-    return () => clearInterval(interval);
-  }, [projectId, threadStatusFilter]); // eslint-disable-line
+    if (!selected) {
+      setThreadReplyPolicy(null);
+      setThreadSlaState(null);
+      return;
+    }
+    fetchThreadSla(selected.thread_id)
+      .then((state) => {
+        setThreadReplyPolicy(state?.reply_policy ?? null);
+        setThreadSlaState(state?.sla_state ?? null);
+      })
+      .catch(() => {
+        setThreadReplyPolicy(null);
+        setThreadSlaState(null);
+      });
+  }, [selected?.thread_id]);
+
+  React.useEffect(() => {
+    if (!threadSlaState?.pickup_due_at && !threadSlaState?.progress_due_at) return;
+    const timer = window.setInterval(() => setCountdownNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [threadSlaState?.pickup_due_at, threadSlaState?.progress_due_at]);
+
+  React.useEffect(() => {
+    if (!selected) {
+      setThreadParticipants([]);
+      setThreadRole(null);
+      setParticipantOptions([]);
+      setParticipantQuery("");
+      setSelectedParticipantId("");
+      setParticipantFeedback(null);
+      setMentionSlugs([]);
+      return;
+    }
+
+    const activeParticipantSlugs = threadParticipants
+      .filter((participant) => !participant.removed_at)
+      .map((participant) => participant.participant_slug.toUpperCase());
+    const fromMessages = messages.map((m) => m.sender_slug.toUpperCase());
+    const fallback = Array.from(new Set([selected.created_slug.toUpperCase(), ...activeParticipantSlugs, ...fromMessages]));
+
+    if (!selected.project_id) {
+      setMentionSlugs(fallback);
+      return;
+    }
+
+    fetchTeam(selected.project_id)
+      .then((team) => {
+        const fromTeam = team.map((m) => (m.agent?.name ?? "").toUpperCase()).filter(Boolean);
+        const merged = Array.from(new Set([selected.created_slug.toUpperCase(), ...fromTeam, ...activeParticipantSlugs, ...fromMessages]));
+        setMentionSlugs(merged);
+      })
+      .catch(() => setMentionSlugs(fallback));
+  }, [selected?.thread_id, selected?.project_id, messages, threadParticipants]); // eslint-disable-line
+
+  React.useEffect(() => {
+    if (!selected) return;
+    const thread = selected;
+
+    let cancelled = false;
+    async function loadParticipantOptions() {
+      setParticipantOptionsLoading(true);
+      const options = thread.project_id
+        ? (await fetchTeam(thread.project_id)).map((member) => ({
+            id: member.agentId,
+            name: member.agent?.name ?? member.agentId,
+            slug: (member.agent?.name ?? member.agentId).toUpperCase().replace(/[^A-Z0-9]/g, "_"),
+          }))
+        : (await fetchAgentsDirectory()).map((agent) => ({
+            id: agent.id,
+            name: agent.name,
+            slug: agent.name.toUpperCase().replace(/[^A-Z0-9]/g, "_"),
+          }));
+
+      if (cancelled) return;
+      setParticipantOptions(Array.from(new Map(options.map((option) => [option.id, option])).values()));
+      setParticipantOptionsLoading(false);
+    }
+
+    loadParticipantOptions().catch(() => {
+      if (cancelled) return;
+      setParticipantOptions([]);
+      setParticipantOptionsLoading(false);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selected?.thread_id, selected?.project_id]);
+
+  // Push-based realtime updates (no polling fallback in UI)
+  React.useEffect(() => {
+    let ws: WebSocket | null = null;
+    let retryTimeout: ReturnType<typeof setTimeout>;
+
+    const connect = () => {
+      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+      ws = new WebSocket(`${protocol}//${window.location.host}/api/backend/ws`);
+
+      ws.onmessage = (e) => {
+        try {
+          const evt = JSON.parse(String(e.data));
+          const type = evt?.type as string | undefined;
+          const data = evt?.data as any;
+
+          if (type === "thread.message_created") {
+            const threadId = data?.thread_id as string | undefined;
+            const msg = data?.message as ThreadMessage | undefined;
+            if (!threadId || !msg) return;
+
+            if (selected && selected.thread_id === threadId) {
+              setMessages((prev) => prev.some((m) => m.message_id === msg.message_id) ? prev : [...prev, msg]);
+              fetchThreadSla(threadId)
+                .then((state) => {
+                  setThreadReplyPolicy(state?.reply_policy ?? null);
+                  setThreadSlaState(state?.sla_state ?? null);
+                })
+                .catch(() => {});
+            }
+            loadThreads(projectId, threadStatusFilter, { silent: true, search: debouncedThreadSearch });
+            return;
+          }
+
+          if (type === "thread.updated") {
+            const thread = data?.thread as Thread | undefined;
+            if (!thread?.thread_id) return;
+            reconcileThread(thread);
+            if (selected?.thread_id === thread.thread_id) {
+              fetchThreadSla(thread.thread_id)
+                .then((state) => {
+                  setThreadReplyPolicy(state?.reply_policy ?? null);
+                  setThreadSlaState(state?.sla_state ?? null);
+                })
+                .catch(() => {});
+            }
+            return;
+          }
+
+          if (type === "thread.created" || type === "thread.status_changed" || type === "thread.deleted") {
+            loadThreads(projectId, threadStatusFilter, { silent: true, search: debouncedThreadSearch });
+          }
+        } catch {
+          // Ignore malformed websocket events
+        }
+      };
+
+      ws.onclose = () => {
+        retryTimeout = setTimeout(connect, 3000);
+      };
+    };
+
+    connect();
+    return () => {
+      clearTimeout(retryTimeout);
+      ws?.close();
+    };
+  }, [selected?.thread_id, projectId, threadStatusFilter, loadThreads, debouncedThreadSearch, reconcileThread]);
 
   const selectThread = React.useCallback(async (thread: Thread) => {
-    setSelected(thread);
+    const detail = await fetchThread(thread.thread_id);
+    setSelected(detail?.thread ?? thread);
+    setThreadParticipants(detail?.participants ?? []);
+    setThreadRole(detail?.role ?? null);
     setMessages([]);
-    const msgs = await fetchThreadMessages(thread.thread_id);
+    const msgs = await fetchThreadMessages(thread.thread_id, 200);
     setMessages(msgs);
   }, []);
 
@@ -382,12 +890,36 @@ export default function ThreadsPage() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  const mentionSuggestions = React.useMemo(() => {
+    if (!mentionCtx) return [] as string[];
+    const q = mentionCtx.query.toUpperCase();
+    return mentionSlugs.filter((s) => s.startsWith(q)).slice(0, 8);
+  }, [mentionSlugs, mentionCtx]);
+
+  const applyMention = (slug: string) => {
+    if (!mentionCtx) return;
+    const before = draft.slice(0, mentionCtx.start + 1);
+    const after = draft.slice(mentionCtx.end);
+    const suffix = after.startsWith(" ") || after.length === 0 ? "" : " ";
+    const next = `${before}${slug}${suffix}${after}`;
+    setDraft(next);
+    setMentionOpen(false);
+    setMentionCtx(null);
+    setMentionIndex(0);
+    setTimeout(() => {
+      const pos = (before + slug + suffix).length;
+      textareaRef.current?.focus();
+      textareaRef.current?.setSelectionRange(pos, pos);
+    }, 0);
+  };
+
   const handleSend = async () => {
     if (!selected || sending || (!draft.trim() && draftAttachments.length === 0)) return;
     setSending(true);
     const msg = await sendThreadMessage(selected.thread_id, draft.trim(), draftAttachments);
     if (msg) {
-      setMessages((prev) => [...prev, msg]);
+      // Do not append optimistically here.
+      // WebSocket thread.message_created is the single source of truth and avoids duplicate flashes.
       setDraft("");
       setDraftAttachments([]);
     }
@@ -407,6 +939,56 @@ export default function ThreadsPage() {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); }
   };
 
+  React.useEffect(() => {
+    const supported = typeof window !== "undefined" && ("webkitSpeechRecognition" in window || "SpeechRecognition" in window);
+    setVoiceSupported(supported);
+
+    return () => {
+      try { recognitionRef.current?.stop?.(); } catch {}
+    };
+  }, []);
+
+  const handleVoiceInput = () => {
+    if (!voiceSupported || isListening) return;
+
+    const SpeechRecognitionCtor = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognitionCtor) return;
+
+    const recognition = new SpeechRecognitionCtor();
+    recognitionRef.current = recognition;
+    recognition.lang = "en-US";
+    recognition.interimResults = true;
+    recognition.continuous = false;
+    voiceBaseDraftRef.current = draft;
+
+    recognition.onstart = () => setIsListening(true);
+    recognition.onend = () => setIsListening(false);
+    recognition.onerror = () => setIsListening(false);
+
+    recognition.onresult = (event: any) => {
+      let finalText = "";
+      let interimText = "";
+
+      for (let i = 0; i < event.results.length; i++) {
+        const chunk = String(event.results[i]?.[0]?.transcript ?? "").trim();
+        if (!chunk) continue;
+        if (event.results[i].isFinal) finalText += `${finalText ? " " : ""}${chunk}`;
+        else interimText += `${interimText ? " " : ""}${chunk}`;
+      }
+
+      const spoken = `${finalText}${finalText && interimText ? " " : ""}${interimText}`.trim();
+      const base = voiceBaseDraftRef.current.trim();
+      setDraft(`${base}${base && spoken ? " " : ""}${spoken}`.trim());
+    };
+
+    recognition.start();
+  };
+
+  const stopVoiceInput = () => {
+    try { recognitionRef.current?.stop?.(); } catch {}
+    setIsListening(false);
+  };
+
   const handleSetStatus = async (newStatus: "open" | "closed" | "archived") => {
     if (!selected) return;
     setClosing(true);
@@ -417,24 +999,181 @@ export default function ThreadsPage() {
     setSelected(null);
   };
 
-  // Sort threads: most recent preview first
+  // Sort threads: most recent activity first (last_activity = COALESCE(last_message.sent_at, created_at))
   const sortedThreads = [...threads].sort((a, b) => {
-    const ta = previews[a.thread_id]?.time ?? a.created_at;
-    const tb = previews[b.thread_id]?.time ?? b.created_at;
-    return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+    const ta = a.last_activity ?? a.created_at;
+    const tb = b.last_activity ?? b.created_at;
+    return new Date(tb).getTime() - new Date(ta).getTime();
   });
 
   const handleThreadCreated = async (thread: Thread) => {
     setComposeOpen(false);
     // Reload list then open the new thread
-    await loadThreads(thread.project_id, threadStatusFilter);
-    setSelected(thread);
-    const msgs = await fetchThreadMessages(thread.thread_id);
+    await loadThreads(thread.project_id, threadStatusFilter, { search: debouncedThreadSearch });
+    const detail = await fetchThread(thread.thread_id);
+    setSelected(detail?.thread ?? thread);
+    setThreadParticipants(detail?.participants ?? []);
+    setThreadRole(detail?.role ?? null);
+    const msgs = await fetchThreadMessages(thread.thread_id, 200);
     setMessages(msgs);
+  };
+
+  const activeParticipants = React.useMemo(
+    () => threadParticipants.filter((participant) => !participant.removed_at),
+    [threadParticipants]
+  );
+  const canManageParticipants = threadRole === "creator" || threadRole === "owner";
+  const replyPolicySummary = React.useMemo(() => {
+    if (!threadReplyPolicy || threadReplyPolicy.mode !== "restricted") return null;
+    const names = threadReplyPolicy.allowed_participants.map((participant) => participant.participant_slug).join(", ");
+    const remaining = threadReplyPolicy.next_message_limit !== null ? ` · next ${threadReplyPolicy.next_message_limit}` : "";
+    return names ? `${names}${remaining}` : `Restricted${remaining}`;
+  }, [threadReplyPolicy]);
+  const slaSummary = React.useMemo(() => {
+    if (selected?.thread_type !== "task" || !threadSlaState) return null;
+    if (threadSlaState.stale_reason) {
+      return { label: "SLA missed", value: threadSlaState.stale_reason.replace("-", " ") };
+    }
+    if (threadSlaState.pickup_due_at) {
+      return { label: "Waiting pickup", value: formatCountdown(threadSlaState.pickup_due_at, countdownNow) };
+    }
+    if (threadSlaState.progress_due_at) {
+      return { label: "Next update due", value: formatCountdown(threadSlaState.progress_due_at, countdownNow) };
+    }
+    return null;
+  }, [selected?.thread_type, threadSlaState, countdownNow]);
+  const availableParticipantOptions = React.useMemo(() => {
+    const activeIds = new Set(activeParticipants.map((participant) => participant.participant_id));
+    const query = participantQuery.trim().toLowerCase();
+    return participantOptions.filter((option) => {
+      if (activeIds.has(option.id)) return false;
+      if (!query) return true;
+      return option.name.toLowerCase().includes(query) || option.slug.toLowerCase().includes(query);
+    });
+  }, [activeParticipants, participantOptions, participantQuery]);
+
+  React.useEffect(() => {
+    if (!availableParticipantOptions.some((option) => option.id === selectedParticipantId)) {
+      setSelectedParticipantId(availableParticipantOptions[0]?.id ?? "");
+    }
+  }, [availableParticipantOptions, selectedParticipantId]);
+
+  const handleAddParticipant = async (directId?: string) => {
+    const pid = directId ?? selectedParticipantId;
+    if (!selected || !pid || addingParticipant) return;
+    setAddingParticipant(true);
+    setParticipantFeedback(null);
+    const result = await addThreadParticipant(selected.thread_id, pid);
+    setAddParticipantOpen(false);
+    setParticipantQuery("");
+    setSelectedParticipantId("");
+    if (!result.ok) {
+      const message = result.status === 403
+        ? (result.error ?? "You do not have permission to add participants to this thread.")
+        : (result.error ?? "Failed to add participant.");
+      setParticipantFeedback({ tone: "error", message });
+      setToast({ tone: "error", message });
+      setAddingParticipant(false);
+      return;
+    }
+
+    const refreshedParticipants = await fetchThreadParticipants(selected.thread_id);
+    setThreadParticipants(refreshedParticipants);
+    setToast({ tone: "success", message: `${result.participant_slug ?? "Participant"} added.` });
+    setAddingParticipant(false);
+  };
+
+  // Close add-participant popover on outside click
+  React.useEffect(() => {
+    if (!addParticipantOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (addParticipantRef.current && !addParticipantRef.current.contains(e.target as Node)) {
+        setAddParticipantOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [addParticipantOpen]);
+
+  const handleRemoveParticipant = async (participantId: string, slug: string) => {
+    if (!selected) return;
+    const result = await removeThreadParticipant(selected.thread_id, participantId);
+    if (!result.ok) {
+      setToast({ tone: "error", message: result.error ?? "Failed to remove participant" });
+      return;
+    }
+    const refreshed = await fetchThreadParticipants(selected.thread_id);
+    setThreadParticipants(refreshed);
+    setToast({ tone: "success", message: `${slug} removed.` });
+  };
+
+  const handleSaveSubject = async () => {
+    if (!selected || !subjectDraft.trim() || updatingThread) return;
+    setUpdatingThread(true);
+    const updated = await updateThread(selected.thread_id, { subject: subjectDraft.trim() });
+    setUpdatingThread(false);
+    if (updated) {
+      reconcileThread(updated);
+      setEditingSubject(false);
+      setToast({ tone: "success", message: "Subject updated." });
+    } else {
+      setToast({ tone: "error", message: "Failed to update subject." });
+    }
+  };
+
+  const handleUpdateTaskField = async (patch: Parameters<typeof updateThread>[1]) => {
+    if (!selected || updatingThread) return;
+    setUpdatingThread(true);
+    const updated = await updateThread(selected.thread_id, patch);
+    setUpdatingThread(false);
+    if (updated) {
+      reconcileThread(updated);
+    } else {
+      setToast({ tone: "error", message: "Failed to update thread." });
+    }
+  };
+
+  const handleThreadTypeChange = async (nextType: ThreadTypeValue) => {
+    if (!selected || updatingThread) return;
+    const currentType = selected.thread_type ?? "conversation";
+    if (currentType === nextType) return;
+
+    if (
+      nextType === "task" &&
+      currentType !== "task" &&
+      !window.confirm("Switch this thread to a task? Missing task fields will default to Proposed status and Normal priority.")
+    ) {
+      return;
+    }
+
+    const previousSelected = selected;
+    const previousThreads = threads;
+    const optimisticThread: Thread = {
+      ...selected,
+      thread_type: nextType,
+      task_status: nextType === "task" ? (selected.task_status ?? "proposed") : selected.task_status,
+      priority: nextType === "task" ? (selected.priority ?? "normal") : selected.priority,
+    };
+
+    reconcileThread(optimisticThread);
+    setUpdatingThread(true);
+    const updated = await updateThread(selected.thread_id, { thread_type: nextType });
+    setUpdatingThread(false);
+
+    if (updated) {
+      reconcileThread(updated);
+      setToast({ tone: "success", message: "Thread type updated." });
+      return;
+    }
+
+    setThreads(previousThreads);
+    setSelected(previousSelected);
+    setToast({ tone: "error", message: "Failed to update thread type." });
   };
 
   return (
     <>
+    {toast && <Toast tone={toast.tone} message={toast.message} />}
     {composeOpen && (
       <NewThreadModal
         projects={projects}
@@ -443,7 +1182,7 @@ export default function ThreadsPage() {
         onCreate={handleThreadCreated}
       />
     )}
-    <div className="flex h-[calc(100vh-5rem)] overflow-hidden rounded-2xl ring-1 ring-line dark:ring-slate-800">
+    <div className="flex h-full overflow-hidden">
 
       {/* ── Left: thread list ─────────────────────────────────────────────── */}
       <div className="flex w-80 shrink-0 flex-col border-r border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
@@ -468,7 +1207,7 @@ export default function ThreadsPage() {
                 <Plus className="h-3.5 w-3.5" />
               </button>
               <button
-                onClick={() => loadThreads(projectId)}
+                onClick={() => loadThreads(projectId, threadStatusFilter, { search: debouncedThreadSearch })}
                 className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800"
               >
                 <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
@@ -511,6 +1250,16 @@ export default function ThreadsPage() {
               )}
             </div>
           )}
+        </div>
+
+        {/* Search */}
+        <div className="px-3 pb-2">
+          <input
+            value={threadSearch}
+            onChange={(e) => setThreadSearch(e.target.value)}
+            placeholder="Search threads…"
+            className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs text-slate-700 placeholder-slate-400 outline-none focus:border-violet-400 focus:ring-1 focus:ring-violet-400 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+          />
         </div>
 
         {/* Status tabs */}
@@ -584,34 +1333,217 @@ export default function ThreadsPage() {
             <div className="border-b border-slate-200 bg-white px-6 py-3 dark:border-slate-800 dark:bg-slate-950">
               <div className="flex items-start justify-between gap-2">
                 <div>
-                  <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-                    {selected.subject}
+                  <div className="flex items-center gap-2">
+                    {editingSubject ? (
+                      <div className="flex items-center gap-1.5 flex-1">
+                        <input
+                          autoFocus
+                          value={subjectDraft}
+                          onChange={(e) => setSubjectDraft(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") handleSaveSubject();
+                            if (e.key === "Escape") setEditingSubject(false);
+                          }}
+                          className="flex-1 rounded-lg border border-violet-400 bg-white px-2 py-0.5 text-sm font-semibold text-slate-900 outline-none focus:ring-1 focus:ring-violet-400 dark:bg-slate-900 dark:text-slate-100"
+                        />
+                        <button onClick={handleSaveSubject} disabled={updatingThread} className="rounded px-2 py-0.5 text-xs font-medium bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-40">Save</button>
+                        <button onClick={() => setEditingSubject(false)} className="rounded px-2 py-0.5 text-xs text-slate-400 hover:text-slate-600">Cancel</button>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                          {selected.subject}
+                        </div>
+                        {(threadRole === "creator" || threadRole === "owner") && (
+                          <button
+                            onClick={() => { setSubjectDraft(selected.subject); setEditingSubject(true); }}
+                            title="Edit subject"
+                            className="text-slate-300 hover:text-slate-500 dark:text-slate-600 dark:hover:text-slate-400"
+                          >
+                            <svg className="h-3 w-3" viewBox="0 0 16 16" fill="currentColor"><path d="M11.013 1.427a1.75 1.75 0 0 1 2.474 0l1.086 1.086a1.75 1.75 0 0 1 0 2.474l-8.61 8.61c-.21.21-.47.364-.756.445l-3.251.93a.75.75 0 0 1-.927-.928l.929-3.25c.081-.286.235-.547.445-.758l8.61-8.61zm1.414 1.06a.25.25 0 0 0-.354 0L10.811 3.75l1.439 1.44 1.263-1.263a.25.25 0 0 0 0-.354l-1.086-1.086zM11.189 6.25 9.75 4.81l-6.286 6.287a.25.25 0 0 0-.064.108l-.558 1.953 1.953-.558a.25.25 0 0 0 .108-.064z"/></svg>
+                          </button>
+                        )}
+                        <span className="font-mono text-[10px] text-slate-400" title={selected.thread_id}>
+                          {selected.thread_id.slice(0, 8)}
+                        </span>
+                      </>
+                    )}
                   </div>
                   <div className="mt-0.5 text-xs text-slate-400">
                     Started by {selected.created_slug} · {relativeTime(selected.created_at)}
                   </div>
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    {replyPolicySummary && (
+                      <span className="rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-semibold text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
+                        Active Responders · {replyPolicySummary}
+                      </span>
+                    )}
+                    {slaSummary && (
+                      <span
+                        className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
+                          threadSlaState?.stale_reason
+                            ? "bg-rose-100 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300"
+                            : "bg-sky-100 text-sky-700 dark:bg-sky-950/40 dark:text-sky-300"
+                        }`}
+                      >
+                        {slaSummary.label} · {slaSummary.value}
+                      </span>
+                    )}
+                    {activeParticipants.map((participant) => (
+                      <span
+                        key={participant.participant_id}
+                        className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 pl-2.5 pr-1.5 py-1 text-[11px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300"
+                      >
+                        <span className={`h-2 w-2 rounded-full ${slugColor(participant.participant_slug)}`} />
+                        {participant.participant_slug}
+                        {canManageParticipants && (
+                          <button
+                            onClick={() => handleRemoveParticipant(participant.participant_id, participant.participant_slug)}
+                            title={`Remove ${participant.participant_slug}`}
+                            className="ml-0.5 rounded-full p-0.5 text-slate-400 hover:bg-slate-200 hover:text-rose-500 dark:hover:bg-slate-700"
+                          >
+                            <X className="h-2.5 w-2.5" />
+                          </button>
+                        )}
+                      </span>
+                    ))}
+
+                    {/* Inline add-participant button + popover */}
+                    {canManageParticipants && (
+                      <div ref={addParticipantRef} className="relative">
+                        <button
+                          onClick={() => setAddParticipantOpen(v => !v)}
+                          title="Add participant"
+                          className="inline-flex items-center gap-1 rounded-full border border-dashed border-slate-300 px-2.5 py-1 text-[11px] font-medium text-slate-400 transition hover:border-violet-400 hover:text-violet-600 dark:border-slate-600 dark:text-slate-500 dark:hover:border-violet-500 dark:hover:text-violet-400"
+                        >
+                          <UserPlus className="h-3 w-3" />
+                          {activeParticipants.length === 0 ? "Add participant" : "Add"}
+                        </button>
+
+                        {addParticipantOpen && (
+                          <div className="absolute left-0 top-full z-40 mt-1.5 w-60 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl dark:border-slate-700 dark:bg-slate-900">
+                            <div className="p-2 border-b border-slate-100 dark:border-slate-800">
+                              <input
+                                autoFocus
+                                value={participantQuery}
+                                onChange={(e) => setParticipantQuery(e.target.value)}
+                                placeholder="Search agents…"
+                                className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs text-slate-800 placeholder-slate-400 outline-none focus:border-violet-400 focus:ring-1 focus:ring-violet-400 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+                              />
+                            </div>
+                            <div className="max-h-52 overflow-y-auto py-1">
+                              {participantOptionsLoading ? (
+                                <div className="px-3 py-3 text-xs text-slate-400">Loading…</div>
+                              ) : availableParticipantOptions.length === 0 ? (
+                                <div className="px-3 py-3 text-xs text-slate-400">No agents to add</div>
+                              ) : (
+                                availableParticipantOptions.map((option) => (
+                                  <button
+                                    key={option.id}
+                                    type="button"
+                                    disabled={addingParticipant}
+                                    onClick={() => handleAddParticipant(option.id)}
+                                    className="flex w-full items-center gap-2.5 px-3 py-2 text-left hover:bg-violet-50 dark:hover:bg-violet-950/30 disabled:opacity-50"
+                                  >
+                                    <Avatar slug={option.slug} size="sm" />
+                                    <span className="text-sm text-slate-700 dark:text-slate-200">{option.name}</span>
+                                  </button>
+                                ))
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {participantFeedback?.tone === "error" && (
+                      <span className="text-xs text-rose-500">{participantFeedback.message}</span>
+                    )}
+                  </div>
+                  {selected.thread_type === "task" && (
+                    <div className="mt-2.5 space-y-1.5">
+                      {/* Status + Priority row */}
+                      <div className="flex flex-wrap items-center gap-2 text-[11px]">
+                        <span className="rounded-full bg-violet-100 px-2 py-0.5 font-semibold text-violet-700 dark:bg-violet-950/40 dark:text-violet-300">Task</span>
+                        <select
+                          value={selected.task_status ?? "proposed"}
+                          disabled={updatingThread}
+                          onChange={(e) => handleUpdateTaskField({ task_status: e.target.value as "proposed" | "approved" | "in-progress" | "review" | "blocked" })}
+                          className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-600 outline-none focus:border-violet-400 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 disabled:opacity-50"
+                        >
+                          <option value="proposed">Proposed</option>
+                          <option value="approved">Approved</option>
+                          <option value="in-progress">In Progress</option>
+                          <option value="review">Review</option>
+                          <option value="blocked">Blocked</option>
+                        </select>
+                        <select
+                          value={selected.priority ?? "normal"}
+                          disabled={updatingThread}
+                          onChange={(e) => handleUpdateTaskField({ priority: e.target.value as "high" | "medium" | "normal" | "low" })}
+                          className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-600 outline-none focus:border-violet-400 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 disabled:opacity-50"
+                        >
+                          <option value="high">⬆ High</option>
+                          <option value="medium">● Medium</option>
+                          <option value="normal">○ Normal</option>
+                          <option value="low">⬇ Low</option>
+                        </select>
+                        <span className="text-slate-400">
+                          {selected.assignee_name ? `→ ${selected.assignee_name}` : "Unassigned"}
+                        </span>
+                      </div>
+                      {/* Completion note */}
+                      <CompletionNote
+                        value={selected.completion_note ?? ""}
+                        onSave={(note) => handleUpdateTaskField({ completion_note: note })}
+                        disabled={updatingThread}
+                      />
+                    </div>
+                  )}
                 </div>
                 <div className="flex shrink-0 items-center gap-1.5">
+                  {threadRole === "creator" || threadRole === "owner" ? (
+                    <select
+                      value={selected.thread_type ?? "conversation"}
+                      disabled={updatingThread}
+                      onChange={(e) => handleThreadTypeChange(e.target.value as ThreadTypeValue)}
+                      title="Thread type"
+                      className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-500 outline-none hover:border-violet-400 hover:text-violet-600 focus:border-violet-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400 disabled:opacity-40"
+                    >
+                      {THREAD_TYPE_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <span
+                      title="Thread type"
+                      className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-xs font-medium text-slate-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400"
+                    >
+                      {formatThreadType(selected.thread_type)}
+                    </span>
+                  )}
                   {selected.status !== "closed" && (
                     <button
                       onClick={() => handleSetStatus("closed")}
                       disabled={closing}
-                      title="Close thread"
+                      title={selected.thread_type === "task" ? "Complete task" : "Close thread"}
                       className="flex items-center gap-1 rounded-lg border border-slate-200 px-2 py-1 text-xs text-slate-500 hover:border-emerald-400 hover:text-emerald-600 disabled:opacity-40 dark:border-slate-700 dark:text-slate-400"
                     >
                       <CheckCircle className="h-3.5 w-3.5" />
-                      Close
+                      {selected.thread_type === "task" ? "Mark done" : "Close"}
                     </button>
                   )}
                   {selected.status === "closed" && (
                     <button
                       onClick={() => handleSetStatus("open")}
                       disabled={closing}
-                      title="Reopen thread"
+                      title={selected.thread_type === "task" ? "Reopen task" : "Reopen thread"}
                       className="flex items-center gap-1 rounded-lg border border-slate-200 px-2 py-1 text-xs text-slate-500 hover:border-violet-400 hover:text-violet-600 disabled:opacity-40 dark:border-slate-700 dark:text-slate-400"
                     >
                       <RefreshCw className="h-3.5 w-3.5" />
-                      Reopen
+                      {selected.thread_type === "task" ? "Reopen task" : "Reopen"}
                     </button>
                   )}
                   <button
@@ -625,6 +1557,7 @@ export default function ThreadsPage() {
                   </button>
                 </div>
               </div>
+
             </div>
 
             {/* Messages */}
@@ -639,6 +1572,7 @@ export default function ThreadsPage() {
                     key={msg.message_id}
                     msg={msg}
                     isMe={msg.sender_slug === "SANJAYA"}
+                    knownSlugs={new Set(mentionSlugs)}
                   />
                 ))
               )}
@@ -671,13 +1605,58 @@ export default function ThreadsPage() {
                   <Paperclip className="h-4 w-4" />
                 </button>
                 <textarea
+                  ref={textareaRef}
                   rows={2}
                   value={draft}
-                  onChange={(e) => setDraft(e.target.value)}
+                  onChange={(e) => {
+                    const text = e.target.value;
+                    setDraft(text);
+                    const ctx = getMentionContext(text, e.target.selectionStart ?? text.length);
+                    setMentionCtx(ctx);
+                    setMentionOpen(Boolean(ctx));
+                    setMentionIndex(0);
+                  }}
+                  onClick={(e) => {
+                    const t = e.currentTarget;
+                    const ctx = getMentionContext(t.value, t.selectionStart ?? t.value.length);
+                    setMentionCtx(ctx);
+                    setMentionOpen(Boolean(ctx));
+                  }}
+                  onKeyUp={(e) => {
+                    const t = e.currentTarget;
+                    const ctx = getMentionContext(t.value, t.selectionStart ?? t.value.length);
+                    setMentionCtx(ctx);
+                    setMentionOpen(Boolean(ctx));
+                  }}
                   onKeyDown={handleKey}
-                  placeholder="Reply… (Enter to send, Shift+Enter for new line)"
+                  placeholder="Reply… (use @slug to mention, Enter to send)"
                   className="flex-1 resize-none rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800 placeholder-slate-400 outline-none focus:border-violet-400 focus:ring-1 focus:ring-violet-400 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:placeholder-slate-500"
                 />
+                {mentionOpen && mentionSuggestions.length > 0 && (
+                  <div className="absolute bottom-12 left-0 z-30 w-72 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl dark:border-slate-700 dark:bg-slate-900">
+                    {mentionSuggestions.map((slug, idx) => (
+                      <button
+                        key={slug}
+                        type="button"
+                        onClick={() => applyMention(slug)}
+                        className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm ${idx === mentionIndex ? "bg-violet-50 text-violet-700 dark:bg-violet-950/40 dark:text-violet-300" : "text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800"}`}
+                      >
+                        <span className={`h-2 w-2 rounded-full ${slugColor(slug)}`} />
+                        <span className="font-medium">@{slug}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {voiceSupported && (
+                  <button
+                    type="button"
+                    onClick={isListening ? stopVoiceInput : handleVoiceInput}
+                    className={`flex h-10 w-10 items-center justify-center rounded-xl border transition ${isListening ? "border-red-300 bg-red-50 text-red-600 hover:bg-red-100 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300" : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300"}`}
+                    title={isListening ? "Stop voice input" : "Start voice input"}
+                  >
+                    {isListening ? <Square className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
+                  </button>
+                )}
                 <button
                   onClick={handleSend}
                   disabled={(!draft.trim() && draftAttachments.length === 0) || sending}

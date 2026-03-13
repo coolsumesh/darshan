@@ -4,7 +4,13 @@ import { randomUUID } from "crypto";
 import { mkdirSync, writeFileSync } from "fs";
 import { join } from "path";
 import { getRequestUser } from "./auth.js";
-import { pushToAgent } from "../broadcast.js";
+import { broadcast, pushToAgent } from "../broadcast.js";
+import {
+  TASK_PICKUP_SLA_MINUTES,
+  TASK_PROGRESS_SLA_MINUTES,
+  syncTaskSlaJobs,
+  type TaskSlaStateRow,
+} from "../workers/taskSlaQueue.js";
 
 // ── Caller resolution ─────────────────────────────────────────────────────────
 // Resolves the calling identity from either JWT cookie (user) or agent
@@ -49,7 +55,7 @@ async function resolveCaller(req: FastifyRequest, db: pg.Pool): Promise<Caller |
   // 1. JWT user session
   const jwtUser = getRequestUser(req);
   if (jwtUser) {
-    const slug = jwtUser.name?.trim().toUpperCase().replace(/[^A-Z0-9]/g, "_") ?? "USER";
+    const slug = normalizeSlug(jwtUser.name, "USER");
     return { id: jwtUser.userId, slug, type: "user" };
   }
 
@@ -125,6 +131,339 @@ async function checkThreadAccess(
   return { thread, role: parts[0].removed_at ? "removed" : "participant" };
 }
 
+async function resolveIdentityById(db: DbExecutor, id: string) {
+  const { rows } = await db.query(
+    `SELECT id, COALESCE(slug, upper(regexp_replace(name, '[^A-Za-z0-9]', '_', 'g'))) AS slug, 'agent' AS kind
+     FROM agents WHERE id::text = $1
+     UNION ALL
+     SELECT id, upper(regexp_replace(name, '[^A-Za-z0-9]', '_', 'g')) AS slug, 'user' AS kind
+     FROM users WHERE id::text = $1
+     LIMIT 1`,
+    [id]
+  );
+  return rows[0] as { id: string; slug: string; kind: "agent" | "user" } | undefined;
+}
+
+async function ensureParticipant(
+  db: DbExecutor,
+  threadId: string,
+  participantId: string,
+  participantSlug: string,
+  addedBy: string,
+  addedBySlug: string
+) {
+  await db.query(
+    `INSERT INTO thread_participants
+       (thread_id, participant_id, participant_slug, added_by, added_by_slug, joined_at, removed_at)
+     VALUES ($1, $2, $3, $4, $5, now(), null)
+     ON CONFLICT (thread_id, participant_id)
+     DO UPDATE SET participant_slug = excluded.participant_slug,
+                   added_by = excluded.added_by,
+                   added_by_slug = excluded.added_by_slug,
+                   joined_at = now(),
+                   removed_at = null`,
+    [threadId, participantId, participantSlug, addedBy, addedBySlug]
+  );
+}
+
+async function upsertDescriptionMessage(
+  db: DbExecutor,
+  threadId: string,
+  senderId: string,
+  senderSlug: string,
+  description: string
+) {
+  const { rows } = await db.query(
+    `SELECT message_id
+     FROM thread_messages
+     WHERE thread_id = $1 AND type = 'message'
+     ORDER BY sent_at ASC
+     LIMIT 1`,
+    [threadId]
+  );
+
+  if (rows[0]) {
+    await db.query(`UPDATE thread_messages SET body = $1 WHERE message_id = $2`, [description, rows[0].message_id]);
+    return;
+  }
+
+  await db.query(
+    `INSERT INTO thread_messages (thread_id, sender_id, sender_slug, type, body)
+     VALUES ($1, $2, $3, 'message', $4)`,
+    [threadId, senderId, senderSlug, description]
+  );
+}
+
+async function canCloseTaskThread(threadId: string, caller: Caller, db: DbExecutor) {
+  const { rows: threads } = await db.query(
+    `SELECT thread_id, project_id FROM threads WHERE thread_id = $1 LIMIT 1`,
+    [threadId]
+  );
+  if (!threads[0]?.project_id) return false;
+
+  if (caller.type === "user") {
+    const { rows } = await db.query(
+      `SELECT 1 FROM projects WHERE id = $1 AND owner_user_id = $2 LIMIT 1`,
+      [threads[0].project_id, caller.id]
+    );
+    return !!rows[0];
+  }
+
+  const { rows } = await db.query(
+    `SELECT 1
+     FROM project_agent_roles
+     WHERE project_id = $1 AND agent_id = $2 AND agent_role = 'coordinator'
+     LIMIT 1`,
+    [threads[0].project_id, caller.id]
+  );
+  return !!rows[0];
+}
+
+async function isThreadCoordinator(thread: Record<string, unknown>, caller: Caller, db: DbExecutor) {
+  if (caller.type !== "agent" || !thread.project_id) return false;
+  const { rows } = await db.query(
+    `SELECT 1
+     FROM project_agent_roles
+     WHERE project_id = $1 AND agent_id = $2 AND agent_role = 'coordinator'
+     LIMIT 1`,
+    [thread.project_id, caller.id]
+  );
+  return !!rows[0];
+}
+
+async function loadReplyPolicy(db: DbExecutor, threadId: string): Promise<HydratedReplyPolicy | null> {
+  const { rows } = await db.query(
+    `SELECT *
+     FROM thread_reply_policy
+     WHERE thread_id = $1
+     LIMIT 1`,
+    [threadId]
+  );
+  const policy = rows[0] as ThreadReplyPolicyRow | undefined;
+  if (!policy) return null;
+
+  if (policy.mode === "restricted" && policy.expires_at && new Date(policy.expires_at).getTime() <= Date.now()) {
+    await db.query(
+      `UPDATE thread_reply_policy
+       SET mode = 'all',
+           allowed_participant_ids = '{}',
+           next_message_limit = null,
+           expires_at = null,
+           updated_at = now()
+       WHERE thread_id = $1`,
+      [threadId]
+    );
+    return null;
+  }
+
+  const participantIds = Array.isArray(policy.allowed_participant_ids) ? policy.allowed_participant_ids : [];
+  const { rows: allowedParticipants } = participantIds.length === 0
+    ? { rows: [] as Array<{ participant_id: string; participant_slug: string }> }
+    : await db.query(
+        `SELECT participant_id, participant_slug
+         FROM thread_participants
+         WHERE thread_id = $1
+           AND participant_id = ANY($2::uuid[])
+           AND removed_at IS NULL
+         ORDER BY participant_slug ASC`,
+        [threadId, participantIds]
+      );
+
+  return {
+    ...policy,
+    allowed_participants: allowedParticipants,
+  };
+}
+
+async function writeReplyPolicy(
+  db: DbExecutor,
+  threadId: string,
+  updatedBy: string,
+  mode: ReplyPolicyMode,
+  allowedParticipantIds: string[],
+  nextMessageLimit: number | null
+) {
+  await db.query(
+    `INSERT INTO thread_reply_policy (
+       thread_id, mode, allowed_participant_ids, next_message_limit, expires_at, updated_by, updated_at
+     )
+     VALUES ($1, $2, $3::uuid[], $4, null, $5, now())
+     ON CONFLICT (thread_id)
+     DO UPDATE SET mode = excluded.mode,
+                   allowed_participant_ids = excluded.allowed_participant_ids,
+                   next_message_limit = excluded.next_message_limit,
+                   expires_at = excluded.expires_at,
+                   updated_by = excluded.updated_by,
+                   updated_at = now()`,
+    [threadId, mode, allowedParticipantIds, nextMessageLimit, updatedBy]
+  );
+}
+
+async function decrementReplyPolicyWindow(db: DbExecutor, threadId: string) {
+  const { rows } = await db.query(
+    `UPDATE thread_reply_policy
+     SET next_message_limit = next_message_limit - 1,
+         updated_at = now()
+     WHERE thread_id = $1
+       AND mode = 'restricted'
+       AND next_message_limit IS NOT NULL
+       AND next_message_limit > 0
+     RETURNING next_message_limit`,
+    [threadId]
+  );
+  if (!rows[0]) return;
+  if (rows[0].next_message_limit <= 0) {
+    await db.query(
+      `UPDATE thread_reply_policy
+       SET mode = 'all',
+           allowed_participant_ids = '{}',
+           next_message_limit = null,
+           expires_at = null,
+           updated_at = now()
+       WHERE thread_id = $1`,
+      [threadId]
+    );
+  }
+}
+
+async function upsertTaskSlaState(
+  db: pg.Pool,
+  threadId: string,
+  eventType: TaskLifecycleEvent,
+  occurredAt = new Date()
+) {
+  const nowIso = occurredAt.toISOString();
+  let pickupDueAt: string | null = null;
+  let progressDueAt: string | null = null;
+  let lastProgressAt: string | null = null;
+  let staleReason: string | null = null;
+
+  switch (eventType) {
+    case "task.approved":
+      pickupDueAt = addMinutes(occurredAt, TASK_PICKUP_SLA_MINUTES);
+      break;
+    case "task.in_progress":
+      progressDueAt = addMinutes(occurredAt, TASK_PROGRESS_SLA_MINUTES);
+      lastProgressAt = nowIso;
+      break;
+    case "task.progress":
+      progressDueAt = addMinutes(occurredAt, TASK_PROGRESS_SLA_MINUTES);
+      lastProgressAt = nowIso;
+      break;
+    case "task.blocked":
+    case "task.review_requested":
+    case "task.done":
+      staleReason = null;
+      break;
+  }
+
+  const { rows } = await db.query(
+    `INSERT INTO task_sla_state (
+       thread_id, pickup_due_at, progress_due_at, last_progress_at, last_event_type, last_event_at, stale_reason
+     )
+     VALUES ($1, $2, $3, $4, $5, $6, null)
+     ON CONFLICT (thread_id)
+     DO UPDATE SET pickup_due_at = excluded.pickup_due_at,
+                   progress_due_at = excluded.progress_due_at,
+                   last_progress_at = COALESCE(excluded.last_progress_at, task_sla_state.last_progress_at),
+                   last_event_type = excluded.last_event_type,
+                   last_event_at = excluded.last_event_at,
+                   stale_reason = $7
+     RETURNING thread_id, pickup_due_at, progress_due_at`,
+    [threadId, pickupDueAt, progressDueAt, lastProgressAt, eventType, nowIso, staleReason]
+  );
+
+  await syncTaskSlaJobs(rows[0] as TaskSlaStateRow);
+}
+
+async function closeTaskThread(threadId: string, caller: Caller, db: DbExecutor) {
+  const doneByUserId = caller.type === "user" ? caller.id : null;
+  const doneByAgentId = caller.type === "agent" ? caller.id : null;
+
+  const { rows } = await db.query(
+    `UPDATE threads
+     SET status = 'closed',
+         task_status = null,
+         done_at = now(),
+         done_by_user_id = $2,
+         done_by_agent_id = $3
+     WHERE thread_id = $1
+     RETURNING *`,
+    [threadId, doneByUserId, doneByAgentId]
+  );
+  return rows[0];
+}
+
+async function hydrateThread(db: DbExecutor, threadId: string) {
+  const { rows } = await db.query(
+    `SELECT
+       t.*,
+       COALESCE(assignee_agent.name, assignee_user.name) AS assignee_name,
+       first_message.body AS description
+     FROM threads t
+     LEFT JOIN agents assignee_agent ON assignee_agent.id = t.assignee_agent_id
+     LEFT JOIN users assignee_user ON assignee_user.id = t.assignee_user_id
+     LEFT JOIN LATERAL (
+       SELECT body
+       FROM thread_messages
+       WHERE thread_id = t.thread_id AND type = 'message'
+       ORDER BY sent_at ASC
+       LIMIT 1
+     ) first_message ON true
+     WHERE t.thread_id = $1
+     LIMIT 1`,
+    [threadId]
+  );
+  return rows[0];
+}
+
+async function notifyTaskAssignee(threadId: string, db: pg.Pool) {
+  const { rows } = await db.query(
+    `SELECT
+       t.thread_id,
+       t.project_id,
+       t.subject,
+       t.priority,
+       t.task_status,
+       t.status,
+       a.id AS assignee_agent_id,
+       a.name AS assignee_name,
+       p.slug AS project_slug,
+       p.name AS project_name,
+       p.agent_briefing,
+       first_message.body AS description
+     FROM threads t
+     JOIN agents a ON a.id = t.assignee_agent_id
+     LEFT JOIN projects p ON p.id = t.project_id
+     LEFT JOIN LATERAL (
+       SELECT tm.body
+       FROM thread_messages tm
+       WHERE tm.thread_id = t.thread_id AND tm.type = 'message'
+       ORDER BY tm.sent_at ASC
+       LIMIT 1
+     ) first_message ON true
+     WHERE t.thread_id = $1
+     LIMIT 1`,
+    [threadId]
+  );
+  if (!rows[0]) return;
+
+  const task = rows[0];
+  pushToAgent(task.assignee_agent_id, "task_assigned", {
+    task_id: task.thread_id,
+    thread_id: task.thread_id,
+    project_id: task.project_id,
+    project_slug: task.project_slug ?? null,
+    project_name: task.project_name ?? null,
+    agent_briefing: task.agent_briefing ?? null,
+    title: task.subject,
+    description: task.description ?? "",
+    priority: task.priority ?? "normal",
+    status: task.task_status ?? task.status,
+    assigned_to: task.assignee_name,
+  });
+}
+
 // ── Fan-out helpers ───────────────────────────────────────────────────────────
 
 async function fanOutNotifications(
@@ -132,16 +471,35 @@ async function fanOutNotifications(
   messageId: string,
   threadId: string,
   senderId: string,
-  priority: string = "normal"
+  senderType: Caller["type"],
+  priority: string = "normal",
+  messageBody: string = ""
 ) {
+  // Parse @mentions — if present, only notify mentioned agents
+  const mentionedSlugs = (messageBody.match(/@([A-Za-z0-9_]+)/g) ?? [])
+    .map(m => m.slice(1).toLowerCase());
+
   // All active participants except sender
-  const { rows: recipients } = await db.query(
+  const { rows: allRecipients } = await db.query(
     `SELECT participant_id, participant_slug FROM thread_participants
      WHERE thread_id = $1 AND participant_id != $2 AND removed_at IS NULL`,
     [threadId, senderId]
   );
 
-  for (const r of recipients) {
+  // If message has @mentions, only notify the mentioned participants
+  const recipients = mentionedSlugs.length > 0
+    ? allRecipients.filter(r => mentionedSlugs.includes((r.participant_slug ?? "").toLowerCase()))
+    : allRecipients;
+
+  const policy = await loadReplyPolicy(db, threadId);
+  const allowedIds = policy?.mode === "restricted"
+    ? new Set(policy.allowed_participant_ids)
+    : null;
+  const routedRecipients = allowedIds
+    ? recipients.filter((recipient) => allowedIds.has(recipient.participant_id))
+    : recipients;
+
+  for (const r of routedRecipients) {
     const { rows: [notif] } = await db.query(
       `INSERT INTO notifications
          (recipient_id, recipient_slug, message_id, priority)
@@ -152,9 +510,11 @@ async function fanOutNotifications(
     // Real-time push if recipient is an agent connected via WS
     // Enrich with message body/sender so the extension doesn't need a follow-up fetch
     db.query(
-      `SELECT tm.body, tm.sender_slug, t.subject
+      `SELECT tm.body, tm.sender_slug, t.subject,
+              (a.id IS NOT NULL) AS sender_is_agent
        FROM thread_messages tm
        JOIN threads t ON t.thread_id = tm.thread_id
+       LEFT JOIN agents a ON a.id = tm.sender_id
        WHERE tm.message_id = $1 LIMIT 1`,
       [messageId]
     ).then(({ rows: [msg] }) => {
@@ -167,6 +527,7 @@ async function fanOutNotifications(
         message_body:    msg?.body ?? "",
         message_from:    msg?.sender_slug ?? "",
         thread_subject:  msg?.subject ?? "",
+        sender_is_agent: msg?.sender_is_agent ?? false,
       });
     }).catch(() => {
       // Fallback: push without enrichment
@@ -179,6 +540,10 @@ async function fanOutNotifications(
       });
     });
   }
+
+  if (senderType === "user" && policy?.mode === "restricted" && policy.next_message_limit !== null) {
+    await decrementReplyPolicyWindow(db, threadId);
+  }
 }
 
 async function insertEventMessage(
@@ -188,12 +553,14 @@ async function insertEventMessage(
   senderSlug: string,
   body: string
 ) {
-  await db.query(
+  const { rows: [message] } = await db.query(
     `INSERT INTO thread_messages (thread_id, sender_id, sender_slug, type, body)
-     VALUES ($1, $2, $3, 'event', $4)`,
+     VALUES ($1, $2, $3, 'event', $4)
+     RETURNING *`,
     [threadId, senderId, senderSlug, body]
   );
-  // Event messages do not generate notifications
+  broadcast("thread.message_created", { thread_id: threadId, message });
+  return message;
 }
 
 // ── Routes ────────────────────────────────────────────────────────────────────
@@ -201,15 +568,59 @@ async function insertEventMessage(
 export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
 
   // ── POST /api/v1/threads — create thread ───────────────────────────────────
-  server.post<{ Body: { subject: string; participants?: string[]; project_id: string } }>(
+  server.post<{
+    Body: {
+      subject: string;
+      participants?: string[];
+      project_id: string;
+      thread_type?: string;
+      assignee_agent_id?: string;
+      assignee_user_id?: string;
+      priority?: string;
+      task_status?: string;
+      completion_note?: string;
+      status?: string;
+      description?: string;
+      body?: string;
+    };
+  }>(
     "/threads",
     async (req, reply) => {
       const caller = await resolveCaller(req, db);
       if (!caller) return reply.status(401).send({ ok: false, error: "not authenticated" });
 
-      const { subject, participants = [], project_id } = req.body ?? {};
+      const {
+        subject,
+        participants = [],
+        project_id,
+        thread_type = "conversation",
+        assignee_agent_id,
+        assignee_user_id,
+        priority,
+        task_status,
+        completion_note,
+        status = "open",
+        description,
+        body,
+      } = req.body ?? {};
       if (!subject?.trim()) return reply.status(400).send({ ok: false, error: "subject is required" });
       if (!project_id?.trim()) return reply.status(400).send({ ok: false, error: "project_id is required" });
+      if (!THREAD_TYPES.has(thread_type)) return reply.status(400).send({ ok: false, error: "invalid thread_type" });
+      if (!THREAD_STATUSES.has(status)) return reply.status(400).send({ ok: false, error: "invalid status" });
+      if (assignee_agent_id && assignee_user_id) return reply.status(400).send({ ok: false, error: "only one assignee may be set" });
+
+      const normalizedPriority = priority === undefined ? (thread_type === "task" ? "normal" : null) : normalizePriority(priority);
+      if (priority !== undefined && !normalizedPriority) return reply.status(400).send({ ok: false, error: "invalid priority" });
+
+      const normalizedTaskStatus = task_status === undefined
+        ? (thread_type === "task" && status === "open" ? "proposed" : null)
+        : task_status;
+      if (normalizedTaskStatus !== null && normalizedTaskStatus !== undefined && !TASK_STATUSES.has(normalizedTaskStatus)) {
+        return reply.status(400).send({ ok: false, error: "invalid task_status" });
+      }
+      if (thread_type !== "task" && (assignee_agent_id || assignee_user_id || normalizedTaskStatus || normalizedPriority || completion_note)) {
+        return reply.status(400).send({ ok: false, error: "task fields require thread_type=task" });
+      }
 
       const client = await db.connect();
       try {
@@ -217,41 +628,73 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
 
         // Create thread
         const { rows: [thread] } = await client.query(
-          `INSERT INTO threads (subject, project_id, created_by, created_slug)
-           VALUES ($1, $2, $3, $4) RETURNING *`,
-          [subject.trim(), project_id ?? null, caller.id, caller.slug]
+          `INSERT INTO threads
+             (subject, project_id, created_by, created_slug, thread_type, status,
+              assignee_agent_id, assignee_user_id, priority, task_status, completion_note)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+           RETURNING *`,
+          [
+            subject.trim(),
+            project_id ?? null,
+            caller.id,
+            caller.slug,
+            thread_type,
+            status,
+            assignee_agent_id ?? null,
+            assignee_user_id ?? null,
+            thread_type === "task" ? normalizedPriority : null,
+            thread_type === "task" && status === "open" ? normalizedTaskStatus : null,
+            thread_type === "task" ? completion_note ?? null : null,
+          ]
         );
 
         // Auto-add creator as participant
-        await client.query(
-          `INSERT INTO thread_participants
-             (thread_id, participant_id, participant_slug, added_by, added_by_slug)
-           VALUES ($1, $2, $3, $4, $5)`,
-          [thread.thread_id, caller.id, caller.slug, caller.id, caller.slug]
-        );
+        await ensureParticipant(client, thread.thread_id, caller.id, caller.slug, caller.id, caller.slug);
 
         // Add initial participants
         for (const pid of participants) {
           if (pid === caller.id) continue;
-          const { rows: [resolved] } = await client.query(
-            `SELECT id, COALESCE(slug, name) AS slug FROM agents WHERE id::text = $1
-             UNION ALL
-             SELECT id, upper(regexp_replace(name, '[^A-Za-z0-9]', '_', 'g')) FROM users WHERE id::text = $1
-             LIMIT 1`,
-            [pid]
-          );
+          const resolved = await resolveIdentityById(client, pid);
           if (!resolved) continue;
+          await ensureParticipant(client, thread.thread_id, resolved.id, resolved.slug, caller.id, caller.slug);
+        }
+
+        if (thread_type === "task" && assignee_agent_id) {
+          const { rows } = await client.query(
+            `SELECT id, COALESCE(slug, upper(regexp_replace(name, '[^A-Za-z0-9]', '_', 'g'))) AS slug
+             FROM agents WHERE id = $1 LIMIT 1`,
+            [assignee_agent_id]
+          );
+          if (rows[0]) await ensureParticipant(client, thread.thread_id, rows[0].id, rows[0].slug, caller.id, caller.slug);
+        }
+        if (thread_type === "task" && assignee_user_id) {
+          const { rows } = await client.query(
+            `SELECT id, upper(regexp_replace(name, '[^A-Za-z0-9]', '_', 'g')) AS slug
+             FROM users WHERE id = $1 LIMIT 1`,
+            [assignee_user_id]
+          );
+          if (rows[0]) await ensureParticipant(client, thread.thread_id, rows[0].id, rows[0].slug, caller.id, caller.slug);
+        }
+
+        const descriptionText = (description ?? body ?? "").trim();
+        if (descriptionText) {
           await client.query(
-            `INSERT INTO thread_participants
-               (thread_id, participant_id, participant_slug, added_by, added_by_slug)
-             VALUES ($1, $2, $3, $4, $5)
-             ON CONFLICT (thread_id, participant_id) DO NOTHING`,
-            [thread.thread_id, resolved.id, resolved.slug, caller.id, caller.slug]
+            `INSERT INTO thread_messages (thread_id, sender_id, sender_slug, type, body)
+             VALUES ($1, $2, $3, 'message', $4)`,
+            [thread.thread_id, caller.id, caller.slug, descriptionText]
           );
         }
 
         await client.query("COMMIT");
-        return { ok: true, thread_id: thread.thread_id, thread };
+
+        const hydratedThread = await hydrateThread(client, thread.thread_id);
+
+        if (thread.thread_type === "task" && thread.assignee_agent_id) {
+          await notifyTaskAssignee(thread.thread_id, db);
+        }
+
+        broadcast("thread.created", { thread: hydratedThread });
+        return { ok: true, thread_id: thread.thread_id, thread: hydratedThread };
       } catch (err) {
         await client.query("ROLLBACK");
         throw err;
@@ -296,7 +739,7 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
           `SELECT t.thread_id FROM threads t
            JOIN thread_participants pa ON pa.thread_id = t.thread_id AND pa.participant_id = $1 AND pa.removed_at IS NULL
            JOIN thread_participants pb ON pb.thread_id = t.thread_id AND pb.participant_id = $2 AND pb.removed_at IS NULL
-           WHERE t.deleted_at IS NULL AND t.project_id = $3 AND t.status = 'open'
+           WHERE t.deleted_at IS NULL AND t.project_id = $3 AND t.status = 'open' AND t.thread_type = 'dm'
            ORDER BY t.created_at DESC LIMIT 1`,
           [caller.id, recipient.id, project_id]
         );
@@ -309,19 +752,15 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
           // Create new direct thread
           const autoSubject = subject?.trim() || `${caller.slug} ↔ ${recipient.slug}`;
           const { rows: [thread] } = await client.query(
-            `INSERT INTO threads (subject, project_id, created_by, created_slug)
-             VALUES ($1, $2, $3, $4) RETURNING thread_id`,
+            `INSERT INTO threads (subject, project_id, created_by, created_slug, thread_type)
+             VALUES ($1, $2, $3, $4, 'dm') RETURNING thread_id`,
             [autoSubject, project_id, caller.id, caller.slug]
           );
           thread_id = thread.thread_id;
 
           // Add both as participants
           for (const p of [{ id: caller.id, slug: caller.slug }, { id: recipient.id, slug: recipient.slug }]) {
-            await client.query(
-              `INSERT INTO thread_participants (thread_id, participant_id, participant_slug, added_by, added_by_slug)
-               VALUES ($1, $2, $3, $4, $5) ON CONFLICT (thread_id, participant_id) DO NOTHING`,
-              [thread_id, p.id, p.slug, caller.id, caller.slug]
-            );
+            await ensureParticipant(client, thread_id, p.id, p.slug, caller.id, caller.slug);
           }
         }
 
@@ -351,6 +790,8 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
           body:        body.trim().slice(0, 100),
         });
 
+        broadcast("thread.message_created", { thread_id, message });
+
         return { ok: true, thread_id, message_id: message.message_id, notification_id: notif.notification_id };
       } catch (err) {
         await client.query("ROLLBACK");
@@ -362,19 +803,46 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
   );
 
   // ── GET /threads — list threads ─────────────────────────────────────────
-  server.get<{ Querystring: { search?: string; limit?: string; offset?: string; include_deleted?: string; project_id?: string; status?: string } }>(
+  server.get<{
+    Querystring: {
+      search?: string;
+      limit?: string;
+      offset?: string;
+      include_deleted?: string;
+      project_id?: string;
+      status?: string;
+      type?: string;
+      task_status?: string;
+      assignee_agent_id?: string;
+      assignee_user_id?: string;
+    };
+  }>(
     "/threads",
     async (req, reply) => {
       const caller = await resolveCaller(req, db);
       if (!caller) return reply.status(401).send({ ok: false, error: "not authenticated" });
 
-      const { search, limit = "10", offset = "0", include_deleted, project_id, status = "open" } = req.query;
+      const {
+        search,
+        limit = "10",
+        offset = "0",
+        include_deleted,
+        project_id,
+        status = "open",
+        type,
+        task_status,
+        assignee_agent_id,
+        assignee_user_id,
+      } = req.query;
       const lim = Math.min(Number(limit), 100);
       const off = Number(offset);
       const showDeleted = include_deleted === "true";
       const pid = project_id?.trim() || null;
-      // status filter: "open" | "closed" | "archived" | "all"
-      const statusFilter = ["open", "closed", "archived"].includes(status) ? status : null;
+      const statusFilter = THREAD_STATUSES.has(status) ? status : null;
+      const typeFilter = type && THREAD_TYPES.has(type) ? type : null;
+      const taskStatusFilter = task_status && TASK_STATUSES.has(task_status) ? task_status : null;
+      const assigneeAgentFilter = assignee_agent_id?.trim() || null;
+      const assigneeUserFilter = assignee_user_id?.trim() || null;
 
       let query: string;
       let params: unknown[];
@@ -409,37 +877,108 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
 
       if (search?.trim()) {
         query = `${visibilityCte}
-          SELECT DISTINCT t.*, tp_self.removed_at AS my_removed_at
+          SELECT DISTINCT
+            t.*,
+            tp_self.removed_at AS my_removed_at,
+            COALESCE(assignee_agent.name, assignee_user.name) AS assignee_name,
+            first_message.body AS description,
+            COALESCE(last_message.sent_at, t.created_at) AS last_activity
           FROM threads t
           JOIN visible v ON v.thread_id = t.thread_id
           LEFT JOIN thread_participants tp_self
             ON tp_self.thread_id = t.thread_id AND tp_self.participant_id = $1
           LEFT JOIN thread_messages tm ON tm.thread_id = t.thread_id
+          LEFT JOIN agents assignee_agent ON assignee_agent.id = t.assignee_agent_id
+          LEFT JOIN users assignee_user ON assignee_user.id = t.assignee_user_id
+          LEFT JOIN LATERAL (
+            SELECT body FROM thread_messages
+            WHERE thread_id = t.thread_id AND type = 'message'
+            ORDER BY sent_at ASC
+            LIMIT 1
+          ) first_message ON true
+          LEFT JOIN LATERAL (
+            SELECT sent_at FROM thread_messages
+            WHERE thread_id = t.thread_id
+            ORDER BY sent_at DESC
+            LIMIT 1
+          ) last_message ON true
           WHERE
             ($3 = false OR t.deleted_at IS NULL)
             AND ($4::uuid IS NULL OR t.project_id = $4)
             AND ($5::text IS NULL OR t.status = $5)
+            AND ($6::text IS NULL OR t.thread_type = $6)
+            AND ($7::text IS NULL OR t.task_status = $7)
+            AND ($8::uuid IS NULL OR t.assignee_agent_id = $8)
+            AND ($9::uuid IS NULL OR t.assignee_user_id = $9)
             AND (
-              to_tsvector('english', t.subject) @@ plainto_tsquery('english', $6)
-              OR to_tsvector('english', COALESCE(tm.body, '')) @@ plainto_tsquery('english', $6)
+              to_tsvector('english', t.subject) @@ plainto_tsquery('english', $10)
+              OR to_tsvector('english', COALESCE(tm.body, '')) @@ plainto_tsquery('english', $10)
             )
-          ORDER BY t.created_at DESC
-          LIMIT $7 OFFSET $8`;
-        params = [caller.id, caller.type === "user", !showDeleted, pid, statusFilter, search.trim(), lim, off];
+          ORDER BY COALESCE(last_message.sent_at, t.created_at) DESC, t.created_at DESC
+          LIMIT $11 OFFSET $12`;
+        params = [
+          caller.id,
+          caller.type === "user",
+          !showDeleted,
+          pid,
+          statusFilter,
+          typeFilter,
+          taskStatusFilter,
+          assigneeAgentFilter,
+          assigneeUserFilter,
+          search.trim(),
+          lim,
+          off,
+        ];
       } else {
         query = `${visibilityCte}
-          SELECT t.*, tp_self.removed_at AS my_removed_at
+          SELECT
+            t.*,
+            tp_self.removed_at AS my_removed_at,
+            COALESCE(assignee_agent.name, assignee_user.name) AS assignee_name,
+            first_message.body AS description,
+            COALESCE(last_message.sent_at, t.created_at) AS last_activity
           FROM threads t
           JOIN visible v ON v.thread_id = t.thread_id
           LEFT JOIN thread_participants tp_self
             ON tp_self.thread_id = t.thread_id AND tp_self.participant_id = $1
+          LEFT JOIN agents assignee_agent ON assignee_agent.id = t.assignee_agent_id
+          LEFT JOIN users assignee_user ON assignee_user.id = t.assignee_user_id
+          LEFT JOIN LATERAL (
+            SELECT body FROM thread_messages
+            WHERE thread_id = t.thread_id AND type = 'message'
+            ORDER BY sent_at ASC
+            LIMIT 1
+          ) first_message ON true
+          LEFT JOIN LATERAL (
+            SELECT sent_at FROM thread_messages
+            WHERE thread_id = t.thread_id
+            ORDER BY sent_at DESC
+            LIMIT 1
+          ) last_message ON true
           WHERE
             ($3 = false OR t.deleted_at IS NULL)
             AND ($4::uuid IS NULL OR t.project_id = $4)
             AND ($5::text IS NULL OR t.status = $5)
-          ORDER BY t.created_at DESC
-          LIMIT $6 OFFSET $7`;
-        params = [caller.id, caller.type === "user", !showDeleted, pid, statusFilter, lim, off];
+            AND ($6::text IS NULL OR t.thread_type = $6)
+            AND ($7::text IS NULL OR t.task_status = $7)
+            AND ($8::uuid IS NULL OR t.assignee_agent_id = $8)
+            AND ($9::uuid IS NULL OR t.assignee_user_id = $9)
+          ORDER BY COALESCE(last_message.sent_at, t.created_at) DESC, t.created_at DESC
+          LIMIT $10 OFFSET $11`;
+        params = [
+          caller.id,
+          caller.type === "user",
+          !showDeleted,
+          pid,
+          statusFilter,
+          typeFilter,
+          taskStatusFilter,
+          assigneeAgentFilter,
+          assigneeUserFilter,
+          lim,
+          off,
+        ];
       }
 
       const { rows } = await db.query(query, params);
@@ -462,7 +1001,233 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
         [req.params.thread_id]
       );
 
-      return { ok: true, thread: access.thread, participants, role: access.role };
+      const thread = await hydrateThread(db, req.params.thread_id);
+      return { ok: true, thread: thread ?? access.thread, participants, role: access.role };
+    }
+  );
+
+  server.get<{ Params: { thread_id: string } }>(
+    "/threads/:thread_id/sla",
+    async (req, reply) => {
+      const caller = await resolveCaller(req, db);
+      if (!caller) return reply.status(401).send({ ok: false, error: "not authenticated" });
+
+      const access = await checkThreadAccess(req.params.thread_id, caller, db);
+      if (!access) return reply.status(404).send({ ok: false, error: "thread not found or no access" });
+
+      const replyPolicy = await loadReplyPolicy(db, req.params.thread_id);
+      const { rows: [slaState] } = await db.query(
+        `SELECT *
+         FROM task_sla_state
+         WHERE thread_id = $1
+         LIMIT 1`,
+        [req.params.thread_id]
+      );
+
+      return { ok: true, reply_policy: replyPolicy, sla_state: (slaState ?? null) as TaskSlaState | null };
+    }
+  );
+
+  server.patch<{ Params: { thread_id: string }; Body: Record<string, unknown> }>(
+    "/threads/:thread_id",
+    async (req, reply) => {
+      const caller = await resolveCaller(req, db);
+      if (!caller) return reply.status(401).send({ ok: false, error: "not authenticated" });
+
+      const access = await checkThreadAccess(req.params.thread_id, caller, db);
+      if (!access) return reply.status(404).send({ ok: false, error: "thread not found" });
+
+      const thread = access.thread as Record<string, unknown>;
+      const isManager = access.role === "creator" || access.role === "owner";
+      const isAssignedAgent = caller.type === "agent" && thread.assignee_agent_id === caller.id && thread.thread_type === "task";
+      if (!isManager && !isAssignedAgent) {
+        return reply.status(403).send({ ok: false, error: "forbidden" });
+      }
+
+      const requestedStatus = typeof req.body.status === "string" ? req.body.status.trim() : undefined;
+      const requestedThreadType = typeof req.body.thread_type === "string" ? req.body.thread_type.trim() : undefined;
+      const requestedTaskStatus = typeof req.body.task_status === "string" ? req.body.task_status.trim() : undefined;
+      const requestedSubject = typeof req.body.subject === "string" ? req.body.subject.trim() : undefined;
+      const requestedDescription = typeof req.body.description === "string" ? req.body.description.trim() : undefined;
+      const requestedCompletionNote =
+        typeof req.body.completion_note === "string" || req.body.completion_note === null
+          ? req.body.completion_note
+          : undefined;
+      const requestedAssigneeAgentId =
+        typeof req.body.assignee_agent_id === "string" ? req.body.assignee_agent_id.trim() : req.body.assignee_agent_id === null ? null : undefined;
+      const requestedAssigneeUserId =
+        typeof req.body.assignee_user_id === "string" ? req.body.assignee_user_id.trim() : req.body.assignee_user_id === null ? null : undefined;
+      const requestedPriority = req.body.priority === undefined ? undefined : normalizePriority(req.body.priority);
+
+      if (requestedStatus !== undefined && !THREAD_STATUSES.has(requestedStatus)) {
+        return reply.status(400).send({ ok: false, error: "invalid status" });
+      }
+      if (requestedThreadType !== undefined && !THREAD_TYPES.has(requestedThreadType)) {
+        return reply.status(400).send({ ok: false, error: "invalid thread_type" });
+      }
+      if (requestedTaskStatus !== undefined && !TASK_STATUSES.has(requestedTaskStatus)) {
+        return reply.status(400).send({ ok: false, error: "invalid task_status" });
+      }
+      if (req.body.priority !== undefined && !requestedPriority) {
+        return reply.status(400).send({ ok: false, error: "invalid priority" });
+      }
+      if (requestedAssigneeAgentId && requestedAssigneeUserId) {
+        return reply.status(400).send({ ok: false, error: "only one assignee may be set" });
+      }
+      const effectiveThreadType = requestedThreadType ?? String(thread.thread_type ?? "conversation");
+      if (effectiveThreadType !== "task" && (requestedTaskStatus !== undefined || requestedCompletionNote !== undefined || requestedAssigneeAgentId !== undefined || requestedAssigneeUserId !== undefined || requestedPriority !== undefined)) {
+        return reply.status(400).send({ ok: false, error: "task fields require thread_type=task" });
+      }
+
+      if (isAssignedAgent) {
+        const allowedAgentFields = new Set(["task_status", "completion_note"]);
+        for (const key of Object.keys(req.body)) {
+          if (!allowedAgentFields.has(key)) {
+            return reply.status(403).send({ ok: false, error: "forbidden field for assignee update" });
+          }
+        }
+      }
+
+      if (requestedStatus === "closed" && thread.thread_type === "task") {
+        const permitted = await canCloseTaskThread(req.params.thread_id, caller, db);
+        if (!permitted) {
+          return reply.status(403).send({ ok: false, error: "only the coordinator or project owner can close a task thread" });
+        }
+        await closeTaskThread(req.params.thread_id, caller, db);
+        await insertEventMessage(db, req.params.thread_id, caller.id, caller.slug, describeTaskLifecycleEvent("task.done", caller.slug));
+        await upsertTaskSlaState(db, req.params.thread_id, "task.done");
+        const closed = await hydrateThread(db, req.params.thread_id);
+        broadcast("thread.status_changed", { thread_id: req.params.thread_id, status: "closed" });
+        return { ok: true, thread: closed };
+      }
+
+      const previousTaskStatus = typeof thread.task_status === "string" ? thread.task_status : null;
+
+      const sets: string[] = [];
+      const values: unknown[] = [];
+
+      if (requestedSubject !== undefined) {
+        if (!isManager || !requestedSubject) return reply.status(403).send({ ok: false, error: "only the thread creator or owner can update subject" });
+        values.push(requestedSubject);
+        sets.push(`subject = $${values.length}`);
+      }
+      if (requestedThreadType !== undefined) {
+        if (!isManager) return reply.status(403).send({ ok: false, error: "only the thread creator or owner can update thread_type" });
+        values.push(requestedThreadType);
+        sets.push(`thread_type = $${values.length}`);
+        if (requestedThreadType === "task" && thread.thread_type !== "task") {
+          if (requestedPriority === undefined && !thread.priority) {
+            values.push("normal");
+            sets.push(`priority = $${values.length}`);
+          }
+          if (requestedTaskStatus === undefined && !thread.task_status) {
+            values.push("proposed");
+            sets.push(`task_status = $${values.length}`);
+          }
+        }
+      }
+      if (requestedStatus !== undefined) {
+        if (!isManager) return reply.status(403).send({ ok: false, error: "only the thread creator or owner can update status" });
+        values.push(requestedStatus);
+        sets.push(`status = $${values.length}`);
+        if (thread.thread_type === "task" && requestedStatus === "open") {
+          sets.push("done_at = null", "done_by_user_id = null", "done_by_agent_id = null");
+        }
+      }
+      if (requestedTaskStatus !== undefined) {
+        values.push(requestedTaskStatus);
+        sets.push(`task_status = $${values.length}`, "done_at = null", "done_by_user_id = null", "done_by_agent_id = null");
+      }
+      if (requestedCompletionNote !== undefined) {
+        values.push(requestedCompletionNote);
+        sets.push(`completion_note = $${values.length}`);
+      }
+      if (requestedPriority !== undefined) {
+        if (!isManager) return reply.status(403).send({ ok: false, error: "only the thread creator or owner can update priority" });
+        values.push(requestedPriority);
+        sets.push(`priority = $${values.length}`);
+      }
+      if (requestedAssigneeAgentId !== undefined) {
+        if (!isManager) return reply.status(403).send({ ok: false, error: "only the thread creator or owner can update assignee" });
+        values.push(requestedAssigneeAgentId);
+        sets.push(`assignee_agent_id = $${values.length}`, "assignee_user_id = null");
+      }
+      if (requestedAssigneeUserId !== undefined) {
+        if (!isManager) return reply.status(403).send({ ok: false, error: "only the thread creator or owner can update assignee" });
+        values.push(requestedAssigneeUserId);
+        sets.push(`assignee_user_id = $${values.length}`, "assignee_agent_id = null");
+      }
+
+      let updatedThread = thread;
+      if (sets.length > 0) {
+        values.push(req.params.thread_id);
+        const { rows } = await db.query(
+          `UPDATE threads SET ${sets.join(", ")} WHERE thread_id = $${values.length} RETURNING *`,
+          values
+        );
+        updatedThread = rows[0];
+      }
+
+      if (requestedDescription !== undefined) {
+        if (!isManager) return reply.status(403).send({ ok: false, error: "only the thread creator or owner can update description" });
+        if (requestedDescription) {
+          await upsertDescriptionMessage(db, req.params.thread_id, caller.id, caller.slug, requestedDescription);
+        }
+      }
+
+      if (requestedAssigneeAgentId) {
+        const resolved = await resolveIdentityById(db, requestedAssigneeAgentId);
+        if (resolved) {
+          await ensureParticipant(db, req.params.thread_id, resolved.id, resolved.slug, caller.id, caller.slug);
+          await insertEventMessage(db, req.params.thread_id, caller.id, caller.slug, `${resolved.slug} was assigned by ${caller.slug}`);
+          await notifyTaskAssignee(req.params.thread_id, db);
+        }
+      }
+      if (requestedAssigneeUserId) {
+        const resolved = await resolveIdentityById(db, requestedAssigneeUserId);
+        if (resolved) {
+          await ensureParticipant(db, req.params.thread_id, resolved.id, resolved.slug, caller.id, caller.slug);
+          await insertEventMessage(db, req.params.thread_id, caller.id, caller.slug, `${resolved.slug} was assigned by ${caller.slug}`);
+        }
+      }
+      const taskEvent = mapTaskEventForStatus(previousTaskStatus, requestedTaskStatus);
+      if (taskEvent) {
+        await insertEventMessage(db, req.params.thread_id, caller.id, caller.slug, describeTaskLifecycleEvent(taskEvent, caller.slug));
+        await upsertTaskSlaState(db, req.params.thread_id, taskEvent);
+      }
+      if (requestedTaskStatus === "approved" && (updatedThread as Record<string, unknown>).assignee_agent_id) {
+        await notifyTaskAssignee(req.params.thread_id, db);
+      }
+
+      const hydratedThread = await hydrateThread(db, req.params.thread_id);
+      broadcast("thread.updated", { thread_id: req.params.thread_id, thread: hydratedThread ?? updatedThread });
+      return { ok: true, thread: hydratedThread ?? updatedThread };
+    }
+  );
+
+  server.post<{ Params: { thread_id: string } }>(
+    "/threads/:thread_id/close",
+    async (req, reply) => {
+      const caller = await resolveCaller(req, db);
+      if (!caller) return reply.status(401).send({ ok: false, error: "not authenticated" });
+
+      const access = await checkThreadAccess(req.params.thread_id, caller, db);
+      if (!access) return reply.status(404).send({ ok: false, error: "thread not found" });
+      if ((access.thread as Record<string, unknown>).thread_type !== "task") {
+        return reply.status(400).send({ ok: false, error: "close is only supported for task threads" });
+      }
+
+      const permitted = await canCloseTaskThread(req.params.thread_id, caller, db);
+      if (!permitted) {
+        return reply.status(403).send({ ok: false, error: "only the coordinator or project owner can close a task thread" });
+      }
+
+      await closeTaskThread(req.params.thread_id, caller, db);
+      await insertEventMessage(db, req.params.thread_id, caller.id, caller.slug, describeTaskLifecycleEvent("task.done", caller.slug));
+      await upsertTaskSlaState(db, req.params.thread_id, "task.done");
+      const thread = await hydrateThread(db, req.params.thread_id);
+      broadcast("thread.status_changed", { thread_id: req.params.thread_id, status: "closed" });
+      return { ok: true, thread };
     }
   );
 
@@ -483,6 +1248,7 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
         `UPDATE threads SET deleted_at = now() WHERE thread_id = $1`,
         [req.params.thread_id]
       );
+      broadcast("thread.deleted", { thread_id: req.params.thread_id });
       return { ok: true };
     }
   );
@@ -495,20 +1261,37 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
       if (!caller) return reply.status(401).send({ ok: false, error: "not authenticated" });
 
       const { status } = req.body ?? {};
-      if (!["open", "closed", "archived"].includes(status)) {
+      if (!THREAD_STATUSES.has(status)) {
         return reply.status(400).send({ ok: false, error: "status must be open, closed, or archived" });
       }
 
       const access = await checkThreadAccess(req.params.thread_id, caller, db);
       if (!access) return reply.status(404).send({ ok: false, error: "thread not found" });
+      if ((access.thread as Record<string, unknown>).thread_type === "task" && status === "closed") {
+        const permitted = await canCloseTaskThread(req.params.thread_id, caller, db);
+        if (!permitted) {
+          return reply.status(403).send({ ok: false, error: "only the coordinator or project owner can close a task thread" });
+        }
+        const thread = await closeTaskThread(req.params.thread_id, caller, db);
+        await insertEventMessage(db, req.params.thread_id, caller.id, caller.slug, describeTaskLifecycleEvent("task.done", caller.slug));
+        await upsertTaskSlaState(db, req.params.thread_id, "task.done");
+        broadcast("thread.status_changed", { thread_id: req.params.thread_id, status });
+        return { ok: true, status, thread };
+      }
       if (access.role !== "creator" && access.role !== "owner") {
         return reply.status(403).send({ ok: false, error: "only the thread creator or owner can change status" });
       }
 
       await db.query(
-        `UPDATE threads SET status = $1 WHERE thread_id = $2`,
+        `UPDATE threads
+         SET status = $1,
+             done_at = CASE WHEN $1 = 'open' THEN null ELSE done_at END,
+             done_by_user_id = CASE WHEN $1 = 'open' THEN null ELSE done_by_user_id END,
+             done_by_agent_id = CASE WHEN $1 = 'open' THEN null ELSE done_by_agent_id END
+         WHERE thread_id = $2`,
         [status, req.params.thread_id]
       );
+      broadcast("thread.status_changed", { thread_id: req.params.thread_id, status });
       return { ok: true, status };
     }
   );
@@ -706,7 +1489,9 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
       );
 
       // Fan out notifications to all active participants except sender
-      await fanOutNotifications(db, msg.message_id, req.params.thread_id, caller.id, priority);
+      await fanOutNotifications(db, msg.message_id, req.params.thread_id, caller.id, caller.type, priority, trimmedBody);
+
+      broadcast("thread.message_created", { thread_id: req.params.thread_id, message: msg });
 
       return { ok: true, message_id: msg.message_id, message: msg };
     }

@@ -57,7 +57,10 @@ jobs:
             source ~/.nvm/nvm.sh
             cd /home/ubuntu/projects/darshan
 
-            git pull origin main
+            # Ensure remote tree is clean so deploy cannot fail on local modifications
+            git fetch origin main
+            git reset --hard origin/main
+            git clean -fd
 
             # API
             cd apps/api

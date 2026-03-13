@@ -8,7 +8,7 @@ import {
 import { cn } from "@/lib/cn";
 import { Button } from "@/components/ui/button";
 import {
-  fetchLevelDefinitions, fetchProjectAgentLevels, fetchAgentLevelDetail, setAgentLevel,
+  fetchLevelDefinitions, fetchProjectAgentLevels, fetchAgentLevelDetail, setAgentLevel, deleteAgentLevel,
   fetchProjects,
   type LevelDefinition, type AgentProjectLevel, type LevelEvent, type LevelProof,
 } from "@/lib/api";
@@ -180,11 +180,12 @@ function SetLevelModal({
 
 // ── Agent Level Row ───────────────────────────────────────────────────────────
 function AgentLevelRow({
-  entry, projectId, definitions,
-  onPromote,
+  entry, projectId,
+  onPromote, onDelete,
 }: {
-  entry: AgentProjectLevel; projectId: string; definitions: LevelDefinition[];
+  entry: AgentProjectLevel; projectId: string;
   onPromote: (agentId: string, agentName: string, currentLevel: number) => void;
+  onDelete: (agentId: string, agentName: string) => void;
 }) {
   const [expanded, setExpanded] = React.useState(false);
   const [detail, setDetail] = React.useState<{ events: LevelEvent[]; proofs: LevelProof[] } | null>(null);
@@ -224,6 +225,12 @@ function AgentLevelRow({
             className="rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-600 hover:border-blue-400 hover:text-blue-600 dark:border-zinc-700 dark:text-zinc-400 transition-colors"
           >
             Set Level
+          </button>
+          <button
+            onClick={e => { e.stopPropagation(); onDelete(entry.agent_id, entry.agent_name); }}
+            className="rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-600 hover:border-red-400 hover:text-red-600 dark:border-zinc-700 dark:text-zinc-400 transition-colors"
+          >
+            Delete
           </button>
           {loading ? <Loader2 className="h-4 w-4 animate-spin text-zinc-400" /> :
             expanded ? <ChevronDown className="h-4 w-4 text-zinc-400" /> : <ChevronRight className="h-4 w-4 text-zinc-400" />}
@@ -278,19 +285,34 @@ export default function AgentLevelsPage() {
   const [modal, setModal] = React.useState<{ agentId: string; agentName: string; currentLevel: number } | null>(null);
 
   React.useEffect(() => {
-    fetchLevelDefinitions().then(setDefinitions);
     fetchProjects().then(list => setProjects(list.map(p => ({ id: p.id, name: p.name }))));
   }, []);
 
   React.useEffect(() => {
-    if (!selectedProject) { setLevels([]); return; }
+    if (!selectedProject) { setLevels([]); setDefinitions([]); return; }
     setLoading(true);
-    fetchProjectAgentLevels(selectedProject).then(l => { setLevels(l); setLoading(false); });
+    Promise.all([
+      fetchProjectAgentLevels(selectedProject),
+      fetchLevelDefinitions(selectedProject),
+    ]).then(([l, defs]) => {
+      setLevels(l);
+      setDefinitions(defs);
+      setLoading(false);
+    });
   }, [selectedProject]);
 
   const refresh = () => {
     if (!selectedProject) return;
     fetchProjectAgentLevels(selectedProject).then(setLevels);
+  };
+
+  const handleDelete = async (agentId: string, agentName: string) => {
+    if (!selectedProject) return;
+    const ok = window.confirm(`Delete level row for ${agentName}?`);
+    if (!ok) return;
+
+    const deleted = await deleteAgentLevel(selectedProject, agentId);
+    if (deleted) refresh();
   };
 
   return (
@@ -351,10 +373,10 @@ export default function AgentLevelsPage() {
               key={entry.agent_id}
               entry={entry}
               projectId={selectedProject}
-              definitions={definitions}
               onPromote={(agentId, agentName, currentLevel) =>
                 setModal({ agentId, agentName, currentLevel })
               }
+              onDelete={handleDelete}
             />
           ))}
         </div>

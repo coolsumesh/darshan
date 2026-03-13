@@ -28,7 +28,7 @@ export default function AgentTasksPage() {
   const [tasks,   setTasks]   = React.useState<AgentTask[]>([]);
   const [agents,  setAgents]  = React.useState<Agent[]>([]);
   const [loading, setLoading] = React.useState(true);
-  const [filter,  setFilter]  = React.useState<string>("all"); // agent name or "all"
+  const [filter,  setFilter]  = React.useState<string>("all"); // agent id or "all"
   const [statusF, setStatusF] = React.useState<string>("open"); // "open" | "all" | status
 
   React.useEffect(() => {
@@ -41,7 +41,7 @@ export default function AgentTasksPage() {
         projects.map(async (p) => {
           const ts = await fetchTasks(p.id);
           ts.forEach((t) => {
-            if (t.assignee) {
+            if (t.assignee_agent_id) {
               allTasks.push({ ...t, projectName: p.name, projectSlug: (p as unknown as { slug?: string }).slug ?? p.id });
             }
           });
@@ -59,10 +59,10 @@ export default function AgentTasksPage() {
     load();
   }, []);
 
-  const agentNames = Array.from(new Set(tasks.map((t) => t.assignee).filter(Boolean))) as string[];
+  const agentOptions = Array.from(new Set(tasks.map((t) => t.assignee_agent_id).filter(Boolean))) as string[];
 
   const visible = tasks.filter((t) => {
-    const agentOk = filter === "all" || t.assignee === filter;
+    const agentOk = filter === "all" || t.assignee_agent_id === filter;
     const statusOk =
       statusF === "all"  ? true :
       statusF === "open" ? t.status !== "done" :
@@ -106,7 +106,12 @@ export default function AgentTasksPage() {
           className="rounded-lg border-0 bg-white px-3 py-1.5 text-sm font-medium text-zinc-700 ring-1 ring-zinc-200 focus:outline-none focus:ring-brand-400 dark:bg-[#16132A] dark:text-zinc-300 dark:ring-[#2D2A45]"
         >
           <option value="all">All agents</option>
-          {agentNames.map((n) => <option key={n} value={n}>{n}</option>)}
+          {agentOptions.map((agentId) => {
+            const label = agents.find((agent) => agent.id === agentId)?.name
+              ?? tasks.find((task) => task.assignee_agent_id === agentId)?.assignee
+              ?? agentId;
+            return <option key={agentId} value={agentId}>{label}</option>;
+          })}
         </select>
 
         {/* Status filter */}

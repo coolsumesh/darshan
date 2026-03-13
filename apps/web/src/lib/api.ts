@@ -99,6 +99,16 @@ export type Thread = {
   deleted_at: string | null;
   my_removed_at: string | null;
   status: "open" | "closed" | "archived";
+  thread_type?: "conversation" | "feature" | "level_test" | "dm" | "task";
+  assignee_agent_id?: string | null;
+  assignee_user_id?: string | null;
+  assignee_name?: string | null;
+  priority?: "high" | "medium" | "normal" | "low" | null;
+  task_status?: "proposed" | "approved" | "in-progress" | "review" | "blocked" | null;
+  completion_note?: string | null;
+  done_at?: string | null;
+  description?: string | null;
+  last_activity?: string | null;
 };
 
 export type ThreadAttachment = {
@@ -122,16 +132,94 @@ export type ThreadMessage = {
   sent_at: string;
 };
 
-export async function fetchThreads(projectId?: string | null, status: "open" | "closed" | "archived" | "all" = "open"): Promise<Thread[]> {
+export type ThreadParticipant = {
+  thread_id: string;
+  participant_id: string;
+  participant_slug: string;
+  added_by: string | null;
+  added_by_slug: string | null;
+  joined_at: string;
+  removed_at: string | null;
+};
+
+export type ThreadAccessRole = "creator" | "owner" | "participant" | "removed";
+
+export type ThreadDetail = {
+  thread: Thread;
+  participants: ThreadParticipant[];
+  role: ThreadAccessRole;
+};
+
+export type ThreadReplyPolicy = {
+  thread_id: string;
+  mode: "all" | "restricted";
+  allowed_participant_ids: string[];
+  allowed_participants: Array<{ participant_id: string; participant_slug: string }>;
+  next_message_limit: number | null;
+  expires_at: string | null;
+  updated_by: string | null;
+  updated_at: string;
+};
+
+export type ThreadSlaState = {
+  thread_id: string;
+  pickup_due_at: string | null;
+  progress_due_at: string | null;
+  last_progress_at: string | null;
+  last_event_type: string | null;
+  last_event_at: string | null;
+  stale_reason: string | null;
+};
+
+export type ThreadParticipantMutationResult = {
+  ok: boolean;
+  status: number;
+  error?: string;
+  participant_id?: string;
+  participant_slug?: string;
+};
+
+export async function fetchThreads(
+  projectId?: string | null,
+  status: "open" | "closed" | "archived" | "all" = "open",
+  search?: string
+): Promise<Thread[]> {
   const qs = new URLSearchParams({ limit: "50", status });
   if (projectId) qs.set("project_id", projectId);
+  if (search?.trim()) qs.set("search", search.trim());
   const data = await apiFetch<{ ok: boolean; threads: Thread[] }>(`/api/v1/threads?${qs}`);
   return data?.ok ? (data.threads ?? []) : [];
 }
 
-export async function fetchThreadMessages(threadId: string): Promise<ThreadMessage[]> {
+export async function fetchThread(threadId: string): Promise<ThreadDetail | null> {
+  const data = await apiFetch<{ ok: boolean; thread: Thread; participants?: ThreadParticipant[]; role?: ThreadAccessRole }>(
+    `/api/v1/threads/${threadId}`
+  );
+  if (!data?.ok || !data.thread) return null;
+  return {
+    thread: data.thread,
+    participants: data.participants ?? [],
+    role: data.role ?? "participant",
+  };
+}
+
+export async function fetchThreadSla(threadId: string): Promise<{ reply_policy: ThreadReplyPolicy | null; sla_state: ThreadSlaState | null } | null> {
+  const data = await apiFetch<{
+    ok: boolean;
+    reply_policy: ThreadReplyPolicy | null;
+    sla_state: ThreadSlaState | null;
+  }>(`/api/v1/threads/${threadId}/sla`);
+  if (!data?.ok) return null;
+  return {
+    reply_policy: data.reply_policy ?? null,
+    sla_state: data.sla_state ?? null,
+  };
+}
+
+export async function fetchThreadMessages(threadId: string, limit = 100): Promise<ThreadMessage[]> {
+  const safeLimit = Math.min(Math.max(limit, 1), 200);
   const data = await apiFetch<{ ok: boolean; messages: ThreadMessage[] }>(
-    `/api/v1/threads/${threadId}/messages?limit=100`
+    `/api/v1/threads/${threadId}/messages?limit=${safeLimit}`
   );
   return data?.ok ? (data.messages ?? []) : [];
 }
@@ -161,6 +249,77 @@ export async function sendThreadMessage(
   return data?.ok ? data.message ?? null : null;
 }
 
+export async function fetchThreadParticipants(threadId: string): Promise<ThreadParticipant[]> {
+  const data = await apiFetch<{ ok: boolean; participants: ThreadParticipant[] }>(
+    `/api/v1/threads/${threadId}/participants`
+  );
+  return data?.ok ? (data.participants ?? []) : [];
+}
+
+export async function addThreadParticipant(
+  threadId: string,
+  participantId: string
+): Promise<ThreadParticipantMutationResult> {
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/threads/${threadId}/participants`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ participant_id: participantId }),
+    });
+    const data = await res.json().catch(() => null) as
+      | { ok?: boolean; error?: string; participant_id?: string; participant_slug?: string }
+      | null;
+
+    return {
+      ok: res.ok && !!data?.ok,
+      status: res.status,
+      error: data?.error,
+      participant_id: data?.participant_id,
+      participant_slug: data?.participant_slug,
+    };
+  } catch {
+    return { ok: false, status: 0, error: "Network error while adding participant" };
+  }
+}
+
+export async function removeThreadParticipant(
+  threadId: string,
+  participantId: string
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/threads/${threadId}/participants/${participantId}`, {
+      method: "DELETE",
+      credentials: "include",
+    });
+    const data = await res.json().catch(() => null) as { ok?: boolean; error?: string } | null;
+    return { ok: res.ok && !!data?.ok, error: data?.error };
+  } catch {
+    return { ok: false, error: "Network error" };
+  }
+}
+
+export async function updateThread(
+  threadId: string,
+  patch: {
+    subject?: string;
+    thread_type?: "conversation" | "feature" | "level_test" | "dm" | "task";
+    status?: "open" | "closed" | "archived";
+    task_status?: "proposed" | "approved" | "in-progress" | "review" | "blocked";
+    completion_note?: string | null;
+    assignee_agent_id?: string | null;
+    assignee_user_id?: string | null;
+    priority?: "high" | "medium" | "normal" | "low";
+    description?: string;
+  }
+): Promise<Thread | null> {
+  const data = await apiFetch<{ ok: boolean; thread: Thread }>(
+    `/api/v1/threads/${threadId}`,
+    { method: "PATCH", body: JSON.stringify(patch) }
+  );
+  return data?.ok ? (data.thread ?? null) : null;
+}
+
 export async function setThreadStatus(
   threadId: string,
   status: "open" | "closed" | "archived"
@@ -184,6 +343,49 @@ export async function createThread(
   return data?.ok ? data.thread ?? null : null;
 }
 
+export async function sendDirectMessage(
+  toId: string,
+  body: string,
+  projectId: string,
+  subject?: string
+): Promise<{ thread_id: string; message_id: string } | null> {
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/threads/direct`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ to: toId, body, project_id: projectId, subject }),
+    });
+    const data = await res.json().catch(() => null) as { ok?: boolean; thread_id?: string; message_id?: string } | null;
+    return res.ok && data?.ok ? { thread_id: data.thread_id!, message_id: data.message_id! } : null;
+  } catch {
+    return null;
+  }
+}
+
+function mapThreadToTask(thread: Thread & Record<string, unknown>): Task {
+  const rawStatus = typeof thread.task_status === "string"
+    ? thread.task_status
+    : thread.status === "closed"
+      ? "done"
+      : "proposed";
+  const priority = thread.priority === "normal" ? "medium" : (thread.priority ?? "medium");
+
+  return {
+    id: thread.thread_id,
+    projectId: thread.project_id ?? "",
+    title: thread.subject,
+    description: typeof thread.description === "string" ? thread.description : "",
+    status: rawStatus as Task["status"],
+    assignee: typeof thread.assignee_name === "string" ? thread.assignee_name : undefined,
+    assignee_agent_id: typeof thread.assignee_agent_id === "string" ? thread.assignee_agent_id : null,
+    assignee_user_id: typeof thread.assignee_user_id === "string" ? thread.assignee_user_id : null,
+    priority: priority as Task["priority"],
+    completion_note: typeof thread.completion_note === "string" ? thread.completion_note : undefined,
+    completed_at: typeof thread.done_at === "string" ? thread.done_at : undefined,
+  };
+}
+
 // ── Docs (Architecture + Tech Spec) ──────────────────────────────────────────
 
 export async function fetchArchitecture(projectId: string): Promise<string | null> {
@@ -199,29 +401,54 @@ export async function fetchTechSpec(projectId: string): Promise<string | null> {
 // ── Tasks ─────────────────────────────────────────────────────────────────────
 
 export async function fetchTasks(projectId: string): Promise<Task[]> {
-  const data = await apiFetch<{ ok: boolean; tasks: Task[] }>(`/api/v1/projects/${projectId}/tasks`);
-  if (data?.ok && data.tasks) return data.tasks;
+  const data = await apiFetch<{ ok: boolean; threads: Thread[] }>(`/api/v1/projects/${projectId}/threads?type=task`);
+  if (data?.ok && data.threads) return data.threads.map((thread) => mapThreadToTask(thread as Thread & Record<string, unknown>));
   return [];
 }
 
 export async function createTask(projectId: string, payload: Partial<Task>): Promise<Task | null> {
-  const data = await apiFetch<{ ok: boolean; task: Task }>(`/api/v1/projects/${projectId}/tasks`, {
+  const priority = payload.priority === "urgent" ? "high" : payload.priority;
+  const data = await apiFetch<{ ok: boolean; thread: Thread }>(`/api/v1/threads`, {
     method: "POST",
-    body: JSON.stringify(payload),
+    body: JSON.stringify({
+      project_id: projectId,
+      subject: payload.title,
+      description: payload.description,
+      thread_type: "task",
+      task_status: payload.status === "done" ? undefined : payload.status,
+      priority,
+      assignee_agent_id: payload.assignee_agent_id,
+      assignee_user_id: payload.assignee_user_id,
+    }),
   });
-  return data?.task ?? null;
+  return data?.thread ? mapThreadToTask(data.thread as Thread & Record<string, unknown>) : null;
 }
 
 export async function updateTask(projectId: string, taskId: string, patch: Partial<Task>): Promise<Task | null> {
-  const data = await apiFetch<{ ok: boolean; task: Task }>(`/api/v1/projects/${projectId}/tasks/${taskId}`, {
+  const body: Record<string, unknown> = {};
+  if (patch.title !== undefined) body.subject = patch.title;
+  if (patch.description !== undefined) body.description = patch.description;
+  if (patch.status !== undefined) body.task_status = patch.status === "done" ? undefined : patch.status;
+  if (patch.priority !== undefined) body.priority = patch.priority === "urgent" ? "high" : patch.priority;
+  if (patch.completion_note !== undefined) body.completion_note = patch.completion_note;
+  if (patch.assignee_agent_id !== undefined) {
+    body.assignee_agent_id = patch.assignee_agent_id;
+    body.assignee_user_id = null;
+  }
+  if (patch.assignee_user_id !== undefined) {
+    body.assignee_user_id = patch.assignee_user_id;
+    body.assignee_agent_id = null;
+  }
+
+  const data = await apiFetch<{ ok: boolean; thread: Thread }>(`/api/v1/threads/${taskId}`, {
     method: "PATCH",
-    body: JSON.stringify(patch),
+    body: JSON.stringify(body),
   });
-  return data?.task ?? null;
+  return data?.thread ? mapThreadToTask(data.thread as Thread & Record<string, unknown>) : null;
 }
 
 export async function deleteTask(projectId: string, taskId: string): Promise<boolean> {
-  const data = await apiFetch<{ ok: boolean }>(`/api/v1/projects/${projectId}/tasks/${taskId}`, {
+  const data = await apiFetch<{ ok: boolean }>(`/api/v1/threads/${taskId}`, {
     method: "DELETE",
   });
   return data?.ok ?? false;
@@ -611,12 +838,12 @@ export async function fetchUserMembers(projectId: string): Promise<UserMember[]>
 
 export async function addUserMember(
   projectId: string, email: string, role: ProjectMembershipRole
-): Promise<UserMember | null> {
-  const data = await apiFetch<{ ok: boolean; member: UserMember }>(`/api/v1/projects/${projectId}/user-members`, {
+): Promise<ProjectInvite | null> {
+  const data = await apiFetch<{ ok: boolean; invite: ProjectInvite }>(`/api/v1/projects/${projectId}/user-members`, {
     method: "POST",
     body: JSON.stringify({ email, role }),
   });
-  return data?.ok ? data.member : null;
+  return data?.ok ? data.invite : null;
 }
 
 export async function removeUserMember(projectId: string, userId: string): Promise<boolean> {
@@ -815,10 +1042,19 @@ export type TaskActivity = {
 };
 
 export async function fetchTaskActivity(projectId: string, taskId: string): Promise<TaskActivity[]> {
-  const data = await apiFetch<{ ok: boolean; activity: TaskActivity[] }>(
-    `/api/v1/projects/${projectId}/tasks/${taskId}/activity`
+  const data = await apiFetch<{ ok: boolean; messages: ThreadMessage[] }>(
+    `/api/v1/threads/${taskId}/messages?types=event`
   );
-  return data?.ok ? data.activity : [];
+  if (!data?.ok) return [];
+  return (data.messages ?? []).map((message) => ({
+    id: message.message_id,
+    actor_name: message.sender_slug,
+    actor_type: "system",
+    action: "status_changed",
+    from_value: null,
+    to_value: message.body,
+    created_at: message.sent_at,
+  }));
 }
 
 // ── Project group chat (MVP) ─────────────────────────────────────────────────
@@ -942,12 +1178,10 @@ export type LevelProof = {
   created_at?: string;
 };
 
-export async function fetchLevelDefinitions(projectId?: string): Promise<LevelDefinition[]> {
-  const qs = new URLSearchParams();
-  if (projectId) qs.set("project_id", projectId);
-  const suffix = qs.toString();
+export async function fetchLevelDefinitions(projectId: string): Promise<LevelDefinition[]> {
+  const qs = new URLSearchParams({ project_id: projectId });
   const data = await apiFetch<{ ok: boolean; definitions: LevelDefinition[] }>(
-    `/api/v1/agent-levels/definitions${suffix ? `?${suffix}` : ""}`
+    `/api/v1/agent-levels/definitions?${qs.toString()}`
   );
   return data?.ok ? data.definitions : [];
 }
@@ -989,4 +1223,53 @@ export async function setAgentLevel(
     }
   );
   return data ?? { ok: false };
+}
+
+export async function deleteAgentLevel(projectId: string, agentId: string): Promise<boolean> {
+  const data = await apiFetch<{ ok: boolean }>(
+    `/api/v1/projects/${projectId}/agent-levels/${agentId}`,
+    { method: "DELETE" }
+  );
+  return data?.ok ?? false;
+}
+
+// ── LLM Usage ─────────────────────────────────────────────────────────────────
+
+export type UsageEvent = {
+  id: string;
+  session_key: string;
+  thread_id: string | null;
+  agent_id: string | null;
+  model: string;
+  tokens_delta: number;
+  tokens_total: number;
+  context_tokens: number | null;
+  recorded_at: string;
+};
+
+export type UsageSummary = {
+  events: UsageEvent[];
+  total_tokens: number;
+  total_events: number;
+  by_model: Record<string, number>;
+};
+
+export async function fetchUsage(params?: {
+  thread_id?: string;
+  agent_id?: string;
+  from?: string;
+  to?: string;
+  limit?: number;
+}): Promise<UsageSummary> {
+  const qs = new URLSearchParams();
+  if (params?.thread_id) qs.set("thread_id", params.thread_id);
+  if (params?.agent_id)  qs.set("agent_id",  params.agent_id);
+  if (params?.from)      qs.set("from",       params.from);
+  if (params?.to)        qs.set("to",         params.to);
+  if (params?.limit)     qs.set("limit",      String(params.limit));
+  const q = qs.toString();
+  const data = await apiFetch<{ ok: boolean } & UsageSummary>(`/api/v1/usage${q ? "?" + q : ""}`);
+  return data?.ok
+    ? { events: data.events, total_tokens: data.total_tokens, total_events: data.total_events, by_model: data.by_model }
+    : { events: [], total_tokens: 0, total_events: 0, by_model: {} };
 }

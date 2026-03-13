@@ -83,6 +83,25 @@ function taskProjectId(t: Task): string {
   return t.projectId ?? (t as unknown as { project_id: string }).project_id ?? "";
 }
 
+function getTeamMemberLabel(member: TeamMemberWithAgent): string {
+  return member.agent?.name ?? member.agentId;
+}
+
+function getTaskAssigneeLabel(task: Task, team: TeamMemberWithAgent[]): string | undefined {
+  if (task.assignee?.trim()) return task.assignee;
+  if (task.assignee_agent_id) return team.find((member) => member.agentId === task.assignee_agent_id)?.agent?.name ?? task.assignee_agent_id;
+  if (task.assignee_user_id) return "User";
+  return undefined;
+}
+
+function getTaskAssigneeInitial(task: Task, team: TeamMemberWithAgent[]): string {
+  return getTaskAssigneeLabel(task, team)?.[0]?.toUpperCase() ?? "?";
+}
+
+function buildAgentAssigneePatch(agentId: string | null): Partial<Task> {
+  return { assignee_agent_id: agentId, assignee_user_id: null };
+}
+
 function formatDueDate(due?: string): { text: string; cls: string } | null {
   if (!due) return null;
   const d    = new Date(due);
@@ -205,9 +224,9 @@ function StatusPopover({ anchorEl, status, onSelect, onClose }: {
   );
 }
 
-function OwnerPopover({ anchorEl, assignee, team, onSelect, onClose }: {
-  anchorEl: HTMLElement | null; assignee?: string; team: TeamMemberWithAgent[];
-  onSelect: (name: string) => void; onClose: () => void;
+function OwnerPopover({ anchorEl, assigneeAgentId, team, onSelect, onClose }: {
+  anchorEl: HTMLElement | null; assigneeAgentId?: string | null; team: TeamMemberWithAgent[];
+  onSelect: (agentId: string | null) => void; onClose: () => void;
 }) {
   const ref = React.useRef<HTMLDivElement>(null);
   const [q, setQ] = React.useState("");
@@ -222,7 +241,7 @@ function OwnerPopover({ anchorEl, assignee, team, onSelect, onClose }: {
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, [onClose]);
-  const members = team.filter((m) => !q || (m.agent?.name ?? m.agentId).toLowerCase().includes(q.toLowerCase()));
+  const members = team.filter((m) => !q || getTeamMemberLabel(m).toLowerCase().includes(q.toLowerCase()));
   if (!pos || typeof document === "undefined") return null;
   return createPortal(
     <div ref={ref} style={{ position: "fixed", top: pos.top, left: pos.left, zIndex: 9999 }}
@@ -232,22 +251,22 @@ function OwnerPopover({ anchorEl, assignee, team, onSelect, onClose }: {
           placeholder="Search member…"
           className="w-full rounded-lg bg-zinc-100 px-2.5 py-1.5 text-xs outline-none dark:bg-white/10 dark:text-white" />
       </div>
-      <button onClick={() => { onSelect(""); onClose(); }}
+      <button onClick={() => { onSelect(null); onClose(); }}
         className="flex w-full items-center gap-2.5 px-3 py-2 text-xs text-zinc-500 hover:bg-zinc-50 dark:hover:bg-white/5">
-        <span className="grid h-6 w-6 place-items-center rounded-full bg-zinc-200 text-[10px]">—</span>
+        <span className="grid h-6 w-6 place-items-center rounded-full bg-zinc-200 text-[10px]">-</span>
         Unassigned
-        {!assignee && <span className="ml-auto text-zinc-400">✓</span>}
+        {!assigneeAgentId && <span className="ml-auto text-zinc-400">?</span>}
       </button>
       {members.map((m) => {
-        const name = m.agent?.name ?? m.agentId;
+        const name = getTeamMemberLabel(m);
         return (
-          <button key={m.agentId} onClick={() => { onSelect(name); onClose(); }}
+          <button key={m.agentId} onClick={() => { onSelect(m.agentId); onClose(); }}
             className="flex w-full items-center gap-2.5 px-3 py-2 text-xs transition-colors hover:bg-zinc-50 dark:hover:bg-white/5">
             <div className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-violet-600 text-[10px] font-bold text-white">
               {name[0]?.toUpperCase()}
             </div>
             <span className="flex-1 truncate font-medium text-zinc-800 dark:text-white">{name}</span>
-            {assignee === name && <span className="text-zinc-400">✓</span>}
+            {assigneeAgentId === m.agentId && <span className="text-zinc-400">?</span>}
           </button>
         );
       })}
@@ -416,7 +435,7 @@ function TaskDetailPanel({
     if (pid) fetchTaskActivity(pid, task.id).then(setActivity);
   }, [task.id]); // eslint-disable-line react-hooks/exhaustive-deps
   React.useEffect(() => { refreshActivity(); }, [refreshActivity]);
-  React.useEffect(() => { refreshActivity(); }, [task.status, task.assignee]); // eslint-disable-line react-hooks/exhaustive-deps
+  React.useEffect(() => { refreshActivity(); }, [task.status, task.assignee, task.assignee_agent_id, task.assignee_user_id]); // eslint-disable-line react-hooks/exhaustive-deps
   function openPopover(name: string, el: HTMLElement) { setOpenPop(name); setAnchorEl(el); }
   function closePopover() { setOpenPop(null); setAnchorEl(null); }
 
@@ -495,20 +514,20 @@ function TaskDetailPanel({
             <div className="relative">
               <button onClick={(e) => openPop === "owner" ? closePopover() : openPopover("owner", e.currentTarget as HTMLElement)}
                 className="flex items-center gap-1.5 rounded-full hover:opacity-80 transition-opacity">
-                {task.assignee ? (
+                {getTaskAssigneeLabel(task, team) ? (
                   <>
                     <div className="grid h-6 w-6 place-items-center rounded-full bg-brand-600 text-[10px] font-bold text-white">
-                      {task.assignee[0]?.toUpperCase()}
+                      {getTaskAssigneeInitial(task, team)}
                     </div>
-                    <span className="text-xs font-medium text-zinc-700 dark:text-zinc-300">{task.assignee}</span>
+                    <span className="text-xs font-medium text-zinc-700 dark:text-zinc-300">{getTaskAssigneeLabel(task, team)}</span>
                   </>
                 ) : (
                   <span className="text-xs text-zinc-400">Unassigned</span>
                 )}
               </button>
               {openPop === "owner" && (
-                <OwnerPopover anchorEl={anchorEl} assignee={task.assignee} team={team}
-                  onSelect={(name) => { onUpdate(task.id, { assignee: name }); closePopover(); }} onClose={closePopover} />
+                <OwnerPopover anchorEl={anchorEl} assigneeAgentId={task.assignee_agent_id} team={team}
+                  onSelect={(agentId) => { onUpdate(task.id, buildAgentAssigneePatch(agentId)); closePopover(); }} onClose={closePopover} />
               )}
             </div>
           )}
@@ -686,12 +705,12 @@ function TableRow({
         <div className="flex items-center gap-1.5 flex-wrap">
           <StatusPill status={task.status} />
           <PriorityPill priority={task.priority} />
-          {task.assignee && (
+          {getTaskAssigneeLabel(task, team) && (
             <div className="flex items-center gap-1">
               <div className="grid h-5 w-5 place-items-center rounded-full bg-brand-600 text-[9px] font-bold text-white">
-                {task.assignee[0]?.toUpperCase()}
+                {getTaskAssigneeInitial(task, team)}
               </div>
-              <span className="text-xs text-zinc-500">{task.assignee}</span>
+              <span className="text-xs text-zinc-500">{getTaskAssigneeLabel(task, team)}</span>
             </div>
           )}
         </div>
@@ -740,20 +759,20 @@ function TableRow({
       <div className="flex w-28 shrink-0 items-center px-3">
         <button onClick={(e) => { e.stopPropagation(); openPop === "owner" ? closePopover() : openPopover("owner", e.currentTarget as HTMLElement); }}
           className="flex items-center gap-1.5 hover:opacity-80 transition-opacity">
-          {task.assignee ? (
+          {getTaskAssigneeLabel(task, team) ? (
             <>
               <div className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-brand-600 text-[10px] font-bold text-white">
-                {task.assignee[0]?.toUpperCase()}
+                {getTaskAssigneeInitial(task, team)}
               </div>
-              <span className="truncate text-xs text-zinc-600 dark:text-zinc-400">{task.assignee}</span>
+              <span className="truncate text-xs text-zinc-600 dark:text-zinc-400">{getTaskAssigneeLabel(task, team)}</span>
             </>
           ) : (
             <span className="text-xs text-zinc-300 dark:text-zinc-700 group-hover:text-zinc-400">+ Assign</span>
           )}
         </button>
         {openPop === "owner" && (
-          <OwnerPopover anchorEl={anchorEl} assignee={task.assignee} team={team}
-            onSelect={(name) => { onUpdate(task.id, { assignee: name }); closePopover(); }}
+          <OwnerPopover anchorEl={anchorEl} assigneeAgentId={task.assignee_agent_id} team={team}
+            onSelect={(agentId) => { onUpdate(task.id, buildAgentAssigneePatch(agentId)); closePopover(); }}
             onClose={closePopover} />
         )}
       </div>
@@ -874,7 +893,7 @@ function TableSection({
         </span>
         <button onClick={(e) => { e.stopPropagation(); onAddTask(); }}
           className="ml-2 flex items-center gap-1 text-xs text-zinc-400 opacity-0 group-hover/sh:opacity-100 transition-opacity hover:text-zinc-600">
-          <Plus className="h-3 w-3" /> Add task
+          <Plus className="h-3 w-3" /> Add item
         </button>
 
       </button>
@@ -906,7 +925,7 @@ function TableSection({
 
           {/* Rows */}
           {tasks.length === 0 ? (
-            <div className="px-8 py-5 text-center text-sm text-zinc-400">No tasks here.</div>
+            <div className="px-8 py-5 text-center text-sm text-zinc-400">No items here.</div>
           ) : tasks.map((task, i) => (
             <TableRow
               key={task.id} task={task} taskNumber={startIndex + i + 1}
@@ -955,7 +974,7 @@ function TableSection({
               onClick={() => setQuickAdding(true)}
               className="flex w-full items-center gap-2 border-t border-dashed border-zinc-200 px-8 py-2.5 text-xs text-zinc-400 hover:bg-zinc-50 hover:text-zinc-600 dark:border-[#2D2A45] dark:hover:bg-white/5 transition-colors"
             >
-              <Plus className="h-3.5 w-3.5" /> Add task
+              <Plus className="h-3.5 w-3.5" /> Add item
             </button>
           )}
 
@@ -1008,7 +1027,7 @@ function BulkActionBar({
 }: {
   count: number; team: TeamMemberWithAgent[];
   onMove: (status: TaskStatus) => void;
-  onAssign: (name: string) => void;
+  onAssign: (agentId: string | null) => void;
   onDelete: () => void;
   onClear: () => void;
 }) {
@@ -1055,9 +1074,9 @@ function BulkActionBar({
           {showAssign && (
             <div className="absolute bottom-full mb-2 left-0 z-10 min-w-[180px] overflow-hidden rounded-xl border border-zinc-100 bg-white shadow-xl dark:border-white/10 dark:bg-[#1C1830]">
               {team.map((m) => {
-                const name = m.agent?.name ?? m.agentId;
+                const name = getTeamMemberLabel(m);
                 return (
-                  <button key={m.agentId} onClick={() => { onAssign(name); closeAll(); }}
+                  <button key={m.agentId} onClick={() => { onAssign(m.agentId); closeAll(); }}
                     className="flex w-full items-center gap-2 px-3 py-2 text-xs text-zinc-700 hover:bg-zinc-50 dark:text-zinc-300 dark:hover:bg-white/5">
                     <div className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-brand-600 text-[9px] font-bold text-white">
                       {name[0]?.toUpperCase()}
@@ -1145,12 +1164,12 @@ function CreateTaskModal({
   defaultStatus, team, onSave, onClose,
 }: {
   defaultStatus: TaskStatus; team: TeamMemberWithAgent[];
-  onSave: (p: { title: string; description: string; assignee: string; status: TaskStatus; type: string; priority: Priority }) => Promise<void>;
+  onSave: (p: { title: string; description: string; assigneeAgentId: string | null; status: TaskStatus; type: string; priority: Priority }) => Promise<void>;
   onClose: () => void;
 }) {
   const [title,       setTitle]       = React.useState("");
   const [description, setDescription] = React.useState("");
-  const [assignee,    setAssignee]    = React.useState("");
+  const [assigneeAgentId, setAssigneeAgentId] = React.useState("");
   const [status,      setStatus]      = React.useState<TaskStatus>(defaultStatus);
   const [type,        setType]        = React.useState("Task");
   const [priority,    setPriority]    = React.useState<Priority>("medium");
@@ -1161,7 +1180,7 @@ function CreateTaskModal({
     if (!title.trim()) { setTitleError(true); return; }
     setTitleError(false);
     setSaving(true);
-    await onSave({ title: title.trim(), description: description.trim(), assignee, status, type, priority });
+    await onSave({ title: title.trim(), description: description.trim(), assigneeAgentId: assigneeAgentId || null, status, type, priority });
     setSaving(false);
   }
 
@@ -1172,7 +1191,7 @@ function CreateTaskModal({
       <button className="absolute inset-0 bg-zinc-950/40 backdrop-blur-[2px]" onClick={onClose} />
       <div className="relative z-10 flex w-full max-w-md flex-col rounded-2xl bg-white shadow-soft ring-1 ring-zinc-200 dark:bg-[#16132A] dark:ring-[#2D2A45] max-h-[90vh]">
         <div className="flex shrink-0 items-center justify-between border-b border-zinc-200 px-5 py-4 dark:border-[#2D2A45]">
-          <div className="font-display text-sm font-semibold text-zinc-900 dark:text-white">New task</div>
+          <div className="font-display text-sm font-semibold text-zinc-900 dark:text-white">New item</div>
           <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800">
             <X className="h-4 w-4" />
           </button>
@@ -1198,9 +1217,9 @@ function CreateTaskModal({
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="flex flex-col gap-1.5">
               <label className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">Assignee</label>
-              <select value={assignee} onChange={(e) => setAssignee(e.target.value)} className={sel}>
+              <select value={assigneeAgentId} onChange={(e) => setAssigneeAgentId(e.target.value)} className={sel}>
                 <option value="">Unassigned</option>
-                {team.map((m) => <option key={m.agentId} value={m.agent?.name ?? m.agentId}>{m.agent?.name ?? m.agentId}</option>)}
+                {team.map((m) => <option key={m.agentId} value={m.agentId}>{getTeamMemberLabel(m)}</option>)}
               </select>
             </div>
             <div className="flex flex-col gap-1.5">
@@ -1271,10 +1290,10 @@ function TaskBoardContent({
     setTasks((prev) => prev.map((t) => ids.includes(t.id) ? { ...t, status } : t));
     clearSelection();
   }
-  async function handleBulkAssign(name: string) {
+  async function handleBulkAssign(agentId: string | null) {
     const ids = [...selectedIds];
-    await Promise.all(ids.map((id) => updateTask(projectId, id, { assignee: name } as Record<string, unknown>)));
-    setTasks((prev) => prev.map((t) => ids.includes(t.id) ? { ...t, assignee: name } : t));
+    const updated = await Promise.all(ids.map((id) => updateTask(projectId, id, buildAgentAssigneePatch(agentId))));
+    setTasks((prev) => prev.map((t) => updated.find((item) => item?.id === t.id) ?? t));
     clearSelection();
   }
   async function handleBulkDelete() {
@@ -1318,8 +1337,8 @@ function TaskBoardContent({
     setActing(null);
   }
 
-  async function handleCreate(payload: { title: string; description: string; assignee: string; status: TaskStatus; type: string; priority: Priority }) {
-    await createTask(projectId, { ...payload });
+  async function handleCreate(payload: { title: string; description: string; assigneeAgentId: string | null; status: TaskStatus; type: string; priority: Priority }) {
+    await createTask(projectId, { ...payload, assignee_agent_id: payload.assigneeAgentId });
     // Do NOT optimistically add here — the WebSocket `task:created` event is the single source of truth.
     setCreateIn(null);
   }
@@ -1659,6 +1678,7 @@ function UserMembersSection({ projectId, canAdmin }: { projectId: string; canAdm
   const [inviteRole,     setInviteRole]     = React.useState<"contributor" | "admin" | "viewer">("contributor");
   const [generating,     setGenerating]     = React.useState(false);
   const [generatedInvite, setGeneratedInvite] = React.useState<ProjectInvite | null>(null);
+  const [inviteError,    setInviteError]    = React.useState<string | null>(null);
   const [copied,         setCopied]         = React.useState(false);
   const [activeInvites,  setActiveInvites]  = React.useState<ProjectInvite[]>([]);
   const [revoking,       setRevoking]       = React.useState<string | null>(null);
@@ -1672,12 +1692,16 @@ function UserMembersSection({ projectId, canAdmin }: { projectId: string; canAdm
   async function handleAdd() {
     if (!email.trim()) return;
     setAdding(true); setAddError(null);
-    const result = await addUserMember(projectId, email.trim(), role);
-    if (result) {
-      setMembers((prev) => [...prev.filter((m) => m.user_id !== result.user_id), result]);
-      setEmail(""); setShowAdd(false);
+    const invite = await addUserMember(projectId, email.trim(), role);
+    if (invite) {
+      setGeneratedInvite(invite);
+      setActiveInvites((prev) => [invite, ...prev.filter((i) => i.id !== invite.id)]);
+      setInviteEmail("");
+      setEmail("");
+      setShowAdd(false);
+      setShowInvite(true);
     } else {
-      setAddError("No account found with that email, or they're already a member.");
+      setAddError("Could not create invite. They may already be a member, or you may not have admin access.");
     }
     setAdding(false);
   }
@@ -1690,13 +1714,40 @@ function UserMembersSection({ projectId, canAdmin }: { projectId: string; canAdm
   }
 
   async function handleGenerateInvite() {
+    setInviteError(null);
     setGenerating(true);
-    const inv = await createProjectInvite(projectId, inviteEmail.trim() || undefined, inviteRole);
+
+    const email = inviteEmail.trim();
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setInviteError("Please enter a valid email address.");
+      setGenerating(false);
+      return;
+    }
+
+    const inv = await createProjectInvite(projectId, email || undefined, inviteRole);
     if (inv) {
       setGeneratedInvite(inv);
       setActiveInvites((prev) => [inv, ...prev]);
       setInviteEmail("");
+      setGenerating(false);
+      return;
     }
+
+    // Fallback: if API returned null, try to find an existing active invite for this email.
+    const existing = await fetchProjectInvites(projectId);
+    const match = existing.find((i) =>
+      !i.accepted_at && !i.declined_at &&
+      new Date(i.expires_at) > new Date() &&
+      ((email && i.invitee_email?.toLowerCase() === email.toLowerCase()) || (!email && !i.invitee_email))
+    );
+
+    if (match) {
+      setGeneratedInvite(match);
+      setInviteError("An active invite already exists for this recipient. Reusing that link.");
+    } else {
+      setInviteError("Could not generate invite link. Check your project role (admin+) and try again.");
+    }
+
     setGenerating(false);
   }
 
@@ -1715,6 +1766,7 @@ function UserMembersSection({ projectId, canAdmin }: { projectId: string; canAdm
   }
 
   const ROLE_META: Record<string, { label: string; bg: string; text: string }> = {
+    owner:       { label: "Owner",       bg: "bg-amber-100",   text: "text-amber-700"   },
     admin:       { label: "Admin",       bg: "bg-violet-100",  text: "text-violet-700"  },
     contributor: { label: "Contributor", bg: "bg-brand-100",   text: "text-brand-700"   },
     viewer:      { label: "Viewer",      bg: "bg-zinc-100",    text: "text-zinc-600"    },
@@ -1816,6 +1868,11 @@ function UserMembersSection({ projectId, canAdmin }: { projectId: string; canAdm
               <p className="mt-1.5 text-[11px] text-sky-600/70 dark:text-sky-400/60">
                 Link expires in 7 days. Leave email blank to share with anyone.
               </p>
+              {inviteError && (
+                <p className={`mt-1.5 text-[11px] ${inviteError.startsWith("An active invite") ? "text-amber-600 dark:text-amber-400" : "text-red-600 dark:text-red-400"}`}>
+                  {inviteError}
+                </p>
+              )}
             </>
           ) : (
             <div className="flex flex-col gap-2">
@@ -1835,7 +1892,7 @@ function UserMembersSection({ projectId, canAdmin }: { projectId: string; canAdm
                 </button>
               </div>
               <button
-                onClick={() => setGeneratedInvite(null)}
+                onClick={() => { setGeneratedInvite(null); setInviteError(null); }}
                 className="self-start text-xs text-sky-600 hover:underline dark:text-sky-400"
               >
                 Generate another
@@ -1938,7 +1995,14 @@ function UserMembersSection({ projectId, canAdmin }: { projectId: string; canAdm
 }
 
 // ─── Team Tab ──────────────────────────────────────────────────────────────────
-const TEAM_ROLES = ["Member", "Coordinator", "Developer", "Reviewer", "Observer"];
+const TEAM_ROLES = ["worker", "coordinator", "reviewer"] as const;
+
+function toApiTeamRole(role: string): "worker" | "coordinator" | "reviewer" {
+  const r = role.trim().toLowerCase();
+  if (r === "coordinator" || r === "reviewer" || r === "worker") return r;
+  if (r === "developer" || r === "member" || r === "observer") return "worker";
+  return "worker";
+}
 
 function AgentRegistryPanel({ agents, onAdd, onClose, alreadyAdded }: {
   agents: TeamMemberWithAgent["agent"][]; onAdd: (id: string, role: string) => Promise<boolean>; onClose: () => void; alreadyAdded: Set<string>;
@@ -2128,7 +2192,7 @@ function TeamMemberRow({ m, projectId, pinging, pingMeta, onPing, onRemove, canM
         {/* Model */}
         <div className="w-32 shrink-0">
           {model ? <span className="rounded bg-zinc-100 px-1.5 py-0.5 text-[11px] font-mono text-zinc-500 dark:bg-white/10">{model}</span>
-                 : <span className="text-xs text-zinc-300 dark:text-zinc-600">—</span>}
+                 : <span className="text-xs text-zinc-300 dark:text-zinc-600">-</span>}
         </div>
         {/* Org */}
         <div className="w-28 shrink-0 truncate text-[11px] text-zinc-500">{orgName ?? "—"}</div>
@@ -2168,10 +2232,15 @@ function TeamTab({ projectId, canManageAgents, canAdminUsers }: { projectId: str
 
   const addedIds = new Set(team.map((m) => m.agentId));
 
-  async function handleAdd(agentId: string): Promise<boolean> {
-    const ok = await addTeamMember(projectId, agentId);
+  async function handleAdd(agentId: string, role: string): Promise<boolean> {
+    const ok = await addTeamMember(projectId, agentId, toApiTeamRole(role));
     if (ok) fetchTeam(projectId).then(setTeam);
     return ok;
+  }
+
+  async function handleRoleChange(agentId: string, role: string): Promise<void> {
+    await addTeamMember(projectId, agentId, toApiTeamRole(role));
+    fetchTeam(projectId).then(setTeam);
   }
   async function handleRemove(agentId: string) {
     await removeTeamMember(projectId, agentId);
@@ -2258,7 +2327,7 @@ function TeamTab({ projectId, canManageAgents, canAdminUsers }: { projectId: str
               canManageAgents={canManageAgents}
               onPing={() => handlePing(m.agentId)}
               onRemove={() => handleRemove(m.agentId)}
-              onRoleChange={undefined}
+              onRoleChange={(role) => { void handleRoleChange(m.agentId, role); }}
             />
           ))
         )}
@@ -2306,7 +2375,7 @@ function ProjectStatsBar({ projectId }: { projectId: string }) {
   const pct      = total > 0 ? Math.round((done / total) * 100) : 0;
 
   const stats: { label: string; value: React.ReactNode; accent?: string }[] = [
-    { label: "Tasks",       value: total,    accent: "text-zinc-900 dark:text-white"      },
+    { label: "Items",       value: total,    accent: "text-zinc-900 dark:text-white"      },
     { label: "Done",        value: done,     accent: "text-emerald-600 dark:text-emerald-400" },
     { label: "In Progress", value: inProg,   accent: "text-brand-600 dark:text-brand-400" },
     { label: "Review",      value: inReview, accent: "text-sky-600 dark:text-sky-400"     },
@@ -2343,12 +2412,23 @@ function ProjectStatsBar({ projectId }: { projectId: string }) {
 }
 
 // ─── Project Header ───────────────────────────────────────────────────────────
-function ProjectHeader({ project }: { project: { id: string; name: string; description?: string; status?: string; slug?: string } }) {
+function ProjectHeader({
+  project,
+  myRole,
+}: {
+  project: { id: string; name: string; description?: string; status?: string; slug?: string };
+  myRole: "owner" | "admin" | "contributor" | "viewer";
+}) {
   const status = project.status ?? "active";
   const statusCls =
     status === "active"  ? "bg-emerald-100 text-emerald-700" :
     status === "review"  ? "bg-amber-100 text-amber-700"     :
     status === "planned" ? "bg-zinc-100 text-zinc-600"       : "bg-zinc-100 text-zinc-500";
+
+  const roleCls =
+    myRole === "owner"       ? "bg-violet-100 text-violet-700" :
+    myRole === "admin"       ? "bg-sky-100 text-sky-700"       :
+    myRole === "contributor" ? "bg-indigo-100 text-indigo-700" : "bg-zinc-100 text-zinc-600";
 
   return (
     <div className="flex min-h-[56px] shrink-0 items-center gap-3 border-b border-zinc-200 bg-white px-1 py-2 sm:h-[72px] sm:gap-4 dark:border-[#2D2A45] dark:bg-transparent">
@@ -2368,6 +2448,9 @@ function ProjectHeader({ project }: { project: { id: string; name: string; descr
         <div className="flex flex-wrap items-center gap-2">
           <h1 className="font-display text-lg font-extrabold text-zinc-900 dark:text-white sm:text-xl">{project.name}</h1>
           <span className={cn("rounded-full px-2.5 py-0.5 text-xs font-semibold capitalize", statusCls)}>{status}</span>
+          <span className={cn("rounded-full px-2.5 py-0.5 text-xs font-semibold", roleCls)}>
+            My role: {myRole}
+          </span>
         </div>
         {project.description && (
           <p className="mt-0.5 hidden text-sm text-zinc-500 dark:text-zinc-400 sm:block truncate">{project.description}</p>
@@ -2389,7 +2472,7 @@ function ProjectHeader({ project }: { project: { id: string; name: string; descr
 
 // ─── Tab Bar ──────────────────────────────────────────────────────────────────
 const TABS: { id: Tab; label: string; icon: React.ElementType }[] = [
-  { id: "table",          label: "Task List",      icon: LayoutList },
+  { id: "table",          label: "Work List",      icon: LayoutList },
   { id: "team",           label: "Team",           icon: Users      },
   { id: "chat",           label: "Chat",           icon: MessageSquare },
   { id: "architecture",   label: "Architecture",   icon: BookOpen   },
@@ -2403,7 +2486,7 @@ function Toolbar({ onNewTask }: { onNewTask: () => void }) {
     <div className="flex h-10 shrink-0 items-center gap-1 border-b border-zinc-100 bg-white px-1 dark:border-[#2D2A45] dark:bg-transparent sm:gap-2">
       <Button variant="primary" size="sm" onClick={onNewTask}>
         <Plus className="h-3.5 w-3.5 sm:mr-1.5" />
-        <span className="hidden sm:inline">New task</span>
+        <span className="hidden sm:inline">New item</span>
       </Button>
       <div className="mx-1 h-4 w-px bg-zinc-200 dark:bg-white/10" />
       {[
@@ -2452,7 +2535,7 @@ export default function ProjectDetailPage(props: { params: Promise<{ id: string 
   return (
     <div className="flex h-full flex-col">
       {/* Project header */}
-      <ProjectHeader project={project} />
+      <ProjectHeader project={project} myRole={myRole} />
 
       {/* Stats bar */}
       <ProjectStatsBar projectId={project.id} />
@@ -2552,8 +2635,8 @@ function SprintBoardTabWithSignal({ view, projectId, newTaskSignal }: { view: "t
     return () => { clearTimeout(retryTimeout); ws?.close(); };
   }, [projectId]);
 
-  async function handleCreate(payload: { title: string; description: string; assignee: string; status: TaskStatus; type: string; priority: Priority }) {
-    await createTask(projectId, { ...payload });
+  async function handleCreate(payload: { title: string; description: string; assigneeAgentId: string | null; status: TaskStatus; type: string; priority: Priority }) {
+    await createTask(projectId, { ...payload, assignee_agent_id: payload.assigneeAgentId });
     // WebSocket task:created is the single source of truth — no optimistic add here.
     setCreateIn(null);
   }
@@ -2567,3 +2650,4 @@ function SprintBoardTabWithSignal({ view, projectId, newTaskSignal }: { view: "t
     </>
   );
 }
+

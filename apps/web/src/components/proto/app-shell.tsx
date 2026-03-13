@@ -8,6 +8,7 @@ import { authLogout, authMe, fetchMyInvites, fetchInviteByToken, acceptProjectIn
 import {
   Activity,
   Award,
+  BarChart2,
   Bell,
   BookOpen,
   Bot,
@@ -17,7 +18,6 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
-  ClipboardList,
   Code2,
   FileText,
   FolderKanban,
@@ -45,38 +45,28 @@ const PRIMARY_NAV = [
   { href: "/projects",      label: "Projects",       icon: FolderKanban      },
   { href: "/workspaces",    label: "Workspaces",     icon: Building2         },
   { href: "/threads",       label: "Threads",        icon: MessageSquareText  },
-  { href: "/calendar",      label: "Calendar",       icon: CalendarDays      },
 ] as const;
 
 const AGENTS_NAV = [
   { href: "/agents",          label: "Registry",  icon: Users          },
   { href: "/agents/onboard",  label: "Onboard",   icon: Terminal       },
-  { href: "/agents/inbox",    label: "Inbox",     icon: Mail           },
-  { href: "/agents/tasks",    label: "Tasks",     icon: ClipboardList  },
   { href: "/agents/chat",     label: "Chat",      icon: MessageSquareText },
   { href: "/agents/levels",   label: "Levels",    icon: Award          },
   { href: "/agents/activity",      label: "Activity",  icon: Zap   },
-  { href: "/agents/invites",       label: "Invites",   icon: Link2 },
-  { href: "/agents/api-reference", label: "API Ref",   icon: Code2 },
-] as const;
-
-const TOOL_NAV = [
-  { href: "/inspect",  label: "Inspect",     icon: Search           },
+  { href: "/agents/api-reference", label: "API Ref",   icon: Code2     },
+  { href: "/agents/usage",         label: "Usage",     icon: BarChart2 },
 ] as const;
 
 const SETTINGS_NAV = [
   { href: "/settings", label: "Settings",    icon: Settings         },
 ] as const;
 
-const DOCS_NAV = [
-  { href: "/docs",                   label: "Overview",        icon: FileText  },
-  { href: "/docs/getting-started",   label: "Getting Started", icon: FileText  },
-  { href: "/docs/agents",            label: "Agents Guide",    icon: FileText  },
-  { href: "/docs/api",               label: "API Reference",   icon: FileText  },
-] as const;
-
-const HELP_NAV = [
-  { href: "/help/faq", label: "FAQ",         icon: HelpCircle       },
+const HELP_MENU_NAV = [
+  { href: "/docs",                 label: "Overview",        icon: FileText   },
+  { href: "/docs/getting-started", label: "Getting Started", icon: FileText   },
+  { href: "/docs/agents",          label: "Agents Guide",    icon: FileText   },
+  { href: "/docs/api",             label: "API Reference",   icon: Code2      },
+  { href: "/help/faq",             label: "FAQ",             icon: HelpCircle },
 ] as const;
 
 // ─── Nav primitives ───────────────────────────────────────────────────────────
@@ -172,13 +162,6 @@ function Sidebar({
           ))}
         </div>
 
-        <SectionLabel label="Tools" collapsed={collapsed} />
-        <div className="flex flex-col gap-0.5">
-          {TOOL_NAV.map((item) => (
-            <NavItem key={item.href} {...item} active={isActive(item.href)} collapsed={collapsed} />
-          ))}
-        </div>
-
         <SectionLabel label="Settings" collapsed={collapsed} />
         <div className="flex flex-col gap-0.5">
           {SETTINGS_NAV.map((item) => (
@@ -186,19 +169,6 @@ function Sidebar({
           ))}
         </div>
 
-        <SectionLabel label="Docs" collapsed={collapsed} />
-        <div className="flex flex-col gap-0.5">
-          {DOCS_NAV.map((item) => (
-            <NavItem key={item.href} {...item} active={isActive(item.href)} collapsed={collapsed} />
-          ))}
-        </div>
-
-        <SectionLabel label="Help" collapsed={collapsed} />
-        <div className="flex flex-col gap-0.5">
-          {HELP_NAV.map((item) => (
-            <NavItem key={item.href} {...item} active={isActive(item.href)} collapsed={collapsed} />
-          ))}
-        </div>
       </nav>
 
       {/* Bottom pinned */}
@@ -424,6 +394,61 @@ function NotificationBell() {
   );
 }
 
+function HelpMenu() {
+  const pathname = usePathname();
+  const [open, setOpen] = React.useState(false);
+  const panelRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    function handler(e: MouseEvent) {
+      if (panelRef.current && !panelRef.current.contains(e.target as Node)) setOpen(false);
+    }
+    if (open) document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  return (
+    <div className="relative" ref={panelRef}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="grid h-8 w-8 place-items-center rounded-lg text-white/50 hover:bg-white/10 hover:text-white transition-colors"
+        title="Help"
+        aria-label="Help"
+      >
+        <HelpCircle className="h-4 w-4" />
+      </button>
+
+      {open && (
+        <div
+          className="absolute right-0 top-full mt-2 w-60 rounded-xl border border-white/10 p-1.5 shadow-xl z-50"
+          style={{ backgroundColor: "#1A0F2E" }}
+        >
+          {HELP_MENU_NAV.map((item) => {
+            const active = pathname === item.href || pathname.startsWith(item.href + "/");
+            const Icon = item.icon;
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                onClick={() => setOpen(false)}
+                className={cn(
+                  "flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-xs transition-colors",
+                  active
+                    ? "bg-white/10 text-white"
+                    : "text-white/70 hover:bg-white/5 hover:text-white"
+                )}
+              >
+                <Icon className="h-3.5 w-3.5" />
+                <span>{item.label}</span>
+              </Link>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── App Shell ────────────────────────────────────────────────────────────────
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
@@ -541,9 +566,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           <NotificationBell />
 
           {/* Help */}
-          <button className="grid h-8 w-8 place-items-center rounded-lg text-white/50 hover:bg-white/10 hover:text-white transition-colors">
-            <HelpCircle className="h-4 w-4" />
-          </button>
+          <HelpMenu />
 
           {/* Divider */}
           <div className="mx-2 h-5 w-px bg-white/10" />
@@ -571,7 +594,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               )}
               <div className="hidden sm:flex flex-col items-start leading-tight">
                 <span className="text-xs font-semibold text-white">{me?.name ?? "…"}</span>
-                <span className="text-[10px] text-white/40">{me?.role ?? ""}</span>
               </div>
               <ChevronDown className={cn("hidden sm:block h-3 w-3 text-white/30 transition-transform", userMenuOpen && "rotate-180")} />
             </button>
@@ -584,8 +606,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               >
                 {/* User info header */}
                 <div className="px-4 py-3 border-b border-white/10">
-                  <p className="text-xs font-semibold text-white">Sumesh</p>
-                  <p className="text-[10px] text-white/40 mt-0.5">Admin</p>
+                  <p className="text-xs font-semibold text-white">{me?.name ?? "User"}</p>
                 </div>
 
                 {/* Logout */}
@@ -620,15 +641,22 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         )}
 
         {/* Desktop sidebar */}
-        <div className="hidden lg:flex">
+        <div className="relative z-30 hidden lg:flex">
           <Sidebar pathname={pathname} collapsed={collapsed} setCollapsed={handleCollapse} me={me} />
         </div>
 
         {/* Main content area */}
-        <main className="flex min-w-0 flex-1 flex-col overflow-y-auto" role="main">
-          <div className="flex-1 px-6 pt-4 pb-6">
-            {children}
-          </div>
+        <main className="relative z-10 flex min-w-0 flex-1 flex-col overflow-hidden" role="main">
+          {/* Full-height pages (threads, chat-style) get no padding and fill the container */}
+          {pathname.startsWith("/threads") || pathname.startsWith("/agents/chat") ? (
+            <div className="flex flex-1 flex-col overflow-hidden">
+              {children}
+            </div>
+          ) : (
+            <div className="flex-1 overflow-y-auto px-6 pt-4 pb-6">
+              {children}
+            </div>
+          )}
         </main>
       </div>
     </div>
