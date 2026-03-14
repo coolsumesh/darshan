@@ -498,6 +498,7 @@ export default function ThreadsPage() {
   const [threadReplyPolicy, setThreadReplyPolicy] = React.useState<ThreadReplyPolicy | null>(null);
   const [threadSlaState, setThreadSlaState] = React.useState<ThreadSlaState | null>(null);
   const [savingNextReply, setSavingNextReply] = React.useState(false);
+  const [threadFlowOpen, setThreadFlowOpen] = React.useState(false);
   const [countdownNow, setCountdownNow] = React.useState(() => Date.now());
   const [voiceSupported, setVoiceSupported] = React.useState(false);
   const [isListening, setIsListening] = React.useState(false);
@@ -1324,6 +1325,12 @@ export default function ThreadsPage() {
                         <span className="font-mono text-[10px] text-slate-400" title={selected.thread_id}>
                           {selected.thread_id.slice(0, 8)}
                         </span>
+                        <button
+                          onClick={() => setThreadFlowOpen(true)}
+                          className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-600 hover:border-violet-400 hover:text-violet-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300"
+                        >
+                          Thread Flow
+                        </button>
                       </>
                     )}
                   </div>
@@ -1525,17 +1532,29 @@ export default function ThreadsPage() {
 
             </div>
 
-            <div className="border-b border-slate-200 bg-slate-50 px-6 py-4 dark:border-slate-800 dark:bg-slate-900">
-              <ThreadFlowPanel
-                thread={selected}
-                participants={threadParticipants}
-                nextReply={nextReply}
-                canManage={canManageParticipants}
-                saving={savingNextReply}
-                onApply={handleApplyNextReply}
-                onClear={handleClearNextReply}
-              />
-            </div>
+
+            {threadFlowOpen && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4" onClick={() => setThreadFlowOpen(false)}>
+                <div className="max-h-[88vh] w-[min(1100px,95vw)] overflow-auto rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl dark:border-slate-800 dark:bg-slate-950" onClick={(e) => e.stopPropagation()}>
+                  <div className="mb-3 flex items-center justify-between">
+                    <div>
+                      <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">Thread Flow</div>
+                      <div className="text-xs text-slate-500 dark:text-slate-400">{selected.subject}</div>
+                    </div>
+                    <button onClick={() => setThreadFlowOpen(false)} className="rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-500 hover:text-slate-700 dark:border-slate-700 dark:text-slate-300">Close</button>
+                  </div>
+                  <ThreadFlowPanel
+                    thread={selected}
+                    participants={threadParticipants}
+                    nextReply={nextReply}
+                    canManage={canManageParticipants}
+                    saving={savingNextReply}
+                    onApply={handleApplyNextReply}
+                    onClear={handleClearNextReply}
+                  />
+                </div>
+              </div>
+            )}
 
             {/* Messages */}
             <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">

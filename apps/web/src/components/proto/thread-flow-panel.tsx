@@ -24,73 +24,60 @@ const STATE_CARD_HEIGHT = 72;
 const BADGE_WIDTH = 132;
 const BADGE_HEIGHT = 36;
 
-function getActiveStateKey(thread: Thread) {
-  if (thread.status === "archived") return "thread.archived";
-  if (thread.status === "closed") return "thread.closed";
-  if (thread.thread_type === "task") {
-    switch (thread.task_status) {
-      case "approved":
-        return "task.approved";
-      case "in-progress":
-        return "task.in_progress";
-      case "review":
-        return "task.review";
-      case "blocked":
-        return "task.blocked";
-      case "proposed":
-      default:
-        return "task.proposed";
-    }
+function getTaskState(thread: Thread) {
+  if (thread.status === "closed") return "Task Closed";
+  if (thread.status === "archived") return "Task Archived";
+  switch (thread.task_status) {
+    case "approved": return "Task Approved";
+    case "in-progress": return "Task In Progress";
+    case "review": return "Task In Review";
+    case "blocked": return "Task Blocked";
+    case "proposed":
+    default: return "Task Proposed";
   }
-  return "conversation.open";
 }
 
 function buildFlow(thread: Thread, nextReply: ThreadNextReply | null) {
-  const stateKeys = thread.thread_type === "task"
-    ? [
-        { id: "task.proposed", label: "Proposed" },
-        { id: "task.approved", label: "Approved" },
-        { id: "task.in_progress", label: "In Progress" },
-        { id: "task.review", label: "Review" },
-        { id: "task.blocked", label: "Blocked" },
-        { id: "thread.closed", label: "Closed" },
-        { id: "thread.archived", label: "Archived" },
-      ]
-    : [
-        { id: "conversation.open", label: "Open" },
-        { id: "thread.closed", label: "Closed" },
-        { id: "thread.archived", label: "Archived" },
-      ];
-
-  const activeStateKey = getActiveStateKey(thread);
-  const nodes: FlowNode[] = stateKeys.map((state, index) => ({
-    id: state.id,
-    type: "state",
-    x: 32 + index * 172,
-    y: 48,
-    data: {
-      label: state.label,
-      state_key: state.id,
-      isActive: state.id === activeStateKey,
+  const laneLabel = thread.thread_type === "task" ? getTaskState(thread) : "Discussion Active";
+  const nodes: FlowNode[] = [
+    {
+      id: "state-active",
+      type: "state",
+      x: 32,
+      y: 48,
+      data: {
+        label: laneLabel,
+        state_key: "active",
+        isActive: true,
+      },
     },
-  }));
+  ];
 
-  const edges: FlowEdge[] = stateKeys.slice(1).map((state, index) => ({
-    id: `transition-${stateKeys[index].id}-${state.id}`,
-    source: stateKeys[index].id,
-    target: state.id,
-    type: "transition",
-    data: {
-      label: "transition",
-      isActivePath: state.id === activeStateKey || stateKeys[index].id === activeStateKey,
-    },
-  }));
+  const edges: FlowEdge[] = [];
 
   if (!nextReply) {
-    return { nodes, edges, width: Math.max(700, nodes.length * 172 + 80), height: 180 };
+    nodes.push({
+      id: "state-no-pending",
+      type: "state",
+      x: 260,
+      y: 48,
+      data: {
+        label: "No Reply Pending",
+        state_key: "no_pending",
+        isActive: true,
+      },
+    });
+    edges.push({
+      id: "transition-active-no-pending",
+      source: "state-active",
+      target: "state-no-pending",
+      type: "transition",
+      data: { label: "current", isActivePath: true },
+    });
+    return { nodes, edges, width: 620, height: 180 };
   }
 
-  const nextReplyNodeX = Math.max(nodes[nodes.length - 1].x + 212, 620);
+  const nextReplyNodeX = 300;
   nodes.push({
     id: "next-reply",
     type: "next-reply",
@@ -107,8 +94,8 @@ function buildFlow(thread: Thread, nextReply: ThreadNextReply | null) {
     },
   });
   edges.push({
-    id: `reply-expected-${activeStateKey}`,
-    source: activeStateKey,
+    id: "reply-expected-active",
+    source: "state-active",
     target: "next-reply",
     type: "reply-expected",
     data: {
