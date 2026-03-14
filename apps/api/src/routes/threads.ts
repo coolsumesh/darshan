@@ -790,6 +790,71 @@ function extractMentionSlugs(messageBody: string): string[] {
   );
 }
 
+async function createMessageReceipts(
+  db: pg.Pool,
+  messageId: string,
+  threadId: string,
+  senderId: string
+) {
+  const { rows: recipients } = await db.query(
+    `SELECT participant_id, participant_slug
+     FROM thread_participants
+     WHERE thread_id = $1
+       AND participant_id != $2
+       AND removed_at IS NULL`,
+    [threadId, senderId]
+  );
+
+  for (const recipient of recipients) {
+    await db.query(
+      `INSERT INTO thread_message_receipts (message_id, recipient_id, recipient_slug, status, sent_at)
+       VALUES ($1, $2, $3, 'sent', now())
+       ON CONFLICT (message_id, recipient_id)
+       DO UPDATE SET recipient_slug = EXCLUDED.recipient_slug,
+                     status = CASE WHEN thread_message_receipts.status = 'read' THEN 'read' ELSE 'sent' END,
+                     updated_at = now()`,
+      [messageId, recipient.participant_id, recipient.participant_slug]
+    );
+  }
+}
+
+async function enqueueReplyRequiredOutbox(
+  db: pg.Pool,
+  threadId: string,
+  messageId: string,
+  targetParticipantIds: string[],
+  reason: string | null
+) {
+  if (targetParticipantIds.length === 0) return;
+
+  const { rows: agentRows } = await db.query(
+    `SELECT id::text AS id FROM agents WHERE id = ANY($1::uuid[])`,
+    [targetParticipantIds]
+  );
+  const agentIds = agentRows.map((row) => String(row.id));
+  if (agentIds.length === 0) return;
+
+  for (const agentId of agentIds) {
+    await db.query(
+      `INSERT INTO thread_event_outbox (event_type, thread_id, message_id, target_agent_id, payload)
+       VALUES ('reply_required', $1, $2, $3, $4::jsonb)`,
+      [
+        threadId,
+        messageId,
+        agentId,
+        JSON.stringify({
+          event_type: "reply_required",
+          thread_id: threadId,
+          message_id: messageId,
+          target_agent_id: agentId,
+          reason: reason ?? "unspecified",
+          created_at: new Date().toISOString(),
+        }),
+      ]
+    );
+  }
+}
+
 async function fanOutNotifications(
   db: pg.Pool,
   messageId: string,
@@ -2042,6 +2107,18 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
           pendingParticipantIdsForNextReply,
           nextReplyReason,
           null
+        );
+      }
+
+      await createMessageReceipts(db, msg.message_id, req.params.thread_id, caller.id);
+
+      if (caller.type === "user" && effectiveIntent === "question") {
+        await enqueueReplyRequiredOutbox(
+          db,
+          req.params.thread_id,
+          msg.message_id,
+          pendingParticipantIdsForNextReply,
+          nextReplyReason
         );
       }
 
