@@ -39,6 +39,18 @@ const THREAD_TYPES = new Set(["conversation", "feature", "level_test", "task"]);
 const THREAD_STATUSES = new Set(["open", "closed", "archived"]);
 const TASK_STATUSES = new Set(["proposed", "approved", "in-progress", "review", "blocked"]);
 const TASK_PRIORITIES = new Set(["high", "medium", "normal", "low"]);
+const MESSAGE_INTENTS = new Set([
+  "greeting",
+  "question",
+  "answer",
+  "suggest",
+  "work_confirmation",
+  "status_update",
+  "review_request",
+  "blocked",
+  "closure",
+]);
+const AWAITING_ON_VALUES = new Set(["user", "agent", "none"]);
 const ACTIVE_RESPONDERS_MAX_NEXT = Math.max(1, Number(process.env.ACTIVE_RESPONDERS_MAX_NEXT ?? 100));
 
 type ReplyPolicyMode = "all" | "restricted";
@@ -303,8 +315,8 @@ async function upsertDescriptionMessage(
   }
 
   await db.query(
-    `INSERT INTO thread_messages (thread_id, sender_id, sender_slug, type, body)
-     VALUES ($1, $2, $3, 'message', $4)`,
+    `INSERT INTO thread_messages (thread_id, sender_id, sender_slug, type, body, intent, awaiting_on)
+     VALUES ($1, $2, $3, 'message', $4, 'status_update', 'none')`,
     [threadId, senderId, senderSlug, description]
   );
 }
@@ -662,6 +674,66 @@ async function hydrateThread(db: DbExecutor, threadId: string) {
   };
 }
 
+async function buildThreadFlow(db: DbExecutor, threadId: string) {
+  const { rows: [thread] } = await db.query(
+    `SELECT thread_id, created_at, created_slug
+     FROM threads
+     WHERE thread_id = $1
+     LIMIT 1`,
+    [threadId]
+  );
+  if (!thread) return { path: [] as Array<Record<string, unknown>>, awaiting_on: null as string | null, next_expected_from: null as string | null };
+
+  const { rows: messages } = await db.query(
+    `SELECT message_id, sender_slug, sent_at, type, intent, awaiting_on, next_expected_from
+     FROM thread_messages
+     WHERE thread_id = $1
+     ORDER BY sent_at ASC, message_id ASC`,
+    [threadId]
+  );
+
+  const path: Array<Record<string, unknown>> = [
+    {
+      seq: 1,
+      event_type: "created",
+      from_actor: "SYSTEM",
+      to_actor: thread.created_slug,
+      message_id: null,
+      created_at: thread.created_at,
+      awaiting_on: "none",
+      next_expected_from: thread.created_slug,
+    },
+  ];
+
+  let lastAwaitingOn: string | null = null;
+  let lastNextExpectedFrom: string | null = null;
+  for (const [index, message] of messages.entries()) {
+    const eventType = (message.intent as string | null) ?? (message.type === "event" ? "status_update" : "answer");
+    const awaitingOn = (message.awaiting_on as string | null) ?? "none";
+    const nextExpectedFrom = (message.next_expected_from as string | null) ?? null;
+    path.push({
+      seq: index + 2,
+      event_type: eventType,
+      from_actor: message.sender_slug,
+      to_actor: nextExpectedFrom,
+      message_id: message.message_id,
+      created_at: message.sent_at,
+      awaiting_on: awaitingOn,
+      next_expected_from: nextExpectedFrom,
+    });
+    if (awaitingOn && awaitingOn !== "none") {
+      lastAwaitingOn = awaitingOn;
+      lastNextExpectedFrom = nextExpectedFrom;
+    }
+  }
+
+  return {
+    path,
+    awaiting_on: lastAwaitingOn,
+    next_expected_from: lastNextExpectedFrom,
+  };
+}
+
 async function notifyTaskAssignee(threadId: string, db: pg.Pool) {
   const { rows } = await db.query(
     `SELECT
@@ -799,8 +871,8 @@ async function insertEventMessage(
   body: string
 ) {
   const { rows: [message] } = await db.query(
-    `INSERT INTO thread_messages (thread_id, sender_id, sender_slug, type, body)
-     VALUES ($1, $2, $3, 'event', $4)
+    `INSERT INTO thread_messages (thread_id, sender_id, sender_slug, type, body, intent, awaiting_on)
+     VALUES ($1, $2, $3, 'event', $4, 'status_update', 'none')
      RETURNING *`,
     [threadId, senderId, senderSlug, body]
   );
@@ -924,8 +996,8 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
         const descriptionText = (description ?? body ?? "").trim();
         if (descriptionText) {
           await client.query(
-            `INSERT INTO thread_messages (thread_id, sender_id, sender_slug, type, body)
-             VALUES ($1, $2, $3, 'message', $4)`,
+            `INSERT INTO thread_messages (thread_id, sender_id, sender_slug, type, body, intent, awaiting_on)
+             VALUES ($1, $2, $3, 'message', $4, 'status_update', 'none')`,
             [thread.thread_id, caller.id, caller.slug, descriptionText]
           );
         }
@@ -1020,9 +1092,9 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
 
         // Send message
         const { rows: [message] } = await client.query(
-          `INSERT INTO thread_messages (thread_id, sender_id, sender_slug, type, body)
-           VALUES ($1, $2, $3, 'message', $4) RETURNING *`,
-          [thread_id, caller.id, caller.slug, body.trim()]
+          `INSERT INTO thread_messages (thread_id, sender_id, sender_slug, type, body, intent, awaiting_on)
+           VALUES ($1, $2, $3, 'message', $4, $5, 'none') RETURNING *`,
+          [thread_id, caller.id, caller.slug, body.trim(), caller.type === "agent" ? "answer" : "question"]
         );
 
         // Create notification for recipient
@@ -1262,7 +1334,8 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
       );
 
       const thread = await hydrateThread(db, req.params.thread_id);
-      return { ok: true, thread: thread ?? access.thread, participants, role: access.role };
+      const flow = await buildThreadFlow(db, req.params.thread_id);
+      return { ok: true, thread: thread ?? access.thread, participants, role: access.role, flow };
     }
   );
 
@@ -1789,7 +1862,16 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
   // ── POST /api/v1/threads/:thread_id/messages — send message ───────────────
   server.post<{
     Params: { thread_id: string };
-    Body: { body?: string; reply_to?: string; priority?: string; attachments?: ThreadAttachment[] };
+    Body: {
+      body?: string;
+      reply_to?: string;
+      priority?: string;
+      attachments?: ThreadAttachment[];
+      intent?: string;
+      intent_confidence?: number;
+      awaiting_on?: "user" | "agent" | "none";
+      next_expected_from?: string | null;
+    };
   }>(
     "/threads/:thread_id/messages",
     async (req, reply) => {
@@ -1805,9 +1887,24 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
         return reply.status(410).send({ ok: false, error: "thread has been deleted" });
       }
 
-      const { body = "", reply_to, priority = "normal", attachments = [] } = req.body ?? {};
+      const {
+        body = "",
+        reply_to,
+        priority = "normal",
+        attachments = [],
+        intent,
+        intent_confidence,
+        awaiting_on,
+        next_expected_from,
+      } = req.body ?? {};
       const cleanBody = body.trim();
       const safeAttachments = Array.isArray(attachments) ? attachments.filter(Boolean).slice(0, 8) : [];
+
+      const normalizedIntent = typeof intent === "string" ? intent.trim().toLowerCase() : "";
+      const normalizedAwaitingOn = typeof awaiting_on === "string" ? awaiting_on.trim().toLowerCase() : "none";
+      const normalizedNextExpectedFrom =
+        typeof next_expected_from === "string" ? next_expected_from.trim() : next_expected_from ?? null;
+      const effectiveIntent = normalizedIntent || (caller.type === "agent" ? "answer" : "question");
 
       for (const a of safeAttachments) {
         if (!a || typeof a !== "object" || typeof a.url !== "string") {
@@ -1817,6 +1914,26 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
 
       if (!cleanBody && safeAttachments.length === 0) {
         return reply.status(400).send({ ok: false, error: "body or attachments required" });
+      }
+      if (!MESSAGE_INTENTS.has(effectiveIntent)) {
+        return reply.status(400).send({ ok: false, error: "invalid intent" });
+      }
+      if (caller.type === "agent" && !normalizedIntent) {
+        return reply.status(400).send({ ok: false, error: "intent is required for agent messages" });
+      }
+      if (!AWAITING_ON_VALUES.has(normalizedAwaitingOn)) {
+        return reply.status(400).send({ ok: false, error: "awaiting_on must be user, agent, or none" });
+      }
+      if ((effectiveIntent === "blocked" || effectiveIntent === "review_request") && normalizedAwaitingOn === "none") {
+        return reply.status(400).send({ ok: false, error: "awaiting_on is required for blocked/review_request" });
+      }
+      if ((effectiveIntent === "blocked" || effectiveIntent === "review_request") && !normalizedNextExpectedFrom) {
+        return reply.status(400).send({ ok: false, error: "next_expected_from is required for blocked/review_request" });
+      }
+      if (intent_confidence !== undefined) {
+        if (typeof intent_confidence !== "number" || Number.isNaN(intent_confidence) || intent_confidence < 0 || intent_confidence > 1) {
+          return reply.status(400).send({ ok: false, error: "intent_confidence must be between 0 and 1" });
+        }
       }
 
       // Validate reply_to belongs to same thread
@@ -1829,9 +1946,23 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
       }
 
       const { rows: [msg] } = await db.query(
-        `INSERT INTO thread_messages (thread_id, reply_to, sender_id, sender_slug, body, attachments)
-         VALUES ($1, $2, $3, $4, $5, $6::jsonb) RETURNING *`,
-        [req.params.thread_id, reply_to ?? null, caller.id, caller.slug, cleanBody, JSON.stringify(safeAttachments)]
+        `INSERT INTO thread_messages (
+           thread_id, reply_to, sender_id, sender_slug, body, attachments,
+           intent, intent_confidence, awaiting_on, next_expected_from
+         )
+         VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10) RETURNING *`,
+        [
+          req.params.thread_id,
+          reply_to ?? null,
+          caller.id,
+          caller.slug,
+          cleanBody,
+          JSON.stringify(safeAttachments),
+          effectiveIntent,
+          intent_confidence ?? null,
+          normalizedAwaitingOn,
+          normalizedNextExpectedFrom,
+        ]
       );
 
       await resolveThreadNextReplyOnMessage(db, req.params.thread_id, caller.id);

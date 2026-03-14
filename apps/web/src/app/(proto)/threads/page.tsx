@@ -30,6 +30,7 @@ import {
   type ThreadAccessRole,
   type ThreadReplyPolicy,
   type ThreadSlaState,
+  type ThreadFlow,
 } from "@/lib/api";
 import { ThreadFlowPanel } from "@/components/proto/thread-flow-panel";
 import { ChevronDown, Inbox, Send, RefreshCw, CheckCircle, ArchiveIcon, Plus, X, Paperclip, UserPlus, Mic, Square } from "lucide-react";
@@ -499,6 +500,7 @@ export default function ThreadsPage() {
   const [threadSlaState, setThreadSlaState] = React.useState<ThreadSlaState | null>(null);
   const [savingNextReply, setSavingNextReply] = React.useState(false);
   const [threadFlowOpen, setThreadFlowOpen] = React.useState(false);
+  const [threadFlow, setThreadFlow] = React.useState<ThreadFlow>({ path: [], awaiting_on: null, next_expected_from: null });
   const [countdownNow, setCountdownNow] = React.useState(() => Date.now());
   const [voiceSupported, setVoiceSupported] = React.useState(false);
   const [isListening, setIsListening] = React.useState(false);
@@ -579,6 +581,7 @@ export default function ThreadsPage() {
         setSelected(detail.thread);
         setThreadParticipants(detail.participants);
         setThreadRole(detail.role);
+        setThreadFlow(detail.flow);
         const msgs = await fetchThreadMessages(existing.thread_id, 200);
         setMessages(msgs);
         return;
@@ -593,6 +596,7 @@ export default function ThreadsPage() {
       setSelected(direct.thread);
       setThreadParticipants(direct.participants);
       setThreadRole(direct.role);
+      setThreadFlow(direct.flow);
       const msgs = await fetchThreadMessages(direct.thread.thread_id, 200);
       setMessages(msgs);
     };
@@ -606,6 +610,7 @@ export default function ThreadsPage() {
     setMessages([]);
     setThreadParticipants([]);
     setThreadRole(null);
+    setThreadFlow({ path: [], awaiting_on: null, next_expected_from: null });
     setDropdownOpen(false);
   };
 
@@ -624,6 +629,7 @@ export default function ThreadsPage() {
           setSelected(detail.thread);
           setThreadParticipants(detail.participants);
           setThreadRole(detail.role);
+          setThreadFlow(detail.flow);
         })
         .catch(() => {});
     }, 15000);
@@ -793,6 +799,7 @@ export default function ThreadsPage() {
     setSelected(detail?.thread ?? thread);
     setThreadParticipants(detail?.participants ?? []);
     setThreadRole(detail?.role ?? null);
+    setThreadFlow(detail?.flow ?? { path: [], awaiting_on: null, next_expected_from: null });
     setMessages([]);
     const msgs = await fetchThreadMessages(thread.thread_id, 200);
     setMessages(msgs);
@@ -946,6 +953,7 @@ export default function ThreadsPage() {
     setSelected(detail?.thread ?? thread);
     setThreadParticipants(detail?.participants ?? []);
     setThreadRole(detail?.role ?? null);
+    setThreadFlow(detail?.flow ?? { path: [], awaiting_on: null, next_expected_from: null });
     const msgs = await fetchThreadMessages(thread.thread_id, 200);
     setMessages(msgs);
   };
@@ -1547,6 +1555,7 @@ export default function ThreadsPage() {
                     thread={selected}
                     participants={threadParticipants}
                     messages={messages}
+                    flow={threadFlow}
                     nextReply={nextReply}
                     canManage={canManageParticipants}
                     saving={savingNextReply}

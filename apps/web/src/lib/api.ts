@@ -136,6 +136,17 @@ export type ThreadAttachment = {
   duration?: number | null;
 };
 
+export type ThreadMessageIntent =
+  | "greeting"
+  | "question"
+  | "answer"
+  | "suggest"
+  | "work_confirmation"
+  | "status_update"
+  | "review_request"
+  | "blocked"
+  | "closure";
+
 export type ThreadMessage = {
   message_id: string;
   thread_id: string;
@@ -146,6 +157,27 @@ export type ThreadMessage = {
   body: string;
   attachments?: ThreadAttachment[];
   sent_at: string;
+  intent?: ThreadMessageIntent;
+  intent_confidence?: number | null;
+  awaiting_on?: "user" | "agent" | "none";
+  next_expected_from?: string | null;
+};
+
+export type ThreadFlowStep = {
+  seq: number;
+  event_type: string;
+  from_actor: string;
+  to_actor: string | null;
+  message_id: string | null;
+  created_at: string;
+  awaiting_on: "user" | "agent" | "none";
+  next_expected_from: string | null;
+};
+
+export type ThreadFlow = {
+  path: ThreadFlowStep[];
+  awaiting_on: "user" | "agent" | null;
+  next_expected_from: string | null;
 };
 
 export type ThreadParticipant = {
@@ -164,6 +196,7 @@ export type ThreadDetail = {
   thread: Thread;
   participants: ThreadParticipant[];
   role: ThreadAccessRole;
+  flow: ThreadFlow;
 };
 
 export type ThreadReplyPolicy = {
@@ -208,7 +241,7 @@ export async function fetchThreads(
 }
 
 export async function fetchThread(threadId: string): Promise<ThreadDetail | null> {
-  const data = await apiFetch<{ ok: boolean; thread: Thread; participants?: ThreadParticipant[]; role?: ThreadAccessRole }>(
+  const data = await apiFetch<{ ok: boolean; thread: Thread; participants?: ThreadParticipant[]; role?: ThreadAccessRole; flow?: ThreadFlow }>(
     `/api/v1/threads/${threadId}`
   );
   if (!data?.ok || !data.thread) return null;
@@ -216,6 +249,7 @@ export async function fetchThread(threadId: string): Promise<ThreadDetail | null
     thread: data.thread,
     participants: data.participants ?? [],
     role: data.role ?? "participant",
+    flow: data.flow ?? { path: [], awaiting_on: null, next_expected_from: null },
   };
 }
 
