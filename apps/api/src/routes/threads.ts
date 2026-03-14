@@ -783,6 +783,12 @@ async function notifyTaskAssignee(threadId: string, db: pg.Pool) {
 
 // ── Fan-out helpers ───────────────────────────────────────────────────────────
 
+function extractMentionSlugs(messageBody: string): string[] {
+  return Array.from(
+    new Set((messageBody.match(/@([A-Za-z0-9_]+)/g) ?? []).map((m) => m.slice(1).toLowerCase()))
+  );
+}
+
 async function fanOutNotifications(
   db: pg.Pool,
   messageId: string,
@@ -792,9 +798,8 @@ async function fanOutNotifications(
   priority: string = "normal",
   messageBody: string = ""
 ) {
-  // Parse @mentions — if present, only notify mentioned agents
-  const mentionedSlugs = (messageBody.match(/@([A-Za-z0-9_]+)/g) ?? [])
-    .map(m => m.slice(1).toLowerCase());
+  // Parse @mentions — if present, only notify mentioned participants
+  const mentionedSlugs = extractMentionSlugs(messageBody);
 
   // All active participants except sender
   const { rows: allRecipients } = await db.query(
@@ -1906,6 +1911,11 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
         typeof next_expected_from === "string" ? next_expected_from.trim() : next_expected_from ?? null;
       const effectiveIntent = normalizedIntent || (caller.type === "agent" ? "answer" : "question");
 
+      let effectiveAwaitingOn = normalizedAwaitingOn;
+      let effectiveNextExpectedFrom = normalizedNextExpectedFrom;
+      let pendingParticipantIdsForNextReply: string[] = [];
+      let nextReplyReason: string | null = null;
+
       for (const a of safeAttachments) {
         if (!a || typeof a !== "object" || typeof a.url !== "string") {
           return reply.status(400).send({ ok: false, error: "invalid attachments payload" });
@@ -1936,6 +1946,39 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
         }
       }
 
+      // Default awaiting behavior for user questions:
+      // - no @mentions => await all active participants (except sender)
+      // - @mentions present => await only mentioned active participants
+      if (caller.type === "user" && effectiveIntent === "question") {
+        const { rows: activeParticipants } = await db.query(
+          `SELECT participant_id, participant_slug
+           FROM thread_participants
+           WHERE thread_id = $1
+             AND participant_id != $2
+             AND removed_at IS NULL`,
+          [req.params.thread_id, caller.id]
+        );
+
+        const mentionedSlugs = extractMentionSlugs(cleanBody);
+        const targetedParticipants = mentionedSlugs.length > 0
+          ? activeParticipants.filter((participant) => mentionedSlugs.includes(String(participant.participant_slug ?? "").toLowerCase()))
+          : activeParticipants;
+
+        pendingParticipantIdsForNextReply = targetedParticipants.map((participant) => String(participant.participant_id));
+
+        if (pendingParticipantIdsForNextReply.length > 0) {
+          if (normalizedAwaitingOn === "none") {
+            effectiveAwaitingOn = "agent";
+          }
+          if (!effectiveNextExpectedFrom) {
+            effectiveNextExpectedFrom = mentionedSlugs.length > 0
+              ? targetedParticipants.map((participant) => String(participant.participant_slug)).join(",")
+              : "ALL_PARTICIPANTS";
+          }
+          nextReplyReason = mentionedSlugs.length > 0 ? "mentions" : "all_participants";
+        }
+      }
+
       // Validate reply_to belongs to same thread
       if (reply_to) {
         const { rows: [parent] } = await db.query(
@@ -1960,12 +2003,24 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
           JSON.stringify(safeAttachments),
           effectiveIntent,
           intent_confidence ?? null,
-          normalizedAwaitingOn,
-          normalizedNextExpectedFrom,
+          effectiveAwaitingOn,
+          effectiveNextExpectedFrom,
         ]
       );
 
       await resolveThreadNextReplyOnMessage(db, req.params.thread_id, caller.id);
+
+      if (pendingParticipantIdsForNextReply.length > 0) {
+        await upsertThreadNextReply(
+          db,
+          req.params.thread_id,
+          caller.id,
+          "all",
+          pendingParticipantIdsForNextReply,
+          nextReplyReason,
+          null
+        );
+      }
 
       // Fan out notifications to all active participants except sender
       await fanOutNotifications(db, msg.message_id, req.params.thread_id, caller.id, caller.type, priority, cleanBody);
