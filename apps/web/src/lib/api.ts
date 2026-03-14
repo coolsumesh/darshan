@@ -257,12 +257,22 @@ export async function sendThreadMessage(
   threadId: string,
   body: string,
   attachments: ThreadAttachment[] = []
-): Promise<ThreadMessage | null> {
-  const data = await apiFetch<{ ok: boolean; message: ThreadMessage }>(
-    `/api/v1/threads/${threadId}/messages`,
-    { method: "POST", body: JSON.stringify({ body, attachments }) }
-  );
-  return data?.ok ? data.message ?? null : null;
+): Promise<{ ok: true; message: ThreadMessage } | { ok: false; error?: string; status?: number }> {
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/threads/${threadId}/messages`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ body, attachments }),
+    });
+    const data = await res.json().catch(() => null) as { ok?: boolean; message?: ThreadMessage; error?: string } | null;
+    if (!res.ok || !data?.ok || !data.message) {
+      return { ok: false, error: data?.error ?? `HTTP ${res.status}`, status: res.status };
+    }
+    return { ok: true, message: data.message };
+  } catch {
+    return { ok: false, error: "Network error" };
+  }
 }
 
 export async function updateThreadNextReply(

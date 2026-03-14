@@ -829,14 +829,14 @@ export default function ThreadsPage() {
     if (!selected || sending || (!draft.trim() && draftAttachments.length === 0)) return;
     setSending(true);
     try {
-      const msg = await sendThreadMessage(selected.thread_id, draft.trim(), draftAttachments);
-      if (msg) {
+      const result = await sendThreadMessage(selected.thread_id, draft.trim(), draftAttachments);
+      if (result.ok) {
         // Do not append optimistically here.
         // WebSocket thread.message_created is the single source of truth and avoids duplicate flashes.
         setDraft("");
         setDraftAttachments([]);
       } else {
-        setToast({ tone: "error", message: "Failed to send message. Check permissions/next-reply state and try again." });
+        setToast({ tone: "error", message: `Failed to send: ${result.error ?? "unknown error"}` });
       }
     } finally {
       setSending(false);
