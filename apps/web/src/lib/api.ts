@@ -147,6 +147,16 @@ export type ThreadMessageIntent =
   | "blocked"
   | "closure";
 
+export type ThreadReceiptSummary = {
+  total_recipients: number;
+  sent_count: number;
+  delivered_count: number;
+  read_count: number;
+  all_sent: boolean;
+  all_delivered: boolean;
+  all_read: boolean;
+};
+
 export type ThreadMessage = {
   message_id: string;
   thread_id: string;
@@ -161,6 +171,7 @@ export type ThreadMessage = {
   intent_confidence?: number | null;
   awaiting_on?: "user" | "agent" | "none";
   next_expected_from?: string | null;
+  receipt_summary?: ThreadReceiptSummary;
 };
 
 export type ThreadFlowStep = {
@@ -272,6 +283,22 @@ export async function fetchThreadMessages(threadId: string, limit = 100): Promis
     `/api/v1/threads/${threadId}/messages?limit=${safeLimit}`
   );
   return data?.ok ? (data.messages ?? []) : [];
+}
+
+export async function markThreadMessageDelivered(threadId: string, messageId: string): Promise<ThreadReceiptSummary | null> {
+  const data = await apiFetch<{ ok: boolean; receipt_summary?: ThreadReceiptSummary }>(
+    `/api/v1/threads/${threadId}/messages/${messageId}/delivered`,
+    { method: "POST" }
+  );
+  return data?.ok ? (data.receipt_summary ?? null) : null;
+}
+
+export async function markThreadMessageRead(threadId: string, messageId: string): Promise<ThreadReceiptSummary | null> {
+  const data = await apiFetch<{ ok: boolean; receipt_summary?: ThreadReceiptSummary }>(
+    `/api/v1/threads/${threadId}/messages/${messageId}/read`,
+    { method: "POST" }
+  );
+  return data?.ok ? (data.receipt_summary ?? null) : null;
 }
 
 export async function uploadThreadAttachment(threadId: string, file: File): Promise<ThreadAttachment | null> {

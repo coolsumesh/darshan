@@ -14,6 +14,8 @@ import {
   fetchTeam,
   fetchAgentsDirectory,
   sendThreadMessage,
+  markThreadMessageDelivered,
+  markThreadMessageRead,
   setThreadStatus,
   addThreadParticipant,
   removeThreadParticipant,
@@ -269,8 +271,42 @@ function attachmentUrl(url: string): string {
   return `${base}${url}`;
 }
 
+function receiptTick(summary?: ThreadMessage["receipt_summary"]): { icon: string; color: string; title: string } {
+  if (!summary || summary.total_recipients === 0) {
+    return { icon: "✓", color: "text-slate-400", title: "No recipients" };
+  }
+
+  if (summary.read_count === summary.total_recipients) {
+    return {
+      icon: "✓✓",
+      color: "text-sky-400",
+      title: `Read by ${summary.read_count}/${summary.total_recipients} participants`,
+    };
+  }
+  if (summary.read_count > 0) {
+    return {
+      icon: "✓✓",
+      color: "text-indigo-300",
+      title: `Read by ${summary.read_count}/${summary.total_recipients} participants`,
+    };
+  }
+  if (summary.delivered_count === summary.total_recipients) {
+    return {
+      icon: "✓✓",
+      color: "text-slate-400",
+      title: `Read by ${summary.read_count}/${summary.total_recipients} participants`,
+    };
+  }
+  return {
+    icon: "✓",
+    color: "text-slate-400",
+    title: `Read by ${summary.read_count}/${summary.total_recipients} participants`,
+  };
+}
+
 function MessageBubble({ msg, isMe, knownSlugs }: { msg: ThreadMessage; isMe: boolean; knownSlugs: Set<string> }) {
   const atts = Array.isArray(msg.attachments) ? msg.attachments : [];
+  const tick = receiptTick(msg.receipt_summary);
   return (
     <div className={`flex items-start gap-3 ${isMe ? "flex-row-reverse" : ""}`}>
       <Avatar slug={msg.sender_slug} size="sm" />
@@ -282,6 +318,11 @@ function MessageBubble({ msg, isMe, knownSlugs }: { msg: ThreadMessage; isMe: bo
             </span>
           )}
           <span className="text-[10px] text-slate-400">{relativeTime(msg.sent_at)}</span>
+          {isMe && (
+            <span className={`text-[10px] ${tick.color}`} title={tick.title}>
+              {tick.icon}
+            </span>
+          )}
           <span className="text-[10px] font-mono text-slate-300 dark:text-slate-600 select-all" title={msg.message_id}>
             {msg.message_id.slice(0, 8)}
           </span>
@@ -748,6 +789,10 @@ export default function ThreadsPage() {
 
             if (selected && selected.thread_id === threadId) {
               setMessages((prev) => prev.some((m) => m.message_id === msg.message_id) ? prev : [...prev, msg]);
+              if (msg.sender_slug !== "SANJAYA") {
+                markThreadMessageDelivered(threadId, msg.message_id).catch(() => {});
+                markThreadMessageRead(threadId, msg.message_id).catch(() => {});
+              }
               fetchThreadSla(threadId)
                 .then((state) => {
                   setThreadReplyPolicy(state?.reply_policy ?? null);
@@ -771,6 +816,18 @@ export default function ThreadsPage() {
                 })
                 .catch(() => {});
             }
+            return;
+          }
+
+          if (type === "thread.message_receipt_updated") {
+            const threadId = data?.thread_id as string | undefined;
+            const messageId = data?.message_id as string | undefined;
+            const receiptSummary = data?.receipt_summary as ThreadMessage["receipt_summary"] | undefined;
+            if (!threadId || !messageId || !receiptSummary) return;
+            if (selected?.thread_id !== threadId) return;
+            setMessages((prev) => prev.map((m) => (
+              m.message_id === messageId ? { ...m, receipt_summary: receiptSummary } : m
+            )));
             return;
           }
 
@@ -803,6 +860,13 @@ export default function ThreadsPage() {
     setMessages([]);
     const msgs = await fetchThreadMessages(thread.thread_id, 200);
     setMessages(msgs);
+
+    // Mark incoming messages as delivered/read when the thread is opened.
+    const incoming = msgs.filter((m) => m.sender_slug !== "SANJAYA");
+    incoming.forEach((m) => {
+      markThreadMessageDelivered(thread.thread_id, m.message_id).catch(() => {});
+      markThreadMessageRead(thread.thread_id, m.message_id).catch(() => {});
+    });
   }, []);
 
   // Scroll to bottom when messages load
