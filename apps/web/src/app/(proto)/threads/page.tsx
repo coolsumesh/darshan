@@ -1546,6 +1546,7 @@ export default function ThreadsPage() {
                   <ThreadFlowPanel
                     thread={selected}
                     participants={threadParticipants}
+                    messages={messages}
                     nextReply={nextReply}
                     canManage={canManageParticipants}
                     saving={savingNextReply}

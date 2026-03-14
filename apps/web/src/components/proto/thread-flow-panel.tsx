@@ -1,166 +1,147 @@
 "use client";
 
 import * as React from "react";
-import type { Thread, ThreadNextReply, ThreadParticipant } from "@/lib/api";
+import type { Thread, ThreadMessage, ThreadNextReply, ThreadParticipant } from "@/lib/api";
 
-type FlowNode = {
+type GraphNode = {
   id: string;
-  type: "state" | "next-reply" | "participant-badge";
+  slug: string;
   x: number;
   y: number;
-  data: Record<string, unknown>;
 };
 
-type FlowEdge = {
+type GraphEdge = {
   id: string;
-  source: string;
-  target: string;
-  type: "transition" | "reply-expected" | "reply-participant";
-  data: Record<string, unknown>;
+  from: string;
+  to: string;
+  kind: "expected" | "unexpected";
+  status: "pending" | "fulfilled";
+  label: string;
 };
 
-const STATE_CARD_WIDTH = 150;
-const STATE_CARD_HEIGHT = 72;
-const BADGE_WIDTH = 132;
-const BADGE_HEIGHT = 36;
+const NODE_R = 22;
 
-function getTaskState(thread: Thread) {
-  if (thread.status === "closed") return "Task Closed";
-  if (thread.status === "archived") return "Task Archived";
-  switch (thread.task_status) {
-    case "approved": return "Task Approved";
-    case "in-progress": return "Task In Progress";
-    case "review": return "Task In Review";
-    case "blocked": return "Task Blocked";
-    case "proposed":
-    default: return "Task Proposed";
-  }
+function mentionSlugs(body: string) {
+  return Array.from(new Set((body.match(/@([A-Za-z0-9_]+)/g) ?? []).map((m) => m.slice(1).toUpperCase())));
 }
 
-function buildFlow(thread: Thread, nextReply: ThreadNextReply | null) {
-  const laneLabel = thread.thread_type === "task" ? getTaskState(thread) : "Discussion Active";
-  const nodes: FlowNode[] = [
-    {
-      id: "state-active",
-      type: "state",
-      x: 32,
-      y: 48,
-      data: {
-        label: laneLabel,
-        state_key: "active",
-        isActive: true,
-      },
-    },
-  ];
+function buildGraph(
+  participants: ThreadParticipant[],
+  messages: ThreadMessage[],
+  nextReply: ThreadNextReply | null
+) {
+  const active = participants.filter((p) => !p.removed_at);
+  const slugs = Array.from(new Set(active.map((p) => p.participant_slug.toUpperCase()))).sort();
+  const messageById = new Map(messages.map((m) => [m.message_id, m]));
 
-  const edges: FlowEdge[] = [];
-
-  if (!nextReply) {
-    nodes.push({
-      id: "state-no-pending",
-      type: "state",
-      x: 260,
-      y: 48,
-      data: {
-        label: "No Reply Pending",
-        state_key: "no_pending",
-        isActive: true,
-      },
-    });
-    edges.push({
-      id: "transition-active-no-pending",
-      source: "state-active",
-      target: "state-no-pending",
-      type: "transition",
-      data: { label: "current", isActivePath: true },
-    });
-    return { nodes, edges, width: 620, height: 180 };
+  // Expected edges from mentions in each message
+  const expected = new Map<string, GraphEdge>();
+  for (const m of messages) {
+    const from = m.sender_slug.toUpperCase();
+    const mentions = mentionSlugs(m.body).filter((s) => s !== from && slugs.includes(s));
+    for (const to of mentions) {
+      const key = `${m.message_id}:${from}->${to}`;
+      expected.set(key, {
+        id: `exp-${key}`,
+        from,
+        to,
+        kind: "expected",
+        status: "pending",
+        label: "to be replied by",
+      });
+    }
   }
 
-  const nextReplyNodeX = 300;
-  nodes.push({
-    id: "next-reply",
-    type: "next-reply",
-    x: nextReplyNodeX,
-    y: 48,
-    data: {
-      label: nextReply.mode === "all" ? "All Pending" : "Any Pending",
-      mode: nextReply.mode,
-      pendingParticipantSlugs: nextReply.pending_participant_slugs,
-      reason: nextReply.reason,
-      expiresAt: nextReply.expires_at,
-      isExpired: nextReply.is_expired,
-      isActive: true,
-    },
-  });
-  edges.push({
-    id: "reply-expected-active",
-    source: "state-active",
-    target: "next-reply",
-    type: "reply-expected",
-    data: {
-      label: "await reply",
-      isActivePath: true,
-    },
-  });
+  const edges: GraphEdge[] = [];
 
-  nextReply.pending_participant_slugs.forEach((slug, index) => {
-    const badgeId = `pending-${slug}`;
-    nodes.push({
-      id: badgeId,
-      type: "participant-badge",
-      x: nextReplyNodeX + 220,
-      y: 22 + index * 48,
-      data: {
-        slug,
-        isPending: true,
-      },
-    });
-    edges.push({
-      id: `reply-participant-${slug}`,
-      source: "next-reply",
-      target: badgeId,
-      type: "reply-participant",
-      data: {
-        label: nextReply.mode === "all" ? "required" : "eligible",
-      },
-    });
-  });
+  // Resolve replies and unexpected replies
+  for (const m of messages) {
+    if (!m.reply_to) continue;
+    const parent = messageById.get(m.reply_to);
+    if (!parent) continue;
 
-  return {
-    nodes,
-    edges,
-    width: nextReplyNodeX + 400,
-    height: Math.max(180, 100 + nextReply.pending_participant_slugs.length * 48),
-  };
-}
-
-function findNode(nodes: FlowNode[], id: string) {
-  return nodes.find((node) => node.id === id) ?? null;
-}
-
-function nodeCenter(node: FlowNode) {
-  const width = node.type === "participant-badge" ? BADGE_WIDTH : STATE_CARD_WIDTH;
-  const height = node.type === "participant-badge" ? BADGE_HEIGHT : STATE_CARD_HEIGHT;
-  return {
-    x: node.x + width / 2,
-    y: node.y + height / 2,
-  };
-}
-
-function nextReplySummary(nextReply: ThreadNextReply | null) {
-  if (!nextReply) return "No reply pending";
-  if (nextReply.mode === "any") {
-    return nextReply.pending_participant_slugs.length > 2
-      ? `Reply pending: any of ${nextReply.pending_participant_slugs.length}`
-      : `Reply pending: ${nextReply.pending_participant_slugs.join(", ")}`;
+    const from = parent.sender_slug.toUpperCase();
+    const to = m.sender_slug.toUpperCase();
+    const e = expected.get(`${parent.message_id}:${from}->${to}`);
+    if (e) {
+      e.status = "fulfilled";
+      edges.push(e);
+    } else {
+      edges.push({
+        id: `unexp-${parent.message_id}-${m.message_id}`,
+        from,
+        to,
+        kind: "unexpected",
+        status: "fulfilled",
+        label: "",
+      });
+    }
   }
-  return `Reply pending: ${nextReply.pending_participant_slugs.join(", ")}`;
+
+  // Remaining pending expected edges
+  for (const e of expected.values()) {
+    if (e.status === "pending") edges.push(e);
+  }
+
+  // Pending from next_reply (final state marker)
+  if (nextReply) {
+    const pendingSet = new Set(nextReply.pending_participant_slugs.map((s) => s.toUpperCase()));
+    for (const slug of pendingSet) {
+      edges.push({
+        id: `nr-${slug}`,
+        from: "SYSTEM",
+        to: slug,
+        kind: "expected",
+        status: "pending",
+        label: "pending reply",
+      });
+    }
+  }
+
+  // Nodes in circular layout (+ optional SYSTEM node)
+  const nodeIds = [...slugs];
+  if (nextReply) nodeIds.push("SYSTEM");
+  const cx = 430;
+  const cy = 240;
+  const radius = Math.max(120, 52 + nodeIds.length * 16);
+  const nodes: GraphNode[] = nodeIds.map((id, i) => {
+    if (id === "SYSTEM") return { id, slug: id, x: cx, y: 52 };
+    const angle = (2 * Math.PI * i) / Math.max(slugs.length, 1) - Math.PI / 2;
+    return {
+      id,
+      slug: id,
+      x: cx + radius * Math.cos(angle),
+      y: cy + radius * Math.sin(angle),
+    };
+  });
+
+  return { nodes, edges, width: 860, height: 500 };
+}
+
+function curvedPath(x1: number, y1: number, x2: number, y2: number, bend = 0.22) {
+  const mx = (x1 + x2) / 2;
+  const my = (y1 + y2) / 2;
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const nx = -dy;
+  const ny = dx;
+  const cx = mx + nx * bend;
+  const cy = my + ny * bend;
+  return `M ${x1} ${y1} Q ${cx} ${cy} ${x2} ${y2}`;
+}
+
+function terminalText(thread: Thread, nextReply: ThreadNextReply | null) {
+  if (thread.status === "closed") return "Conversation closed";
+  if (!nextReply) return "No pending reply";
+  const slugs = nextReply.pending_participant_slugs;
+  if (!slugs.length) return "No pending reply";
+  return `Pending for reply from ${slugs.join(", ")}`;
 }
 
 export function ThreadFlowPanel({
   thread,
   participants,
+  messages,
   nextReply,
   canManage,
   saving,
@@ -169,6 +150,7 @@ export function ThreadFlowPanel({
 }: {
   thread: Thread;
   participants: ThreadParticipant[];
+  messages: ThreadMessage[];
   nextReply: ThreadNextReply | null;
   canManage: boolean;
   saving: boolean;
@@ -179,6 +161,7 @@ export function ThreadFlowPanel({
     () => participants.filter((participant) => !participant.removed_at),
     [participants]
   );
+
   const [mode, setMode] = React.useState<"any" | "all">("any");
   const [reason, setReason] = React.useState("");
   const [selectedIds, setSelectedIds] = React.useState<string[]>([]);
@@ -189,88 +172,59 @@ export function ThreadFlowPanel({
     setSelectedIds(nextReply?.pending_participant_ids ?? []);
   }, [nextReply?.mode, nextReply?.reason, nextReply?.pending_participant_ids, thread.thread_id]);
 
-  const flow = React.useMemo(() => buildFlow(thread, nextReply), [thread, nextReply]);
+  const flow = React.useMemo(
+    () => buildGraph(participants, messages.slice(-80), nextReply),
+    [participants, messages, nextReply]
+  );
+
+  const nodeMap = new Map(flow.nodes.map((n) => [n.id, n]));
 
   return (
     <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">Thread Flow</div>
-          <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">{nextReplySummary(nextReply)}</div>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">Reply Network</div>
+        <div className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+          {terminalText(thread, nextReply)}
         </div>
-        {nextReply && (
-          <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${nextReply.is_expired ? "bg-rose-100 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300" : "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300"}`}>
-            {nextReply.is_expired ? "Expired" : nextReply.mode === "all" ? "Waiting on all" : "Waiting on any"}
-          </span>
-        )}
       </div>
 
-      <div className="mt-4 overflow-x-auto">
-        <div className="relative min-w-[700px]" style={{ height: flow.height, width: flow.width }}>
+      <div className="overflow-x-auto">
+        <div className="relative min-w-[820px]" style={{ width: flow.width, height: flow.height }}>
           <svg className="absolute inset-0 h-full w-full" aria-hidden="true">
-            {flow.edges.map((edge) => {
-              const source = findNode(flow.nodes, edge.source);
-              const target = findNode(flow.nodes, edge.target);
-              if (!source || !target) return null;
-              const start = nodeCenter(source);
-              const end = nodeCenter(target);
-              const isActive = Boolean(edge.data.isActivePath);
+            {flow.edges.map((e) => {
+              const a = nodeMap.get(e.from);
+              const b = nodeMap.get(e.to);
+              if (!a || !b) return null;
+              const path = curvedPath(a.x, a.y, b.x, b.y, e.kind === "unexpected" ? 0.1 : 0.2);
+              const stroke = e.kind === "unexpected" ? "#94a3b8" : e.status === "pending" ? "#f59e0b" : "#22c55e";
               return (
-                <g key={edge.id}>
-                  <path
-                    d={`M ${start.x} ${start.y} C ${start.x + 48} ${start.y}, ${end.x - 48} ${end.y}, ${end.x} ${end.y}`}
-                    fill="none"
-                    stroke={isActive ? "#8b5cf6" : "#cbd5e1"}
-                    strokeWidth={isActive ? 3 : 2}
-                    strokeDasharray={edge.type === "reply-participant" ? "6 4" : undefined}
-                  />
+                <g key={e.id}>
+                  <path d={path} fill="none" stroke={stroke} strokeWidth={e.status === "pending" ? 2.5 : 2} strokeDasharray={e.status === "pending" ? "7 4" : undefined} />
+                  {e.label ? (
+                    <text x={(a.x + b.x) / 2} y={(a.y + b.y) / 2 - 8} textAnchor="middle" className="fill-slate-500 text-[10px]">
+                      {e.label}
+                    </text>
+                  ) : null}
                 </g>
               );
             })}
           </svg>
 
-          {flow.nodes.map((node) => {
-            if (node.type === "participant-badge") {
-              return (
-                <div
-                  key={node.id}
-                  className="absolute flex items-center justify-center rounded-full border border-slate-200 bg-slate-50 px-3 text-xs font-semibold text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300"
-                  style={{ left: node.x, top: node.y, width: BADGE_WIDTH, height: BADGE_HEIGHT }}
-                >
-                  {String(node.data.slug)}
-                </div>
-              );
-            }
-
-            const isActive = Boolean(node.data.isActive);
-            const isReplyNode = node.type === "next-reply";
-            return (
-              <div
-                key={node.id}
-                className={`absolute rounded-2xl border px-4 py-3 shadow-sm ${
-                  isReplyNode
-                    ? "border-amber-300 bg-amber-50 dark:border-amber-900/70 dark:bg-amber-950/30"
-                    : isActive
-                    ? "border-violet-300 bg-violet-50 dark:border-violet-900/70 dark:bg-violet-950/30"
-                    : "border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-900"
-                }`}
-                style={{ left: node.x, top: node.y, width: STATE_CARD_WIDTH, height: STATE_CARD_HEIGHT }}
-              >
-                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
-                  {isReplyNode ? "Next Reply" : "State"}
-                </div>
-                <div className="mt-1 text-sm font-semibold text-slate-900 dark:text-slate-100">
-                  {String(node.data.label)}
-                </div>
-                {isReplyNode && (
-                  <div className="mt-1 line-clamp-2 text-[11px] text-slate-500 dark:text-slate-400">
-                    {String(node.data.reason || "Awaiting participant reply")}
-                  </div>
-                )}
+          {flow.nodes.map((n) => (
+            <div key={n.id} className="absolute -translate-x-1/2 -translate-y-1/2" style={{ left: n.x, top: n.y }}>
+              <div className={`flex h-11 w-11 items-center justify-center rounded-full border text-[11px] font-bold ${n.id === "SYSTEM" ? "border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-300" : "border-violet-300 bg-violet-50 text-violet-700 dark:border-violet-800 dark:bg-violet-950/30 dark:text-violet-300"}`}>
+                {n.id === "SYSTEM" ? "SYS" : n.slug.slice(0, 2)}
               </div>
-            );
-          })}
+              <div className="mt-1 text-center text-[10px] font-medium text-slate-500">{n.slug}</div>
+            </div>
+          ))}
         </div>
+      </div>
+
+      <div className="mt-3 flex flex-wrap items-center gap-3 text-[11px] text-slate-500 dark:text-slate-400">
+        <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-amber-500" /> pending expected</span>
+        <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-green-500" /> expected fulfilled</span>
+        <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-slate-400" /> unexpected reply</span>
       </div>
 
       {canManage && (
