@@ -505,6 +505,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     } catch { /* no-op */ }
   }
 
+  const useFullHeightMain = pathname === "/threads" || pathname.startsWith("/agents/chat");
+
   return (
     <div className="flex h-full flex-col bg-zinc-50 dark:bg-[#0C0A12]">
       <div className="pointer-events-none fixed inset-0 bg-grid opacity-40" />
@@ -648,7 +650,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         {/* Main content area */}
         <main className="relative z-10 flex min-w-0 flex-1 flex-col overflow-hidden" role="main">
           {/* Full-height pages (threads, chat-style) get no padding and fill the container */}
-          {pathname.startsWith("/threads") || pathname.startsWith("/agents/chat") ? (
+          {useFullHeightMain ? (
             <div className="flex flex-1 flex-col overflow-hidden">
               {children}
             </div>
