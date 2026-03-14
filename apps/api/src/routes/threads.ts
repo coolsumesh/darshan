@@ -50,6 +50,7 @@ const MESSAGE_INTENTS = new Set([
   "blocked",
   "closure",
 ]);
+const TARGETED_REPLY_MESSAGE_INTENTS = new Set(["answer", "review_request", "blocked"]);
 const AWAITING_ON_VALUES = new Set(["user", "agent", "none"]);
 const ACTIVE_RESPONDERS_MAX_NEXT = Math.max(1, Number(process.env.ACTIVE_RESPONDERS_MAX_NEXT ?? 100));
 
@@ -2008,7 +2009,29 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
         ]
       );
 
-      await resolveThreadNextReplyOnMessage(db, req.params.thread_id, caller.id);
+      const nextReplyBeforeMessage = await loadThreadNextReply(db, req.params.thread_id);
+      const isTargetedAgentReply =
+        caller.type === "agent" &&
+        !!nextReplyBeforeMessage?.pending_participant_ids.includes(caller.id);
+      const canResolveTargetedReply =
+        !isTargetedAgentReply || TARGETED_REPLY_MESSAGE_INTENTS.has(effectiveIntent);
+
+      if (isTargetedAgentReply && !canResolveTargetedReply) {
+        req.log.warn(
+          {
+            thread_id: req.params.thread_id,
+            agent_id: caller.id,
+            intent: effectiveIntent,
+            pending_participant_ids: nextReplyBeforeMessage?.pending_participant_ids ?? [],
+            metric: "targeted_notification_reply_violation",
+          },
+          "agent posted non-resolving message while targeted for next reply"
+        );
+      }
+
+      if (canResolveTargetedReply) {
+        await resolveThreadNextReplyOnMessage(db, req.params.thread_id, caller.id);
+      }
 
       if (pendingParticipantIdsForNextReply.length > 0) {
         await upsertThreadNextReply(
