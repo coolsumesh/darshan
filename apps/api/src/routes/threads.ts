@@ -934,6 +934,42 @@ async function fanOutNotifications(
   }
 }
 
+async function loadReceiptSummaryByMessageIds(db: pg.Pool, messageIds: string[]) {
+  if (messageIds.length === 0) return new Map<string, Record<string, unknown>>();
+
+  const { rows } = await db.query(
+    `SELECT
+       message_id::text,
+       count(*)::int AS total_recipients,
+       count(*) FILTER (WHERE status IN ('sent','delivered','read'))::int AS sent_count,
+       count(*) FILTER (WHERE status IN ('delivered','read'))::int AS delivered_count,
+       count(*) FILTER (WHERE status = 'read')::int AS read_count
+     FROM thread_message_receipts
+     WHERE message_id = ANY($1::uuid[])
+     GROUP BY message_id`,
+    [messageIds]
+  );
+
+  const map = new Map<string, Record<string, unknown>>();
+  for (const row of rows) {
+    const total = Number(row.total_recipients ?? 0);
+    const sent = Number(row.sent_count ?? 0);
+    const delivered = Number(row.delivered_count ?? 0);
+    const read = Number(row.read_count ?? 0);
+    map.set(String(row.message_id), {
+      total_recipients: total,
+      sent_count: sent,
+      delivered_count: delivered,
+      read_count: read,
+      all_sent: total > 0 && sent === total,
+      all_delivered: total > 0 && delivered === total,
+      all_read: total > 0 && read === total,
+    });
+  }
+
+  return map;
+}
+
 async function insertEventMessage(
   db: pg.Pool,
   threadId: string,
@@ -2160,7 +2196,24 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
         [req.params.thread_id, types, before ?? null, lim]
       );
 
-      return { ok: true, messages: rows, count: rows.length };
+      const summaryByMessage = await loadReceiptSummaryByMessageIds(
+        db,
+        rows.map((row) => String(row.message_id))
+      );
+      const messages = rows.map((row) => ({
+        ...row,
+        receipt_summary: summaryByMessage.get(String(row.message_id)) ?? {
+          total_recipients: 0,
+          sent_count: 0,
+          delivered_count: 0,
+          read_count: 0,
+          all_sent: false,
+          all_delivered: false,
+          all_read: false,
+        },
+      }));
+
+      return { ok: true, messages, count: messages.length };
     }
   );
 
@@ -2180,15 +2233,112 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
       );
       if (!msg) return reply.status(404).send({ ok: false, error: "message not found" });
 
-      // Mark as read — set read_at on the caller's notification for this message
+      // Mark as read for the caller receipt row
       await db.query(
-        `UPDATE notifications
-         SET status = 'read', read_at = now()
-         WHERE message_id = $1 AND recipient_id = $2 AND read_at IS NULL`,
+        `UPDATE thread_message_receipts
+         SET status = 'read',
+             delivered_at = COALESCE(delivered_at, now()),
+             read_at = COALESCE(read_at, now()),
+             updated_at = now()
+         WHERE message_id = $1 AND recipient_id = $2`,
         [req.params.message_id, caller.id]
       );
 
-      return { ok: true, message: msg };
+      const summaryByMessage = await loadReceiptSummaryByMessageIds(db, [req.params.message_id]);
+      const receipt_summary = summaryByMessage.get(req.params.message_id) ?? {
+        total_recipients: 0,
+        sent_count: 0,
+        delivered_count: 0,
+        read_count: 0,
+        all_sent: false,
+        all_delivered: false,
+        all_read: false,
+      };
+      broadcast("thread.message_receipt_updated", {
+        thread_id: req.params.thread_id,
+        message_id: req.params.message_id,
+        receipt_summary,
+      });
+
+      return { ok: true, message: { ...msg, receipt_summary } };
+    }
+  );
+
+  // ── POST delivered/read receipts ───────────────────────────────────────────
+  server.post<{ Params: { thread_id: string; message_id: string } }>(
+    "/threads/:thread_id/messages/:message_id/delivered",
+    async (req, reply) => {
+      const caller = await resolveCaller(req, db);
+      if (!caller) return reply.status(401).send({ ok: false, error: "not authenticated" });
+
+      const access = await checkThreadAccess(req.params.thread_id, caller, db);
+      if (!access) return reply.status(404).send({ ok: false, error: "thread not found or no access" });
+
+      await db.query(
+        `UPDATE thread_message_receipts
+         SET status = CASE WHEN status = 'read' THEN 'read' ELSE 'delivered' END,
+             delivered_at = COALESCE(delivered_at, now()),
+             updated_at = now()
+         WHERE message_id = $1 AND recipient_id = $2`,
+        [req.params.message_id, caller.id]
+      );
+
+      const summaryByMessage = await loadReceiptSummaryByMessageIds(db, [req.params.message_id]);
+      const receipt_summary = summaryByMessage.get(req.params.message_id) ?? {
+        total_recipients: 0,
+        sent_count: 0,
+        delivered_count: 0,
+        read_count: 0,
+        all_sent: false,
+        all_delivered: false,
+        all_read: false,
+      };
+      broadcast("thread.message_receipt_updated", {
+        thread_id: req.params.thread_id,
+        message_id: req.params.message_id,
+        receipt_summary,
+      });
+
+      return { ok: true, message_id: req.params.message_id, receipt_summary };
+    }
+  );
+
+  server.post<{ Params: { thread_id: string; message_id: string } }>(
+    "/threads/:thread_id/messages/:message_id/read",
+    async (req, reply) => {
+      const caller = await resolveCaller(req, db);
+      if (!caller) return reply.status(401).send({ ok: false, error: "not authenticated" });
+
+      const access = await checkThreadAccess(req.params.thread_id, caller, db);
+      if (!access) return reply.status(404).send({ ok: false, error: "thread not found or no access" });
+
+      await db.query(
+        `UPDATE thread_message_receipts
+         SET status = 'read',
+             delivered_at = COALESCE(delivered_at, now()),
+             read_at = COALESCE(read_at, now()),
+             updated_at = now()
+         WHERE message_id = $1 AND recipient_id = $2`,
+        [req.params.message_id, caller.id]
+      );
+
+      const summaryByMessage = await loadReceiptSummaryByMessageIds(db, [req.params.message_id]);
+      const receipt_summary = summaryByMessage.get(req.params.message_id) ?? {
+        total_recipients: 0,
+        sent_count: 0,
+        delivered_count: 0,
+        read_count: 0,
+        all_sent: false,
+        all_delivered: false,
+        all_read: false,
+      };
+      broadcast("thread.message_receipt_updated", {
+        thread_id: req.params.thread_id,
+        message_id: req.params.message_id,
+        receipt_summary,
+      });
+
+      return { ok: true, message_id: req.params.message_id, receipt_summary };
     }
   );
 
@@ -2204,14 +2354,25 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
 
       const { rows } = await db.query(
         `SELECT recipient_id, recipient_slug, status,
-                delivered_at, read_at, processed_at, expires_at
-         FROM notifications
+                sent_at, delivered_at, read_at, updated_at
+         FROM thread_message_receipts
          WHERE message_id = $1
          ORDER BY recipient_slug ASC`,
         [req.params.message_id]
       );
 
-      return { ok: true, message_id: req.params.message_id, receipts: rows };
+      const summaryByMessage = await loadReceiptSummaryByMessageIds(db, [req.params.message_id]);
+      const receipt_summary = summaryByMessage.get(req.params.message_id) ?? {
+        total_recipients: 0,
+        sent_count: 0,
+        delivered_count: 0,
+        read_count: 0,
+        all_sent: false,
+        all_delivered: false,
+        all_read: false,
+      };
+
+      return { ok: true, message_id: req.params.message_id, receipts: rows, receipt_summary };
     }
   );
 }
