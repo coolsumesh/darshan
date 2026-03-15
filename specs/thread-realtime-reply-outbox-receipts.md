@@ -267,7 +267,100 @@ When a thread has pending responders:
 
 ---
 
-## 11) Rollout Plan
+## 11) Redis Streams Transport Design (Channel Plugin as Consumer)
+
+### Decision
+Agent real-time delivery uses **Redis Streams** with the **Darshan channel plugin as direct consumer** (Option 2).  
+Darshan API is publisher-only. Channel plugin owns consumption, dispatch, and ack.
+
+### Stream key
+```
+darshan:reply_required
+```
+Namespace convention: `darshan:<event_type>`.  
+DLQ stream: `darshan:reply_required:dlq`
+
+### Consumer group
+```
+darshan_channel_v1
+```
+- One group per plugin version/contract generation.
+- Versioned to allow safe rollout of new consumer logic without disrupting in-flight events.
+- Rollback = point plugin back to previous group version.
+
+### Consumer id
+```
+<agent_id>
+```
+- Each agent instance uses its own `agent_id` as consumer id.
+- Ensures per-agent work isolation and reclaim safety.
+
+### Event envelope (Kafka-compatible schema)
+All events include:
+```json
+{
+  "schema_version": "1",
+  "event_id": "uuid",
+  "event_type": "reply_required",
+  "thread_id": "uuid",
+  "message_id": "uuid",
+  "target_agent_id": "uuid",
+  "reason": "mentions|all_participants",
+  "created_at": "ISO8601",
+  "deadline_at": "ISO8601|null"
+}
+```
+`partition_key` = `target_agent_id` (use same concept for Kafka partition key during migration).
+
+### Consumer flow
+1. Plugin connects Redis on startup.
+2. `XGROUP CREATE darshan:reply_required darshan_channel_v1 $ MKSTREAM` (idempotent).
+3. Read loop: `XREADGROUP GROUP darshan_channel_v1 <agent_id> COUNT 10 BLOCK 5000 STREAMS darshan:reply_required >`
+4. For each event:
+   - check `target_agent_id == self` (filter guard)
+   - check `event_id` not already processed (idempotency store, TTL 24h acceptable)
+   - dispatch to internal agent pipeline
+   - emit `picked` status via `thread.reply_status_updated` websocket
+   - run LLM / agent response
+   - emit `thinking` status
+   - post reply to thread (`POST /threads/:id/messages`)
+   - emit `responded` or `blocked` status
+   - `XACK darshan:reply_required darshan_channel_v1 <stream_id>`
+5. On failure:
+   - do NOT ack
+   - retry up to N times
+   - after threshold: move to DLQ stream (`XADD darshan:reply_required:dlq`)
+   - emit `failed` status
+
+### Plugin config keys (openclaw.json / channel config)
+```json
+{
+  "darshan": {
+    "enabled": true,
+    "apiBaseUrl": "https://darshan.caringgems.in/api/backend",
+    "agentToken": "<agent_callback_token>",
+    "redis": {
+      "url": "redis://...",
+      "stream": "darshan:reply_required",
+      "consumerGroup": "darshan_channel_v1",
+      "deliverySource": "redis"
+    }
+  }
+}
+```
+Feature flag: `deliverySource: "redis" | "notifications"` (default: `notifications` during Phase 1, `redis` from Phase 2).
+
+### Kafka migration path
+This design is Kafka-compatible. To migrate:
+- Replace `XREADGROUP` loop with Kafka consumer group.
+- Replace `XACK` with Kafka offset commit.
+- Keep event envelope unchanged (stable schema + `schema_version`).
+- Partition key: `target_agent_id`.
+- No business logic changes in channel plugin.
+
+---
+
+## 12) Rollout Plan
 
 ### Phase 1 (compatible)
 - Add tables + workers + Redis stream publisher.
