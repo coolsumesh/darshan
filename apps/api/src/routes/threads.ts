@@ -392,6 +392,73 @@ async function loadThreadNextReply(db: DbExecutor, threadId: string): Promise<Hy
   };
 }
 
+// Batch load next_reply for multiple threads
+async function batchLoadThreadNextReply(db: DbExecutor, threadIds: string[]): Promise<Map<string, HydratedThreadNextReply | null>> {
+  if (threadIds.length === 0) return new Map();
+
+  const uniqueThreadIds = Array.from(new Set(threadIds));
+  const { rows: nextReplies } = await db.query(
+    `SELECT *
+     FROM thread_next_reply
+     WHERE thread_id = ANY($1::uuid[])
+       AND cleared_at IS NULL`,
+    [uniqueThreadIds]
+  );
+
+  const nextReplyMap = new Map<string, ThreadNextReplyRow>();
+  for (const nr of nextReplies) {
+    nextReplyMap.set(nr.thread_id, nr);
+  }
+
+  // Collect all pending participant IDs to batch-fetch
+  const allParticipantIds = new Set<string>();
+  for (const nr of nextReplies) {
+    if (Array.isArray(nr.pending_participant_ids)) {
+      for (const id of nr.pending_participant_ids) {
+        allParticipantIds.add(String(id));
+      }
+    }
+  }
+
+  // Batch fetch all pending participants
+  const { rows: allParticipants } = allParticipantIds.size === 0
+    ? { rows: [] as Array<{ thread_id?: string; participant_id: string; participant_slug: string }> }
+    : await db.query(
+        `SELECT tp.thread_id, tp.participant_id, tp.participant_slug
+         FROM thread_participants tp
+         WHERE tp.participant_id = ANY($1::uuid[])
+           AND tp.removed_at IS NULL`,
+        [Array.from(allParticipantIds)]
+      );
+
+  const participantsByThread = new Map<string, Array<{ participant_id: string; participant_slug: string }>>();
+  for (const p of allParticipants) {
+    if (!participantsByThread.has(p.thread_id)) {
+      participantsByThread.set(p.thread_id, []);
+    }
+    participantsByThread.get(p.thread_id)!.push({ participant_id: p.participant_id, participant_slug: p.participant_slug });
+  }
+
+  const result = new Map<string, HydratedThreadNextReply | null>();
+  for (const threadId of uniqueThreadIds) {
+    const nextReply = nextReplyMap.get(threadId);
+    if (!nextReply) {
+      result.set(threadId, null);
+      continue;
+    }
+
+    const pendingParticipants = participantsByThread.get(threadId) ?? [];
+    result.set(threadId, {
+      ...nextReply,
+      pending_participants: pendingParticipants,
+      pending_participant_slugs: pendingParticipants.map((p) => p.participant_slug),
+      is_expired: !!nextReply.expires_at && new Date(nextReply.expires_at).getTime() <= Date.now(),
+    });
+  }
+
+  return result;
+}
+
 async function setThreadHasReplyPending(db: DbExecutor, threadId: string, hasReplyPending: boolean) {
   await db.query(
     `UPDATE threads
@@ -653,25 +720,11 @@ async function hydrateThread(db: DbExecutor, threadId: string) {
     `SELECT
        t.*,
        COALESCE(assignee_agent.name, assignee_user.name) AS assignee_name,
-       first_message.body AS description,
-       COALESCE(last_message.sent_at, t.created_at) AS last_activity
+       COALESCE(t.first_message_body, '') AS description,
+       COALESCE(t.last_activity_at, t.created_at) AS last_activity
      FROM threads t
      LEFT JOIN agents assignee_agent ON assignee_agent.id = t.assignee_agent_id
      LEFT JOIN users assignee_user ON assignee_user.id = t.assignee_user_id
-     LEFT JOIN LATERAL (
-       SELECT body
-       FROM thread_messages
-       WHERE thread_id = t.thread_id AND type = 'message'
-       ORDER BY sent_at ASC
-       LIMIT 1
-     ) first_message ON true
-     LEFT JOIN LATERAL (
-       SELECT sent_at
-       FROM thread_messages
-       WHERE thread_id = t.thread_id
-       ORDER BY sent_at DESC
-       LIMIT 1
-     ) last_message ON true
      WHERE t.thread_id = $1
      LIMIT 1`,
     [threadId]
@@ -1289,27 +1342,13 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
             t.*,
             tp_self.removed_at AS my_removed_at,
             COALESCE(assignee_agent.name, assignee_user.name) AS assignee_name,
-            first_message.body AS description,
-            COALESCE(last_message.sent_at, t.created_at) AS last_activity
+            COALESCE(t.first_message_body, '') AS description
           FROM threads t
           JOIN visible v ON v.thread_id = t.thread_id
           LEFT JOIN thread_participants tp_self
             ON tp_self.thread_id = t.thread_id AND tp_self.participant_id = $1
-          LEFT JOIN thread_messages tm ON tm.thread_id = t.thread_id
           LEFT JOIN agents assignee_agent ON assignee_agent.id = t.assignee_agent_id
           LEFT JOIN users assignee_user ON assignee_user.id = t.assignee_user_id
-          LEFT JOIN LATERAL (
-            SELECT body FROM thread_messages
-            WHERE thread_id = t.thread_id AND type = 'message'
-            ORDER BY sent_at ASC
-            LIMIT 1
-          ) first_message ON true
-          LEFT JOIN LATERAL (
-            SELECT sent_at FROM thread_messages
-            WHERE thread_id = t.thread_id
-            ORDER BY sent_at DESC
-            LIMIT 1
-          ) last_message ON true
           WHERE
             ($3 = false OR t.deleted_at IS NULL)
             AND ($4::uuid IS NULL OR t.project_id = $4)
@@ -1320,9 +1359,9 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
             AND ($9::uuid IS NULL OR t.assignee_user_id = $9)
             AND (
               to_tsvector('english', t.subject) @@ plainto_tsquery('english', $10)
-              OR to_tsvector('english', COALESCE(tm.body, '')) @@ plainto_tsquery('english', $10)
+              OR to_tsvector('english', COALESCE(t.first_message_body, '')) @@ plainto_tsquery('english', $10)
             )
-          ORDER BY COALESCE(last_message.sent_at, t.created_at) DESC, t.created_at DESC
+          ORDER BY COALESCE(t.last_activity_at, t.created_at) DESC, t.created_at DESC
           LIMIT $11 OFFSET $12`;
         params = [
           caller.id,
@@ -1344,26 +1383,13 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
             t.*,
             tp_self.removed_at AS my_removed_at,
             COALESCE(assignee_agent.name, assignee_user.name) AS assignee_name,
-            first_message.body AS description,
-            COALESCE(last_message.sent_at, t.created_at) AS last_activity
+            COALESCE(t.first_message_body, '') AS description
           FROM threads t
           JOIN visible v ON v.thread_id = t.thread_id
           LEFT JOIN thread_participants tp_self
             ON tp_self.thread_id = t.thread_id AND tp_self.participant_id = $1
           LEFT JOIN agents assignee_agent ON assignee_agent.id = t.assignee_agent_id
           LEFT JOIN users assignee_user ON assignee_user.id = t.assignee_user_id
-          LEFT JOIN LATERAL (
-            SELECT body FROM thread_messages
-            WHERE thread_id = t.thread_id AND type = 'message'
-            ORDER BY sent_at ASC
-            LIMIT 1
-          ) first_message ON true
-          LEFT JOIN LATERAL (
-            SELECT sent_at FROM thread_messages
-            WHERE thread_id = t.thread_id
-            ORDER BY sent_at DESC
-            LIMIT 1
-          ) last_message ON true
           WHERE
             ($3 = false OR t.deleted_at IS NULL)
             AND ($4::uuid IS NULL OR t.project_id = $4)
@@ -1372,7 +1398,7 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
             AND ($7::text IS NULL OR t.task_status = $7)
             AND ($8::uuid IS NULL OR t.assignee_agent_id = $8)
             AND ($9::uuid IS NULL OR t.assignee_user_id = $9)
-          ORDER BY COALESCE(last_message.sent_at, t.created_at) DESC, t.created_at DESC
+          ORDER BY COALESCE(t.last_activity_at, t.created_at) DESC, t.created_at DESC
           LIMIT $10 OFFSET $11`;
         params = [
           caller.id,
@@ -1390,12 +1416,17 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
       }
 
       const { rows } = await db.query(query, params);
-      const threads = await Promise.all(
-        rows.map(async (row) => ({
-          ...row,
-          next_reply: await loadThreadNextReply(db, row.thread_id as string),
-        }))
-      );
+      
+      // Batch load next_reply for all threads in one query
+      const threadIds = rows.map((row) => String(row.thread_id));
+      const nextReplyMap = await batchLoadThreadNextReply(db, threadIds);
+      
+      const threads = rows.map((row) => ({
+        ...row,
+        last_activity: row.last_activity_at ?? row.created_at,
+        next_reply: nextReplyMap.get(String(row.thread_id)) ?? null,
+      }));
+      
       return { ok: true, threads, limit: lim, offset: off };
     }
   );
