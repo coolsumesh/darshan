@@ -5,18 +5,19 @@ export default function DarshanChannelEnablementPage() {
         Darshan Channel — Architecture, Fixes & Telegram Gap Analysis
       </h1>
       <p className="text-sm text-slate-600 dark:text-slate-300">
-        Last updated: 2026-03-10. All plugin fixes, architectural decisions, and parity gap vs Telegram.
+        Last updated: 2026-03-15. All plugin fixes, architectural decisions, and parity gap vs Telegram.
       </p>
 
       {/* ── STATUS BANNER ── */}
       <div className="rounded-xl border border-green-200 bg-green-50 p-4 dark:border-green-900/50 dark:bg-green-950/20">
         <div className="flex items-center gap-2">
           <span className="text-green-600 dark:text-green-400 text-lg">●</span>
-          <span className="font-semibold text-green-800 dark:text-green-300">Current status: Fully operational — real LLM replies confirmed</span>
+          <span className="font-semibold text-green-800 dark:text-green-300">Current status: Fully operational — real LLM replies + message receipts confirmed</span>
         </div>
         <ul className="mt-2 text-sm text-green-700 dark:text-green-400 list-disc pl-5 space-y-0.5">
           <li>Real LLM replies posting to threads (not template/fallback)</li>
           <li>Per-thread session context — each thread has its own LLM history</li>
+          <li>Message receipt ticks live — blue (all read), purple (some read), gray (delivered)</li>
           <li>WebSocket stable — no 60s drops since nginx timeout fix</li>
           <li>No double replies — fallback removed, lane-aware delivery</li>
           <li>Notifications ACK'd exactly once via ackOnce guard</li>
@@ -159,18 +160,18 @@ proxy_send_timeout 3600s;`,
 
       {/* ── GAP ANALYSIS ── */}
       <section className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900 space-y-3">
-        <h2 className="text-lg font-semibold">2) Gap Analysis vs Telegram (updated 2026-03-11)</h2>
+        <h2 className="text-lg font-semibold">2) Gap Analysis vs Telegram (updated 2026-03-15)</h2>
 
         {/* Score */}
         <div className="flex items-center gap-6 rounded-lg bg-slate-50 dark:bg-slate-800/50 p-4">
           <div className="text-center">
-            <div className="text-3xl font-bold text-green-600 dark:text-green-400">12 / 19</div>
+            <div className="text-3xl font-bold text-green-600 dark:text-green-400">13 / 19</div>
             <div className="text-xs text-slate-500 mt-1">capabilities matched</div>
           </div>
           <div className="flex-1 space-y-1">
             <div className="flex items-center gap-2 text-xs">
               <span className="w-3 h-3 rounded-full bg-green-400 inline-block"></span>
-              <span className="text-slate-600 dark:text-slate-300">12 fully working (green)</span>
+              <span className="text-slate-600 dark:text-slate-300">13 fully working (green)</span>
             </div>
             <div className="flex items-center gap-2 text-xs">
               <span className="w-3 h-3 rounded-full bg-amber-400 inline-block"></span>
@@ -178,11 +179,11 @@ proxy_send_timeout 3600s;`,
             </div>
             <div className="flex items-center gap-2 text-xs">
               <span className="w-3 h-3 rounded-full bg-red-400 inline-block"></span>
-              <span className="text-slate-600 dark:text-slate-300">5 missing (red) — all non-critical</span>
+              <span className="text-slate-600 dark:text-slate-300">4 missing (red) — all non-critical</span>
             </div>
           </div>
           <div className="text-center">
-            <div className="text-3xl font-bold text-slate-700 dark:text-slate-200">~63%</div>
+            <div className="text-3xl font-bold text-slate-700 dark:text-slate-200">~68%</div>
             <div className="text-xs text-slate-500 mt-1">Telegram parity</div>
           </div>
         </div>
@@ -214,7 +215,7 @@ proxy_send_timeout 3600s;`,
                 ["🟡", "Outbound proactive DM", "sendText() via bot token", "sendText() registered → /threads/direct", "Registered but not tested end-to-end"],
                 ["🟡", "Directory (listPeers)", "From config", "Fetches /projects/:id/agents live", "Works but tied to hardcoded project ID"],
                 ["❌", "Attachments (image/file/video/voice)", "Native media send/receive", "Text-only thread messages", "No upload/send media flow in Threads UI yet"],
-                ["❌", "Delivery/read receipts (✓ / ✓✓ blue)", "Delivered + read indicators", "No per-message delivery/read ticks", "Need receipts surfaced in thread message row"],
+                ["✅", "Delivery/read receipts (✓ / ✓✓ blue)", "Delivered + read indicators", "Blue/purple/gray ticks per message (shipped 2026-03-15)", "All read → blue, some read → purple, delivered only → gray"],
                 ["❌", "Security / allowFrom", "dmPolicy, pairing, allowFrom list", "Not implemented — all senders accepted", "Any agent can trigger replies"],
                 ["❌", "Status / probe", "probeTelegram() + snapshot", "Not implemented", "openclaw status shows no Darshan health"],
                 ["❌", "Config schema validation", "TelegramConfigSchema (zod)", "emptyPluginConfigSchema()", "No validation on required fields"],
@@ -249,12 +250,7 @@ proxy_send_timeout 3600s;`,
               title: "Threads attachments parity (media/files/voice)",
               detail: "Telegram supports media/file/voice natively; Threads currently supports only text message bodies. Need message schema + upload API + UI composer attachment support.",
             },
-            {
-              priority: "HIGH",
-              color: "red",
-              title: "Message delivery/read receipts (single tick / double blue tick)",
-              detail: "Telegram-like delivery/read state is not shown in Threads. Need to persist and render per-message delivery + read receipts to support ✓ / ✓✓ semantics.",
-            },
+
             {
               priority: "HIGH",
               color: "red",
