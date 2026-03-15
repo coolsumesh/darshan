@@ -17,6 +17,8 @@ import {
   markThreadMessageDelivered,
   markThreadMessageRead,
   setThreadStatus,
+  authMe,
+  type AuthUser,
   addThreadParticipant,
   removeThreadParticipant,
   updateThread,
@@ -517,6 +519,7 @@ export default function ThreadsPage() {
   const [selected, setSelected] = React.useState<Thread | null>(null);
   // responderStatuses: slug → latest ResponderState for the currently selected thread
   const [responderStatuses, setResponderStatuses] = React.useState<Record<string, ResponderState>>({});
+  const [me, setMe] = React.useState<AuthUser | null>(null);
   const [previews, setPreviews] = React.useState<Record<string, { text: string; time: string }>>({});
   const [loading, setLoading] = React.useState(true);
   const [sending, setSending] = React.useState(false);
@@ -571,6 +574,11 @@ export default function ThreadsPage() {
     const params = new URLSearchParams(window.location.search);
     const tid = params.get("thread_id");
     setDeepLinkThreadId(tid && tid.trim() ? tid.trim() : null);
+  }, []);
+
+  // Load current user once (for isMe tick comparison)
+  React.useEffect(() => {
+    authMe().then((u) => { if (u) setMe(u); });
   }, []);
 
   // Load projects once
@@ -801,7 +809,7 @@ export default function ThreadsPage() {
 
             if (selected && selected.thread_id === threadId) {
               setMessages((prev) => prev.some((m) => m.message_id === msg.message_id) ? prev : [...prev, msg]);
-              if (msg.sender_slug !== "SANJAYA") {
+              if (me && msg.sender_id !== me.id) {
                 markThreadMessageDelivered(threadId, msg.message_id).catch(() => {});
                 markThreadMessageRead(threadId, msg.message_id).catch(() => {});
               }
@@ -905,7 +913,9 @@ export default function ThreadsPage() {
     setMessages(msgs);
 
     // Mark incoming messages as delivered/read when the thread is opened.
-    const incoming = msgs.filter((m) => m.sender_slug !== "SANJAYA");
+    const currentMe = await authMe();
+    if (currentMe) setMe(currentMe);
+    const incoming = msgs.filter((m) => m.sender_id !== currentMe?.id);
     incoming.forEach((m) => {
       markThreadMessageDelivered(thread.thread_id, m.message_id).catch(() => {});
       markThreadMessageRead(thread.thread_id, m.message_id).catch(() => {});
@@ -1684,7 +1694,7 @@ export default function ThreadsPage() {
                   <MessageBubble
                     key={msg.message_id}
                     msg={msg}
-                    isMe={msg.sender_slug === "SANJAYA"}
+                    isMe={!!me && msg.sender_id === me.id}
                     knownSlugs={new Set(mentionSlugs)}
                   />
                 ))
