@@ -2,322 +2,463 @@ import type { OpenClawPluginApi, PluginRuntime } from "openclaw/plugin-sdk";
 import { emptyPluginConfigSchema } from "openclaw/plugin-sdk";
 
 const CHANNEL_ID = "darshan";
-const POLL_INTERVAL_MS = 3000;     // main loop tick
-const NOTIF_POLL_MS   = 30000;     // notification poll fallback (every 30s)
+const POLL_INTERVAL_MS = 3000;
 
 let _runtime: PluginRuntime | null = null;
+const _processingThreads = new Set<string>(); // concurrency guard per thread
+
+// ── Token usage tracking ──────────────────────────────────────────────────────
+import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
+
+const _sessionTokenSnapshots = new Map<string, number>();
+
+function readSessionTokens(sessionKey: string): { totalTokens: number; model: string } | null {
+  try {
+    const sessionsPath = `${homedir()}/.openclaw/agents/main/sessions/sessions.json`;
+    const raw = readFileSync(sessionsPath, "utf8");
+    const sessions = JSON.parse(raw) as Record<string, { totalTokens?: number; model?: string }>;
+    const entry = sessions[sessionKey];
+    if (!entry) return null;
+    return { totalTokens: entry.totalTokens ?? 0, model: entry.model ?? "unknown" };
+  } catch {
+    return null;
+  }
+}
+
+async function recordUsageEvent(
+  baseUrl: string,
+  agentToken: string,
+  sessionKey: string,
+  threadId: string,
+  agentId: string,
+): Promise<void> {
+  try {
+    const current = readSessionTokens(sessionKey);
+    if (!current) return;
+    const last = _sessionTokenSnapshots.get(sessionKey) ?? 0;
+    const delta = Math.max(0, current.totalTokens - last);
+    _sessionTokenSnapshots.set(sessionKey, current.totalTokens);
+    if (delta === 0) return;
+    await fetch(`${baseUrl}/api/v1/usage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${agentToken}` },
+      body: JSON.stringify({ session_key: sessionKey, thread_id: threadId, agent_id: agentId, model: current.model, tokens_delta: delta, tokens_total: current.totalTokens }),
+    });
+  } catch { }
+}
+
+// ── Responder status emission ─────────────────────────────────────────────────
+type ResponderStatus = "queued" | "picked" | "thinking" | "responded" | "blocked" | "failed";
+
+async function emitResponderStatus(
+  baseUrl: string,
+  agentToken: string,
+  threadId: string,
+  sourceMessageId: string,
+  status: ResponderStatus,
+  extra?: { intent?: string; failure_code?: string; failure_message?: string },
+  log?: any
+): Promise<void> {
+  try {
+    await fetch(`${baseUrl}/api/v1/threads/${threadId}/reply-status`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${agentToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ source_message_id: sourceMessageId, status, ...extra }),
+      signal: AbortSignal.timeout(8000),
+    });
+  } catch (e: any) {
+    log?.warn?.(`[darshan] emitResponderStatus error: ${e?.message}`);
+  }
+}
+
+// ── Config helper ─────────────────────────────────────────────────────────────
+type DarshanNotif = {
+  notification_id: string;
+  thread_id: string;
+  message_id: string;
+  recipient_id: string;
+  message_body?: string;
+  message_from?: string;
+  thread_subject?: string;
+  priority?: string;
+  sender_is_agent?: boolean;
+};
 
 function getDarshanConfig(cfg: any) {
   const c = cfg?.channels?.darshan ?? {};
-  const baseUrl = (
-    c.endpoint ??
-    process.env.DARSHAN_BASE_URL ??
-    "https://darshan.caringgems.in/api/backend"
-  ).replace(/\/$/, "");
-  const agentId    = c.agentId    ?? process.env.DARSHAN_AGENT_ID    ?? null;
+  const baseUrl = (c.endpoint ?? process.env.DARSHAN_BASE_URL ?? "https://darshan.caringgems.in/api/backend").replace(/\/$/, "");
+  const apiKey = c.apiKey ?? process.env.DARSHAN_API_KEY ?? "";
+  const agentId = c.agentId ?? process.env.DARSHAN_AGENT_ID ?? null;
   const agentToken = c.agentToken ?? process.env.DARSHAN_AGENT_TOKEN ?? null;
-  return { baseUrl, agentId, agentToken };
+  // deliverySource: "redis" = WS-bridged (default), "notifications" = legacy polling fallback
+  const deliverySource: "redis" | "notifications" = c.deliverySource ?? "redis";
+  return { baseUrl, apiKey, agentId, agentToken, deliverySource };
 }
 
-// ── Process a single notification ────────────────────────────────────────────
-async function processNotification(
-  notif: {
-    notification_id: string;
-    message_id:      string;
-    thread_id:       string;
-    thread_subject?: string;
-    message_body:    string;
-    message_from:    string;   // sender_slug
-    priority?:       string;
-  },
-  baseUrl:    string,
-  agentId:    string,
+// ── Core notification handler (shared by both paths) ──────────────────────────
+async function handleNotification(
+  notif: DarshanNotif & { source_message_id?: string },
+  baseUrl: string,
+  _agentId: string,
   agentToken: string,
-  log:        any
+  log: any
 ) {
-  const headers = { Authorization: `Bearer ${agentToken}`, "Content-Type": "application/json" };
+  let fromSlug = notif.message_from ?? "";
+  let body = notif.message_body ?? "";
+  const threadId = notif.thread_id;
+  const sourceMessageId = notif.source_message_id ?? notif.message_id;
 
-  const markProcessed = async (note: string) => {
-    await fetch(`${baseUrl}/api/v1/notifications/${notif.notification_id}/process`, {
-      method:  "POST",
-      headers,
-      body:    JSON.stringify({ response_note: note }),
-      signal:  AbortSignal.timeout(10000),
-    }).catch(() => {});
-  };
+  if ((!body || !fromSlug) && notif.message_id && threadId) {
+    try {
+      const msgRes = await fetch(`${baseUrl}/api/v1/threads/${threadId}/messages/${notif.message_id}`, {
+        headers: { Authorization: `Bearer ${agentToken}` },
+        signal: AbortSignal.timeout(8000),
+      });
+      if (msgRes.ok) {
+        const msgData: any = await msgRes.json();
+        const msg = msgData.message ?? msgData;
+        if (!body) body = msg.body ?? "";
+        if (!fromSlug) fromSlug = msg.sender_slug ?? msg.sender_name ?? "agent";
+      }
+    } catch { }
+  }
+  if (!fromSlug) fromSlug = "agent";
 
-  const sendReply = async (replyText: string) => {
+  const postReply = async (replyText: string): Promise<boolean> => {
     const clean = replyText.trim();
     if (!clean || clean === "NO_REPLY" || clean === "HEARTBEAT_OK") return false;
-    await fetch(`${baseUrl}/api/v1/threads/${notif.thread_id}/messages`, {
-      method:  "POST",
-      headers,
-      body:    JSON.stringify({ body: clean }),
-      signal:  AbortSignal.timeout(15000),
-    }).catch(() => {});
-    log?.info?.(`[darshan] reply sent in thread ${notif.thread_id.slice(0, 8)}: ${clean.slice(0, 60)}`);
+    const res = await fetch(`${baseUrl}/api/v1/threads/${threadId}/messages`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${agentToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ body: clean, intent: "answer", awaiting_on: "none" }),
+      signal: AbortSignal.timeout(15000),
+    }).catch(() => null);
+    if (!res?.ok) return false;
+    log?.warn?.(`[darshan] replied in thread: ${clean.slice(0, 60)}`);
     return true;
   };
 
+  if (notif.sender_is_agent) {
+    log?.info?.(`[darshan] skipping auto-reply — sender ${fromSlug} is an agent`);
+    return;
+  }
+
   try {
-    const rt  = _runtime!;
-    const cfg = await (rt as any).config.loadConfig();
+    // picked: agent has claimed this event
+    await emitResponderStatus(baseUrl, agentToken, threadId, sourceMessageId, "picked", undefined, log);
+
+    const rt = _runtime!;
+    const cfg = await rt.config.loadConfig();
+    const { agentId: aId } = getDarshanConfig(cfg);
+    const route = rt.channel.routing.resolveAgentRoute({
+      cfg, channel: CHANNEL_ID, accountId: "default",
+      peer: { kind: "direct", id: fromSlug },
+    });
+    const threadSessionKey = route.sessionKey.replace(/direct:[^:]+$/, `thread:${threadId}`);
+
     let delivered = false;
 
-    await (rt as any).channel.reply.dispatchReplyWithBufferedBlockDispatcher({
+    await rt.channel.reply.dispatchReplyWithBufferedBlockDispatcher({
       ctx: {
-        Body:               notif.message_body,
-        From:               notif.message_from,
-        To:                 agentId,
-        SessionKey:         `darshan:thread:${notif.thread_id}`,
-        AccountId:          "default",
-        OriginatingChannel: CHANNEL_ID as any,
-        OriginatingTo:      notif.thread_id,
-        ChatType:           "direct" as const,
-        SenderName:         notif.message_from,
-        Subject:            notif.thread_subject ?? "",
+        Body: body,
+        BodyForAgent: `[Darshan thread: "${notif.thread_subject ?? "no subject"}" | thread_id: ${threadId}]\n${fromSlug}: ${body}`,
+        From: fromSlug,
+        To: "Sanjaya",
+        SessionKey: threadSessionKey,
+        AccountId: route.accountId,
+        ChatType: "direct",
+        SenderName: fromSlug,
+        SenderId: fromSlug,
+        Surface: CHANNEL_ID,
+        Provider: CHANNEL_ID,
+        OriginatingTo: fromSlug,
       },
       cfg,
       dispatcherOptions: {
-        deliver: async (payload: { text?: string; body?: string }) => {
-          const out = payload?.text ?? payload?.body ?? "";
-          const sent = await sendReply(out);
-          if (sent) {
+        onFirstChunk: async () => {
+          // thinking: LLM started generating
+          await emitResponderStatus(baseUrl, agentToken, threadId, sourceMessageId, "thinking", undefined, log);
+        },
+        deliver: async (payload: { text?: string }) => {
+          const out = (payload?.text ?? "").trim();
+          const ok = await postReply(out);
+          if (ok) {
             delivered = true;
-            await markProcessed(`replied: ${out.slice(0, 80)}`);
+            await emitResponderStatus(baseUrl, agentToken, threadId, sourceMessageId, "responded", { intent: "answer" }, log);
+            log?.warn?.("[darshan] real reply posted");
+            const dCfg = getDarshanConfig(cfg);
+            void recordUsageEvent(dCfg.baseUrl, dCfg.agentToken ?? "", threadSessionKey, threadId, aId ?? "");
           }
+        },
+        onSkip: (_payload: any, info: { kind: string; reason: string }) => {
+          log?.warn?.(`[darshan] reply skipped kind=${info.kind} reason=${info.reason}`);
+        },
+        onError: async (e: unknown, info: { kind: string }) => {
+          log?.warn?.(`[darshan] reply dispatch error kind=${info.kind}: ${String((e as any)?.message ?? e)}`);
+          await emitResponderStatus(baseUrl, agentToken, threadId, sourceMessageId, "failed", {
+            failure_code: info.kind,
+            failure_message: String((e as any)?.message ?? "dispatch error"),
+          }, log);
         },
       },
     });
 
     if (!delivered) {
-      await markProcessed("auto-processed: no reply generated");
+      log?.warn?.(`[darshan] dispatch returned without immediate delivery — reply queued`);
     }
   } catch (err: any) {
-    log?.error?.(`[darshan] notification ${notif.notification_id} error: ${err?.message ?? err}`);
-    await markProcessed(`error: ${err?.message ?? "unknown"}`);
+    log?.error?.(`[darshan] handleNotification error: ${err?.message}`);
+    await emitResponderStatus(baseUrl, agentToken, threadId, sourceMessageId, "failed", {
+      failure_code: "exception",
+      failure_message: String(err?.message ?? err).slice(0, 200),
+    }, log);
   }
 }
 
-// ── WS real-time push ─────────────────────────────────────────────────────────
-function startNotificationWs(
-  wsUrl:       string,
-  agentId:     string,
-  agentToken:  string,
-  onNotif:     (data: any) => void,
-  abortSignal: AbortSignal | null,
-  log:         any
+// ── WebSocket helper ──────────────────────────────────────────────────────────
+let _wsReconnectTimer: ReturnType<typeof setTimeout> | null = null;
+
+function startAgentWs(
+  wsUrl: string,
+  agentId: string,
+  agentToken: string,
+  onEvent: (type: string, data: any) => void,
+  abortSignal: AbortSignal,
+  log: any
 ) {
-  if (abortSignal?.aborted) return;
+  if (abortSignal.aborted) return;
+  let ws: any;
+  try {
+    ws = new (globalThis as any).WebSocket(wsUrl);
+  } catch {
+    log?.warn?.("[darshan] WebSocket not available");
+    return;
+  }
 
-  let ws: any = null;
-  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-
-  const cleanup = () => {
-    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
-    try { ws?.close?.(); } catch {}
-  };
-
-  abortSignal?.addEventListener?.("abort", cleanup, { once: true });
-
-  const connect = () => {
-    if (abortSignal?.aborted) return;
-    try {
-      const WebSocket = (globalThis as any).WebSocket ?? require("ws");
-      ws = new WebSocket(`${wsUrl}?agentId=${agentId}&token=${agentToken}`);
-
-      ws.onopen = () => {
-        log?.info?.(`[darshan] WS connected (${wsUrl})`);
-      };
-
-      ws.onmessage = (evt: any) => {
-        try {
-          const msg = JSON.parse(evt.data ?? evt);
-          // Event format: { type: "notification", data: { notification_id, thread_id, ... } }
-          if (msg?.type === "notification" && msg?.data) {
-            onNotif(msg.data);
-          }
-        } catch {}
-      };
-
-      ws.onerror = (err: any) => {
-        log?.warn?.(`[darshan] WS error: ${err?.message ?? err}`);
-      };
-
-      ws.onclose = () => {
-        if (!abortSignal?.aborted) {
-          log?.info?.("[darshan] WS closed, reconnecting in 15s");
-          reconnectTimer = setTimeout(connect, 15000);
-        }
-      };
-    } catch (err: any) {
-      log?.warn?.(`[darshan] WS init error: ${err?.message ?? err}`);
-      if (!abortSignal?.aborted) {
-        reconnectTimer = setTimeout(connect, 15000);
+  ws.onopen = () => {
+    log?.info?.("[darshan] WS connected");
+    ws.send(JSON.stringify({ type: "agent_auth", agent_id: agentId, token: agentToken }));
+    const pingInterval = setInterval(() => {
+      if (ws.readyState === 1) {
+        try { ws.send(JSON.stringify({ type: "ping" })); } catch { }
+      } else {
+        clearInterval(pingInterval);
       }
-    }
+    }, 30000);
+    abortSignal.addEventListener("abort", () => clearInterval(pingInterval), { once: true });
   };
 
-  connect();
+  ws.onmessage = (event: any) => {
+    try {
+      const msg = JSON.parse(typeof event.data === "string" ? event.data : event.data.toString());
+      if (msg.type === "agent_subscribed") {
+        log?.info?.(`[darshan] WS subscribed for agent ${agentId}`);
+      } else {
+        onEvent(msg.type, msg.data ?? msg);
+      }
+    } catch { }
+  };
+
+  ws.onclose = () => {
+    if (abortSignal.aborted) return;
+    log?.warn?.("[darshan] WS closed, reconnecting in 5s...");
+    _wsReconnectTimer = setTimeout(() => {
+      startAgentWs(wsUrl, agentId, agentToken, onEvent, abortSignal, log);
+    }, 5000);
+  };
+
+  ws.onerror = () => log?.warn?.("[darshan] WS error");
+  abortSignal.addEventListener("abort", () => {
+    if (_wsReconnectTimer) clearTimeout(_wsReconnectTimer);
+    try { ws.close(); } catch { }
+  }, { once: true });
 }
 
+async function pollNotifications(
+  baseUrl: string,
+  agentToken: string,
+  onNotif: (notif: any) => void,
+  log: any
+) {
+  try {
+    const res = await fetch(`${baseUrl}/api/v1/notifications?status=pending&limit=50`, {
+      headers: { Authorization: `Bearer ${agentToken}` },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!res.ok) return;
+    const data: any = await res.json();
+    for (const notif of data.notifications ?? []) onNotif(notif);
+  } catch (err: any) {
+    log?.warn?.(`[darshan] notification poll error: ${err?.message ?? err}`);
+  }
+}
+
+// ── Plugin definition ─────────────────────────────────────────────────────────
 const plugin = {
-  id:          CHANNEL_ID,
-  name:        "Darshan",
-  description: "Darshan native channel plugin (notifications + threads)",
+  id: CHANNEL_ID,
+  name: "Darshan",
+  description: "Darshan native channel plugin",
   configSchema: emptyPluginConfigSchema(),
 
   register(api: OpenClawPluginApi) {
-    _runtime = (api as any).runtime ?? null;
-    console.log("[darshan] register() called, runtime:", !!_runtime);
+    _runtime = api.runtime;
 
     api.registerChannel({
       plugin: {
         id: CHANNEL_ID,
         meta: {
-          id:             CHANNEL_ID,
-          label:          "Darshan",
+          id: CHANNEL_ID,
+          label: "Darshan",
           selectionLabel: "Darshan",
-          detailLabel:    "Darshan",
-          blurb:          "Native Darshan channel",
-          order:          95,
+          detailLabel: "Darshan",
+          blurb: "Native Darshan channel",
+          order: 95,
         },
         capabilities: {
-          chatTypes:      ["direct" as const, "group" as const],
-          media:          false,
-          threads:        true,
-          reactions:      false,
-          edit:           false,
-          unsend:         false,
-          reply:          true,
-          effects:        false,
-          blockStreaming: false,
+          chatTypes: ["direct" as const, "group" as const],
+          media: false, threads: true, reactions: false,
+          edit: false, unsend: false, reply: true, effects: false, blockStreaming: false,
         },
         reload: { configPrefixes: ["channels.darshan"] },
         configSchema: emptyPluginConfigSchema(),
         config: {
-          listAccountIds:     (_cfg: any) => ["default"],
-          resolveAccount:     (cfg: any)  => ({
-            accountId: "default",
-            enabled:   cfg?.channels?.darshan?.enabled !== false,
-          }),
-          describeAccount:    (_account: any, _cfg: any) => ({ configured: true }),
-          isConfigured:       async (_account: any, _cfg: any) => true,
-          defaultAccountId:   () => "default",
-          setAccountEnabled:  ({ cfg, enabled }: any) => ({
+          listAccountIds: (_cfg: any) => ["default"],
+          resolveAccount: (cfg: any) => ({ accountId: "default", enabled: cfg?.channels?.darshan?.enabled !== false }),
+          describeAccount: (_a: any, _c: any) => ({ configured: true }),
+          isConfigured: async () => true,
+          defaultAccountId: () => "default",
+          setAccountEnabled: ({ cfg, enabled }: any) => ({
             ...cfg,
             channels: { ...(cfg?.channels ?? {}), darshan: { ...(cfg?.channels?.darshan ?? {}), enabled } },
           }),
         },
         messaging: { normalizeTarget: (t: string) => t?.trim() || undefined },
-        directory: { self: async () => null, listPeers: async () => [], listGroups: async () => [] },
-        outbound: {
-          deliveryMode:  "gateway" as const,
-          textChunkLimit: 4000,
-          // Proactive send (agent → agent): uses POST /threads/direct
-          sendText: async ({ to, text }: any) => {
-            const cfg = await (_runtime as any)?.config?.loadConfig?.() ?? {};
+        directory: {
+          self: async () => {
+            const cfg = _runtime ? await _runtime.config.loadConfig() : {} as any;
+            const { agentId } = getDarshanConfig(cfg);
+            return agentId ? { kind: "user" as const, id: agentId, name: "Sanjaya" } : null;
+          },
+          listPeers: async () => {
+            const cfg = _runtime ? await _runtime.config.loadConfig() : {} as any;
             const { baseUrl, agentId, agentToken } = getDarshanConfig(cfg);
-            if (agentId && agentToken && text?.trim()) {
+            if (!agentId || !agentToken) return [];
+            try {
+              const projectId = "702072b8-3264-4a9e-9827-aec2eba1d686";
+              const res = await fetch(`${baseUrl}/api/v1/projects/${projectId}/agents`, {
+                headers: { Authorization: `Bearer ${agentToken}` },
+                signal: AbortSignal.timeout(8000),
+              });
+              if (!res.ok) return [];
+              const data = await res.json() as { agents?: any[] };
+              return (data.agents ?? [])
+                .filter((a: any) => a.id !== agentId)
+                .map((a: any) => ({ kind: "user" as const, id: a.id, name: a.name ?? a.slug }));
+            } catch { return []; }
+          },
+          listGroups: async () => [],
+        },
+        outbound: {
+          deliveryMode: "gateway" as const,
+          textChunkLimit: 4000,
+          sendText: async ({ to, text }: any) => {
+            const cfg = _runtime ? await _runtime.config.loadConfig() : {} as any;
+            const { baseUrl, agentId, agentToken } = getDarshanConfig(cfg);
+            if (agentId && agentToken && text) {
               await fetch(`${baseUrl}/api/v1/threads/direct`, {
-                method:  "POST",
-                headers: {
-                  Authorization:  `Bearer ${agentToken}`,
-                  "Content-Type": "application/json",
-                },
-                body:   JSON.stringify({ to, body: text.trim() }),
+                method: "POST",
+                headers: { Authorization: `Bearer ${agentToken}`, "Content-Type": "application/json" },
+                body: JSON.stringify({ to, body: text }),
                 signal: AbortSignal.timeout(15000),
-              }).catch(() => {});
+              }).catch(() => { });
             }
-            return {
-              channel:   CHANNEL_ID,
-              messageId: `darshan-${Date.now()}`,
-              chatId:    String(to ?? "unknown"),
-            };
+            return { channel: CHANNEL_ID, messageId: `darshan-${Date.now()}`, chatId: String(to ?? "unknown") };
           },
         },
         gateway: {
           startAccount: async (ctx: any) => {
             const { cfg, abortSignal, setStatus, log } = ctx;
-            const { baseUrl, agentId, agentToken } = getDarshanConfig(cfg);
+            const { baseUrl, agentId, agentToken, deliverySource } = getDarshanConfig(cfg);
 
             setStatus?.({ configured: true, running: true, lastError: null });
-            log?.info?.(`[darshan] started, polling ${baseUrl}`);
-            console.log(`[darshan] startAccount called, polling ${baseUrl}`);
+            log?.info?.(`[darshan] started — delivery=${deliverySource} platform=${process.platform}`);
 
-            if (!agentId || !agentToken) {
-              log?.warn?.("[darshan] no agentId/agentToken — skipping");
-              return { stop: () => {} };
-            }
+            const processedNotifIds = new Set<string>();
 
-            const headers = { Authorization: `Bearer ${agentToken}`, "Content-Type": "application/json" };
-
-            // ── WS real-time push ────────────────────────────────────────────
-            const wsBase = baseUrl
-              .replace(/^https:\/\//, "wss://")
-              .replace(/^http:\/\//, "ws://");
-
-            // Set of notification_ids already being processed (avoid double-process)
-            const inFlight = new Set<string>();
-
-            const handleWsNotif = (data: any) => {
-              const nid = data?.notification_id;
-              if (!nid || inFlight.has(nid)) return;
-              inFlight.add(nid);
-              log?.info?.(`[darshan] WS push: notification ${nid}`);
-              // Fetch full notification to get message body
-              fetch(`${baseUrl}/api/v1/notifications?status=pending&limit=50`, { headers })
-                .then((r) => r.json())
-                .then((d: any) => {
-                  const found = (d.notifications ?? []).find((n: any) => n.notification_id === nid);
-                  if (found) {
-                    processNotification(found, baseUrl, agentId, agentToken, log)
-                      .catch(() => {})
-                      .finally(() => inFlight.delete(nid));
-                  } else {
-                    inFlight.delete(nid);
-                  }
-                })
-                .catch(() => inFlight.delete(nid));
+            const handleIncomingNotif = (notif: any) => {
+              if (!notif?.notification_id) return;
+              if (processedNotifIds.has(notif.notification_id)) return;
+              processedNotifIds.add(notif.notification_id);
+              if (processedNotifIds.size > 500) {
+                const first = processedNotifIds.values().next().value;
+                if (first) processedNotifIds.delete(first);
+              }
+              const threadId = notif.thread_id ?? "unknown";
+              if (_processingThreads.has(threadId)) {
+                log?.warn?.(`[darshan] skipping notif ${notif.notification_id} - thread ${threadId} already processing`);
+                return;
+              }
+              _processingThreads.add(threadId);
+              log?.info?.(`[darshan] notification from ${notif.message_from ?? "?"}: ${String(notif.message_body ?? "").slice(0, 60)}`);
+              handleNotification(notif, baseUrl, agentId!, agentToken!, log)
+                .catch((e: any) => log?.error?.(`[darshan] handleNotification error: ${e?.message ?? e}`))
+                .finally(() => _processingThreads.delete(threadId));
             };
 
-            startNotificationWs(
-              `${wsBase}/ws`, agentId, agentToken,
-              handleWsNotif, abortSignal, log
-            );
+            // Start WS — handles both reply_required events and legacy notifications
+            if (agentId && agentToken) {
+              const wsUrl = baseUrl.replace(/^https:\/\//, "wss://").replace(/^http:\/\//, "ws://") + "/ws";
+              startAgentWs(wsUrl, agentId, agentToken, async (type: string, data: any) => {
 
-            // ── Poll fallback (every 30s) ─────────────────────────────────────
-            let lastPoll = 0;
+                if (type === "reply_required") {
+                  // Primary path: server pushed a reply_required event via WS (bridged from Redis stream)
+                  const threadId = data?.thread_id ?? "unknown";
+                  if (_processingThreads.has(threadId)) {
+                    log?.warn?.(`[darshan] reply_required: thread ${threadId} already processing — skipping`);
+                    return;
+                  }
+                  _processingThreads.add(threadId);
+                  log?.info?.(`[darshan] reply_required for thread ${threadId} msg ${data?.message_id}`);
+                  const notif = {
+                    notification_id: data?.event_id ?? `rr-${Date.now()}`,
+                    thread_id: threadId,
+                    message_id: data?.message_id,
+                    source_message_id: data?.message_id,
+                    recipient_id: agentId!,
+                    message_body: "",
+                    message_from: "",
+                    thread_subject: "",
+                    sender_is_agent: false,
+                  };
+                  handleNotification(notif, baseUrl, agentId!, agentToken!, log)
+                    .catch((e: any) => log?.error?.(`[darshan] reply_required handler error: ${e?.message}`))
+                    .finally(() => _processingThreads.delete(threadId));
 
-            async function pollNotifications() {
-              try {
-                const res = await fetch(
-                  `${baseUrl}/api/v1/notifications?status=pending&limit=50`,
-                  { headers: { Authorization: `Bearer ${agentToken}` }, signal: AbortSignal.timeout(10000) }
-                );
-                if (!res.ok) return;
-                const data = await res.json() as { notifications?: any[] };
-                const pending = (data.notifications ?? []).filter(
-                  (n: any) => !inFlight.has(n.notification_id)
-                );
-                for (const notif of pending) {
-                  inFlight.add(notif.notification_id);
-                  processNotification(notif, baseUrl, agentId, agentToken, log)
-                    .catch((e: any) => log?.error?.(`[darshan] notif error: ${e?.message ?? e}`))
-                    .finally(() => inFlight.delete(notif.notification_id));
+                } else if (type === "notification" && deliverySource === "notifications") {
+                  // Fallback path: legacy notification-based delivery
+                  handleIncomingNotif(data);
+
+                } else if (type === "ping") {
+                  fetch(`${baseUrl}/api/v1/agents/${agentId}/pong`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ token: agentToken, sent_at: data?.sent_at }),
+                    signal: AbortSignal.timeout(10000),
+                  }).catch(() => { });
                 }
-              } catch (err: any) {
-                log?.warn?.(`[darshan] poll error: ${err?.message ?? err}`);
-              }
+              }, abortSignal, log);
             }
 
-            // ── Main loop ─────────────────────────────────────────────────────
-            while (!abortSignal?.aborted) {
-              if (Date.now() - lastPoll > NOTIF_POLL_MS) {
-                lastPoll = Date.now();
-                pollNotifications().catch(() => {});
-              }
+            // Notification polling fallback (when deliverySource === "notifications")
+            let lastNotifPoll = 0;
+            const NOTIF_POLL_MS = 30000;
 
+            while (!abortSignal?.aborted) {
+              if (deliverySource === "notifications" && agentId && agentToken && Date.now() - lastNotifPoll > NOTIF_POLL_MS) {
+                lastNotifPoll = Date.now();
+                pollNotifications(baseUrl, agentToken, handleIncomingNotif, log).catch(() => { });
+              }
               await new Promise<void>((resolve) => {
                 if (abortSignal?.aborted) { resolve(); return; }
                 const t = setTimeout(resolve, POLL_INTERVAL_MS);
@@ -326,10 +467,9 @@ const plugin = {
             }
 
             log?.info?.("[darshan] stopped");
-            console.log("[darshan] startAccount exiting");
-            return { stop: () => {} };
+            return { stop: () => { } };
           },
-          stopAccount: async () => {},
+          stopAccount: async () => { },
         },
       },
     });
