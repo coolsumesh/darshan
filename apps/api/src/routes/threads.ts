@@ -653,7 +653,8 @@ async function hydrateThread(db: DbExecutor, threadId: string) {
     `SELECT
        t.*,
        COALESCE(assignee_agent.name, assignee_user.name) AS assignee_name,
-       first_message.body AS description
+       first_message.body AS description,
+       COALESCE(last_message.sent_at, t.created_at) AS last_activity
      FROM threads t
      LEFT JOIN agents assignee_agent ON assignee_agent.id = t.assignee_agent_id
      LEFT JOIN users assignee_user ON assignee_user.id = t.assignee_user_id
@@ -664,6 +665,13 @@ async function hydrateThread(db: DbExecutor, threadId: string) {
        ORDER BY sent_at ASC
        LIMIT 1
      ) first_message ON true
+     LEFT JOIN LATERAL (
+       SELECT sent_at
+       FROM thread_messages
+       WHERE thread_id = t.thread_id
+       ORDER BY sent_at DESC
+       LIMIT 1
+     ) last_message ON true
      WHERE t.thread_id = $1
      LIMIT 1`,
     [threadId]
