@@ -206,20 +206,19 @@ Write-Host "✅ Done. Restart terminal for changes to take effect."
       `curl -o ~/.openclaw/extensions/darshan/package.json         ${BASE_SETUP}/darshan-package.json`,
       `curl -o ~/.openclaw/extensions/darshan/openclaw.plugin.json ${BASE_SETUP}/openclaw.plugin.json`,
       ``,
-      `# 2. Trust + enable the plugin`,
-      `openclaw plugins enable darshan`,
+      `# 2. Install plugin dependencies`,
+      `cd ~/.openclaw/extensions/darshan && npm install && cd ~`,
       ``,
-      `# 3. Restart so OpenClaw loads the plugin`,
-      `openclaw gateway restart`,
+      `# 3. Trust the plugin (adds to plugins.allow)`,
+      `openclaw plugins allow darshan`,
       ``,
-      `# 4. Add the Darshan channel account`,
-      `openclaw channels add --channel darshan`,
+      `# 4. Enable the Darshan channel + set credentials`,
+      `openclaw config set channels.darshan.enabled     true`,
+      `openclaw config set channels.darshan.agentId     "$AGENT_${slug}_ID"`,
+      `openclaw config set channels.darshan.agentToken  "$AGENT_${slug}_TOKEN"`,
+      `openclaw config set channels.darshan.endpoint    "${BASE_URL}/api/backend"`,
       ``,
-      `# 5. Set your agent credentials`,
-      `openclaw config set channels.darshan.agentId   "$AGENT_${slug}_ID"`,
-      `openclaw config set channels.darshan.agentToken "$AGENT_${slug}_TOKEN"`,
-      ``,
-      `# 6. Final restart to apply everything`,
+      `# 5. Restart to load plugin and apply config`,
       `openclaw gateway restart`,
     ].join("\n"),
     windows_ps: [
@@ -229,20 +228,19 @@ Write-Host "✅ Done. Restart terminal for changes to take effect."
       `Invoke-WebRequest "${BASE_SETUP}/darshan-package.json"         -OutFile "$env:USERPROFILE\\.openclaw\\extensions\\darshan\\package.json"`,
       `Invoke-WebRequest "${BASE_SETUP}/openclaw.plugin.json"         -OutFile "$env:USERPROFILE\\.openclaw\\extensions\\darshan\\openclaw.plugin.json"`,
       ``,
-      `# 2. Trust + enable the plugin`,
-      `openclaw plugins enable darshan`,
+      `# 2. Install plugin dependencies`,
+      `Set-Location "$env:USERPROFILE\\.openclaw\\extensions\\darshan"; npm install; Set-Location ~`,
       ``,
-      `# 3. Restart so OpenClaw loads the plugin`,
-      `openclaw gateway restart`,
+      `# 3. Trust the plugin (adds to plugins.allow)`,
+      `openclaw plugins allow darshan`,
       ``,
-      `# 4. Add the Darshan channel account`,
-      `openclaw channels add --channel darshan`,
+      `# 4. Enable the Darshan channel + set credentials`,
+      `openclaw config set channels.darshan.enabled     true`,
+      `openclaw config set channels.darshan.agentId     "$env:AGENT_${slug}_ID"`,
+      `openclaw config set channels.darshan.agentToken  "$env:AGENT_${slug}_TOKEN"`,
+      `openclaw config set channels.darshan.endpoint    "${BASE_URL}/api/backend"`,
       ``,
-      `# 5. Set your agent credentials`,
-      `openclaw config set channels.darshan.agentId   "$env:AGENT_${slug}_ID"`,
-      `openclaw config set channels.darshan.agentToken "$env:AGENT_${slug}_TOKEN"`,
-      ``,
-      `# 6. Final restart to apply everything`,
+      `# 5. Restart to load plugin and apply config`,
       `openclaw gateway restart`,
     ].join("\n"),
     windows_cmd: [
@@ -252,20 +250,19 @@ Write-Host "✅ Done. Restart terminal for changes to take effect."
       `curl -o "%USERPROFILE%\\.openclaw\\extensions\\darshan\\package.json"         ${BASE_SETUP}/darshan-package.json`,
       `curl -o "%USERPROFILE%\\.openclaw\\extensions\\darshan\\openclaw.plugin.json" ${BASE_SETUP}/openclaw.plugin.json`,
       ``,
-      `:: 2. Trust + enable the plugin`,
-      `openclaw plugins enable darshan`,
+      `:: 2. Install plugin dependencies`,
+      `cd "%USERPROFILE%\\.openclaw\\extensions\\darshan" && npm install && cd %USERPROFILE%`,
       ``,
-      `:: 3. Restart so OpenClaw loads the plugin`,
-      `openclaw gateway restart`,
+      `:: 3. Trust the plugin`,
+      `openclaw plugins allow darshan`,
       ``,
-      `:: 4. Add the Darshan channel account`,
-      `openclaw channels add --channel darshan`,
+      `:: 4. Enable the Darshan channel + set credentials`,
+      `openclaw config set channels.darshan.enabled     true`,
+      `openclaw config set channels.darshan.agentId     "%AGENT_${slug}_ID%"`,
+      `openclaw config set channels.darshan.agentToken  "%AGENT_${slug}_TOKEN%"`,
+      `openclaw config set channels.darshan.endpoint    "${BASE_URL}/api/backend"`,
       ``,
-      `:: 5. Set your agent credentials`,
-      `openclaw config set channels.darshan.agentId   "%AGENT_${slug}_ID%"`,
-      `openclaw config set channels.darshan.agentToken "%AGENT_${slug}_TOKEN%"`,
-      ``,
-      `:: 6. Final restart to apply everything`,
+      `:: 5. Restart to load plugin and apply config`,
       `openclaw gateway restart`,
     ].join("\n"),
   };
@@ -414,20 +411,20 @@ Return HEARTBEAT_OK only when nothing was actioned.` : "";
             <div className="flex flex-col gap-2 rounded-xl bg-zinc-50 p-3 ring-1 ring-zinc-100 dark:bg-white/5 dark:ring-white/10 text-xs text-zinc-500">
               <div className="flex items-start gap-2">
                 <span className="mt-0.5 h-1.5 w-1.5 shrink-0 rounded-full bg-brand-600 mt-1" />
-                Downloads <code className="rounded bg-zinc-200 px-1 dark:bg-white/10">index.ts</code> into your OpenClaw extensions folder
+                Downloads <code className="rounded bg-zinc-200 px-1 dark:bg-white/10">index.ts</code> into your OpenClaw extensions folder and installs dependencies
               </div>
               <div className="flex items-start gap-2">
                 <span className="mt-0.5 h-1.5 w-1.5 shrink-0 rounded-full bg-brand-600 mt-1" />
-                Sets <code className="rounded bg-zinc-200 px-1 dark:bg-white/10">DARSHAN_AGENT_ID</code> + <code className="rounded bg-zinc-200 px-1 dark:bg-white/10">DARSHAN_AGENT_TOKEN</code> (pre-filled for {agent.name})
+                Trusts the plugin and sets <code className="rounded bg-zinc-200 px-1 dark:bg-white/10">channels.darshan.agentId</code> + <code className="rounded bg-zinc-200 px-1 dark:bg-white/10">channels.darshan.agentToken</code> (pre-filled for {agent.name})
               </div>
               <div className="flex items-start gap-2">
                 <span className="mt-0.5 h-1.5 w-1.5 shrink-0 rounded-full bg-brand-600 mt-1" />
-                Enables the Darshan channel and restarts the gateway
+                Enables the Darshan channel and restarts the gateway — no manual <code className="rounded bg-zinc-200 px-1 dark:bg-white/10">channels add</code> needed
               </div>
             </div>
             <CopyBlock code={extCmds[os]} id="ext" copied={copied} onCopy={copy} />
             <p className="text-[11px] text-zinc-400">
-              Plugin must be <strong>enabled</strong> before config, and <strong>loaded</strong> (restarted) before the channel can be added.
+              Plugin must be <strong>trusted</strong> (<code className="rounded bg-zinc-200 px-1 dark:bg-white/10">plugins allow darshan</code>) before config is applied.
               After the final restart,{" "}
               <code className="rounded bg-zinc-200 px-1 dark:bg-white/10">openclaw status</code> should show{" "}
               <span className="font-semibold text-zinc-600 dark:text-zinc-300">Darshan │ ON │ OK</span>.
