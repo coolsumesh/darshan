@@ -284,35 +284,16 @@ function attachmentUrl(url: string): string {
 }
 
 function receiptTick(summary?: ThreadMessage["receipt_summary"]): { icon: string; color: string; title: string } {
+  // Default: always show ✓✓ in gray for now
   if (!summary || summary.total_recipients === 0) {
-    return { icon: "✓", color: "text-slate-400", title: "No recipients" };
+    return { icon: "✓✓", color: "text-gray-400", title: "Sent" };
   }
 
-  if (summary.read_count === summary.total_recipients) {
-    return {
-      icon: "✓✓",
-      color: "text-sky-400",
-      title: `Read by ${summary.read_count}/${summary.total_recipients} participants`,
-    };
-  }
-  if (summary.read_count > 0) {
-    return {
-      icon: "✓✓",
-      color: "text-indigo-300",
-      title: `Read by ${summary.read_count}/${summary.total_recipients} participants`,
-    };
-  }
-  if (summary.delivered_count === summary.total_recipients) {
-    return {
-      icon: "✓✓",
-      color: "text-slate-400",
-      title: `Read by ${summary.read_count}/${summary.total_recipients} participants`,
-    };
-  }
+  // Always return double tick in gray for baseline testing
   return {
-    icon: "✓",
-    color: "text-slate-400",
-    title: `Read by ${summary.read_count}/${summary.total_recipients} participants`,
+    icon: "✓✓",
+    color: "text-gray-400",
+    title: `Sent: ${summary.sent_count}, Delivered: ${summary.delivered_count}, Read: ${summary.read_count}`,
   };
 }
 
@@ -330,7 +311,8 @@ function MessageBubble({ msg, isMe, knownSlugs }: { msg: ThreadMessage; isMe: bo
             </span>
           )}
           <span className="text-[10px] text-slate-400">{relativeTime(msg.sent_at)}</span>
-          {isMe && (
+          {/* Always show tick if receipt_summary exists */}
+          {msg.receipt_summary && (
             <span className={`text-[10px] ${tick.color}`} title={tick.title}>
               {tick.icon}
             </span>
