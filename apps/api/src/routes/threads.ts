@@ -2194,15 +2194,17 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
       const before = req.query.before; // ISO timestamp
       const types = req.query.types?.split(",") ?? ["message", "event"];
 
-      const { rows } = await db.query(
+      const { rows: rowsDesc } = await db.query(
         `SELECT * FROM thread_messages
          WHERE thread_id = $1
            AND type = ANY($2)
            AND ($3::timestamptz IS NULL OR sent_at < $3)
-         ORDER BY sent_at ASC
+         ORDER BY sent_at DESC
          LIMIT $4`,
         [req.params.thread_id, types, before ?? null, lim]
       );
+      // Reverse to maintain chronological order (oldest first in response)
+      const rows = rowsDesc.reverse();
 
       const summaryByMessage = await loadReceiptSummaryByMessageIds(
         db,
