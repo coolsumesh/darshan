@@ -284,16 +284,51 @@ function attachmentUrl(url: string): string {
 }
 
 function receiptTick(summary?: ThreadMessage["receipt_summary"]): { icon: string; color: string; title: string } {
-  // Default: always show ✓✓ in gray for now
   if (!summary || summary.total_recipients === 0) {
-    return { icon: "✓✓", color: "text-gray-400", title: "Sent" };
+    return { icon: "✓", color: "text-slate-400", title: "Sent" };
   }
 
-  // Always return double tick in gray for baseline testing
+  // All read → blue double tick
+  if (summary.all_read) {
+    return {
+      icon: "✓✓",
+      color: "text-blue-500",
+      title: `Read by ${summary.read_count}/${summary.total_recipients}`,
+    };
+  }
+
+  // Some read → purple double tick
+  if (summary.read_count > 0) {
+    return {
+      icon: "✓✓",
+      color: "text-purple-400",
+      title: `Read by ${summary.read_count}/${summary.total_recipients}`,
+    };
+  }
+
+  // All delivered (but not read) → gray double tick
+  if (summary.all_delivered) {
+    return {
+      icon: "✓✓",
+      color: "text-slate-400",
+      title: `Delivered to ${summary.delivered_count}/${summary.total_recipients}`,
+    };
+  }
+
+  // Only some delivered → gray double tick
+  if (summary.delivered_count > 0) {
+    return {
+      icon: "✓✓",
+      color: "text-slate-400",
+      title: `Delivered to ${summary.delivered_count}/${summary.total_recipients}`,
+    };
+  }
+
+  // Only sent → single gray tick
   return {
-    icon: "✓✓",
-    color: "text-gray-400",
-    title: `Sent: ${summary.sent_count}, Delivered: ${summary.delivered_count}, Read: ${summary.read_count}`,
+    icon: "✓",
+    color: "text-slate-400",
+    title: "Sent",
   };
 }
 
