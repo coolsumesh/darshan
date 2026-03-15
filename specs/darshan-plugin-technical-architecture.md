@@ -17,6 +17,317 @@ User message in thread → Notification → Plugin polls → LLM dispatch → Re
 
 ---
 
+## Technology Stack & Infrastructure
+
+### Backend Database
+
+**Primary:** PostgreSQL (Neon serverless)
+- **Host:** `ep-withered-wildflower-aiqbe82h-pooler.c-4.us-east-1.aws.neon.tech`
+- **Database:** `neondb`
+- **Connection:** Pooled via Neon connection pooler
+
+### Cache & Queues
+
+**Redis** (for session context, queue management)
+- Session LLM context (per-thread isolation)
+- Rate limiting
+- Pub/Sub for notifications (potential, currently polling)
+
+### Language & Framework
+
+- **API:** Node.js + Fastify (TypeScript)
+- **Frontend:** Next.js 16 (React)
+- **ORM:** None (raw SQL)
+
+---
+
+## 1. Backend Database Schema
+
+### Core Tables
+
+#### `threads`
+```sql
+CREATE TABLE threads (
+  thread_id UUID PRIMARY KEY,
+  subject TEXT NOT NULL,
+  description TEXT,
+  project_id UUID NOT NULL,
+  created_by UUID NOT NULL,
+  created_slug VARCHAR(255),
+  created_at TIMESTAMP NOT NULL,
+  
+  -- Thread metadata
+  thread_type VARCHAR(50),  -- 'conversation', 'task', 'feature', 'level_test'
+  status VARCHAR(50),       -- 'open', 'closed', 'archived'
+  priority VARCHAR(50),
+  task_status VARCHAR(50),  -- 'pending', 'in-progress', 'review', 'done'
+  
+  -- Assignment & SLA
+  assignee_agent_id UUID,
+  assignee_user_id UUID,
+  completion_note TEXT,
+  done_at TIMESTAMP,
+  done_by_user_id UUID,
+  done_by_agent_id UUID,
+  
+  -- Flags
+  has_reply_pending BOOLEAN DEFAULT false,
+  deleted_at TIMESTAMP,
+  last_activity TIMESTAMP  -- COALESCE(last_message.sent_at, created_at)
+);
+```
+
+#### `thread_messages`
+```sql
+CREATE TABLE thread_messages (
+  message_id UUID PRIMARY KEY,
+  thread_id UUID NOT NULL REFERENCES threads(thread_id),
+  
+  -- Sender
+  sender_id UUID NOT NULL,
+  sender_slug VARCHAR(255) NOT NULL,
+  
+  -- Content
+  body TEXT NOT NULL,
+  type VARCHAR(50),         -- 'message', 'event', 'system'
+  intent VARCHAR(50),       -- 'question', 'answer', 'update', etc.
+  
+  -- Metadata
+  sent_at TIMESTAMP NOT NULL,
+  reply_to UUID,            -- null if not a reply
+  
+  -- Embeddings for search
+  embedding vector(1536),   -- pgvector, HNSW indexed
+  embedded_at TIMESTAMP,
+  
+  -- Thread flow tracking
+  awaiting_on VARCHAR(50),  -- 'none', 'agent', 'user'
+  next_expected_from VARCHAR(255),
+  
+  -- Attachments (as JSONB array)
+  attachments JSONB,
+  
+  FOREIGN KEY (thread_id) REFERENCES threads(thread_id),
+  FOREIGN KEY (reply_to) REFERENCES thread_messages(message_id)
+);
+```
+
+#### `thread_message_receipts`
+```sql
+CREATE TABLE thread_message_receipts (
+  receipt_id UUID PRIMARY KEY,
+  message_id UUID NOT NULL REFERENCES thread_messages(message_id),
+  recipient_id UUID NOT NULL,  -- Who is receiving this message
+  
+  -- Status tracking
+  status VARCHAR(50),  -- 'sent', 'delivered', 'read'
+  sent_at TIMESTAMP NOT NULL,
+  delivered_at TIMESTAMP,      -- When message was delivered to recipient
+  read_at TIMESTAMP,           -- When recipient read the message
+  
+  INDEX (message_id),
+  INDEX (recipient_id),
+  INDEX (status)
+);
+```
+
+#### `notifications`
+```sql
+CREATE TABLE notifications (
+  notification_id UUID PRIMARY KEY,
+  thread_id UUID NOT NULL,
+  message_id UUID NOT NULL REFERENCES thread_messages(message_id),
+  
+  -- What happened
+  event_type VARCHAR(50),  -- 'new_message', 'mention', 'assignment', etc.
+  
+  -- Notification content
+  message_from VARCHAR(255),
+  message_body TEXT,
+  message_subject TEXT,
+  
+  -- Status
+  status VARCHAR(50),  -- 'pending', 'processed', 'failed'
+  created_at TIMESTAMP NOT NULL,
+  processed_at TIMESTAMP,
+  
+  -- Metadata
+  actor_id UUID,
+  actor_slug VARCHAR(255),
+  
+  INDEX (status),
+  INDEX (created_at),
+  INDEX (thread_id)
+);
+```
+
+#### `thread_participants`
+```sql
+CREATE TABLE thread_participants (
+  thread_id UUID NOT NULL,
+  participant_id UUID NOT NULL,
+  participant_slug VARCHAR(255),
+  
+  -- Who added them
+  added_by UUID NOT NULL,
+  added_by_slug VARCHAR(255),
+  added_at TIMESTAMP NOT NULL,
+  
+  -- Removal
+  removed_at TIMESTAMP,
+  
+  PRIMARY KEY (thread_id, participant_id),
+  FOREIGN KEY (thread_id) REFERENCES threads(thread_id)
+);
+```
+
+#### `thread_reply_policy`
+```sql
+CREATE TABLE thread_reply_policy (
+  thread_id UUID PRIMARY KEY,
+  mode VARCHAR(50),  -- 'all' or 'restricted'
+  
+  allowed_participants JSONB,  -- Array of {participant_id, participant_slug}
+  next_message_limit INT,      -- Max messages before re-restricting
+  
+  FOREIGN KEY (thread_id) REFERENCES threads(thread_id)
+);
+```
+
+#### `thread_flow` (for tracking conversation flow)
+```sql
+CREATE TABLE thread_flow (
+  thread_id UUID PRIMARY KEY,
+  path JSONB,  -- Array of flow events (chronological)
+  awaiting_on VARCHAR(50),
+  next_expected_from VARCHAR(255),
+  
+  FOREIGN KEY (thread_id) REFERENCES threads(thread_id)
+);
+```
+
+### Data Flow Through Tables
+
+```
+User sends message:
+  ↓
+INSERT INTO thread_messages (message_id, thread_id, sender_id, body, sent_at)
+  ↓
+UPDATE threads SET last_activity = NOW() WHERE thread_id = ?
+  ↓
+INSERT INTO notifications (notification_id, thread_id, message_id, status='pending')
+  ↓
+Event triggers (Pub/Sub or polling loop)
+  ↓
+Plugin receives notification
+  ↓
+Plugin dispatches to LLM
+  ↓
+LLM generates reply
+  ↓
+Plugin posts reply:
+  INSERT INTO thread_messages (message_id, thread_id, sender_id='SANJAYA', body=reply)
+  ↓
+INSERT INTO thread_message_receipts (message_id, recipient_id, status='sent')
+  ↓
+UPDATE notifications SET status='processed'
+  ↓
+Frontend marks delivered:
+  POST /api/v1/threads/{id}/messages/{msgId}/delivered
+  ↓
+UPDATE thread_message_receipts SET delivered_at=NOW()
+  ↓
+Frontend marks read:
+  POST /api/v1/threads/{id}/messages/{msgId}/read
+  ↓
+UPDATE thread_message_receipts SET read_at=NOW()
+```
+
+---
+
+## Redis Usage & Session Management
+
+### Session Context Cache
+
+**Purpose:** Store LLM conversation history per thread (for context isolation)
+
+```typescript
+// Key format: darshan:thread:{threadId}
+// Value: Serialized conversation history
+
+Example:
+Key: "darshan:thread:b030887c-eeb6-4d71-98b5-bfb1571b6b0b"
+Value: {
+  messages: [
+    { role: "user", content: "What is Python?" },
+    { role: "assistant", content: "Python is..." },
+    { role: "user", content: "hello" }
+  ],
+  created_at: 1710512332000,
+  updated_at: 1710512532000,
+  participant_ids: ["86efbfb7-...", "337bf084-..."]
+}
+
+TTL: 24 hours (Redis expiry)
+```
+
+### Session Fetching During Dispatch
+
+```typescript
+// When LLM framework loads session
+1. Route resolution: resolveAgentRoute()
+   → SessionKey: "session:agent:main:darshan:thread:b030887c-..."
+
+2. Framework looks up Redis:
+   GET session:agent:main:darshan:thread:b030887c-...
+   
+3. Returns prior messages (if cache hit):
+   [
+     { role: "user", content: "What is Python?" },
+     { role: "assistant", content: "Python is..." },
+     ...
+   ]
+   
+4. LLM receives:
+   - Prior context (from Redis cache)
+   - New message (from notification)
+   - Thread metadata (from DB)
+
+5. LLM generates reply
+
+6. Session updated (Redis):
+   SET session:agent:main:darshan:thread:b030887c-... {updated_messages}
+```
+
+### Cache Invalidation
+
+```typescript
+// When new message is posted:
+1. INSERT INTO thread_messages
+2. UPDATE thread_message_receipts
+3. INVALIDATE Redis session (optional):
+   - Either: EXPIRE key to force reload
+   - Or: APPEND to existing Redis list
+```
+
+### Queue Management (Buffered Block Dispatcher)
+
+```typescript
+// When LLM lane is busy:
+Redis queue: "darshan:queue:{threadId}"
+
+Queued job: {
+  thread_id: "b030887c-...",
+  notification_id: "notif-xyz",
+  message_body: "hello",
+  created_at: 1710512532000
+}
+
+Worker polls queue every 5s, processes when lane available
+```
+
+---
+
 ## 1. Plugin Entry Point & Initialization
 
 **File:** `C:\Users\ssume\.openclaw\workspace\darshan-channel-plugin\index.ts`
@@ -483,22 +794,95 @@ POST /api/v1/threads/{threadId}/messages/{messageId}/read
 
 ### Receipt Summary Calculation
 
-When fetching messages:
+**Backend Query** (in `apps/api/src/routes/threads.ts`):
+
+```sql
+-- For each message, calculate receipt status across all participants
+SELECT 
+  message_id,
+  COUNT(*) as total_recipients,
+  SUM(CASE WHEN status IN ('delivered', 'read') THEN 1 ELSE 0 END) as delivered_count,
+  SUM(CASE WHEN status = 'read' THEN 1 ELSE 0 END) as read_count,
+  COUNT(*) as sent_count,  -- All created receipts = sent
+  
+  -- Boolean flags
+  CASE WHEN COUNT(*) = SUM(CASE WHEN status IN ('delivered', 'read') THEN 1 ELSE 0 END) 
+    THEN true ELSE false END as all_delivered,
+  CASE WHEN COUNT(*) = SUM(CASE WHEN status = 'read' THEN 1 ELSE 0 END) 
+    THEN true ELSE false END as all_read
+  
+FROM thread_message_receipts
+WHERE message_id = ?
+GROUP BY message_id;
+```
+
+**API Response** when fetching messages:
 
 ```typescript
-GET /api/v1/threads/{threadId}/messages
+GET /api/v1/threads/b030887c-eeb6-4d71-98b5-bfb1571b6b0b/messages
+
 Response includes for each message:
 
-receipt_summary: {
-  total_recipients: 1,          // SUMESH
-  sent_count: 1,
-  delivered_count: 1,
-  read_count: 1,
+{
+  message_id: "c5bd70eb-76dc-49f0-a106-001077865986",
+  sender_slug: "SANJAYA",
+  body: "Got it. Ready to help. What do you need?",
+  sent_at: "2026-03-15T12:22:45.123Z",
   
-  all_sent: true,
-  all_delivered: true,
-  all_read: true                // All have read ✓✓ blue
+  receipt_summary: {
+    total_recipients: 1,
+    sent_count: 1,
+    delivered_count: 1,
+    read_count: 1,
+    
+    all_sent: true,
+    all_delivered: true,
+    all_read: true          // All have read ✓✓ blue
+  }
 }
+```
+
+**Database State at Each Stage:**
+
+```
+Stage 1: Message posted by SANJAYA
+----------------------------------
+thread_messages:
+  message_id: c5bd70eb-...
+  sender_id: 337bf084... (SANJAYA)
+  body: "Got it..."
+  sent_at: 2026-03-15T12:22:45Z
+
+thread_message_receipts:
+  receipt_id: receipt-1
+  message_id: c5bd70eb-...
+  recipient_id: 86efbfb7... (SUMESH)
+  status: "sent"
+  sent_at: 2026-03-15T12:22:45Z
+  delivered_at: NULL
+  read_at: NULL
+
+receipt_summary: { sent_count: 1, delivered_count: 0, read_count: 0, all_read: false }
+
+
+Stage 2: Frontend calls /delivered (message rendered)
+------------------------------------------------------
+thread_message_receipts UPDATE:
+  status: "delivered"
+  delivered_at: 2026-03-15T12:22:47Z
+  read_at: NULL
+
+receipt_summary: { sent_count: 1, delivered_count: 1, read_count: 0, all_delivered: true }
+
+
+Stage 3: Frontend calls /read (user views message)
+---------------------------------------------------
+thread_message_receipts UPDATE:
+  status: "read"
+  delivered_at: 2026-03-15T12:22:47Z
+  read_at: 2026-03-15T12:22:50Z
+
+receipt_summary: { sent_count: 1, delivered_count: 1, read_count: 1, all_read: true }
 ```
 
 ### Tick Rendering
@@ -821,7 +1205,118 @@ No LLM dispatch
 
 ---
 
-## 11. Files & Locations
+## 11. API Endpoints & Database Operations
+
+### Core Endpoints Used by Plugin
+
+#### `GET /api/v1/notifications?status=pending`
+
+**Database Query:**
+```sql
+SELECT * FROM notifications 
+WHERE status = 'pending' 
+  AND created_at > NOW() - INTERVAL '1 hour'
+ORDER BY created_at DESC
+LIMIT 100;
+```
+
+**Response:**
+```json
+[
+  {
+    "notification_id": "notif-xyz",
+    "thread_id": "b030887c-...",
+    "message_id": "e2fd410c-...",
+    "status": "pending",
+    "message_from": "SUMESH_SUKUMARAN",
+    "message_body": "hello",
+    "message_subject": "Redis Test - Sanjaya",
+    "created_at": "2026-03-15T12:22:12.598Z"
+  }
+]
+```
+
+#### `POST /api/v1/threads/{threadId}/messages`
+
+**Database Operations:**
+```sql
+1. INSERT INTO thread_messages (
+     message_id, thread_id, sender_id, sender_slug, 
+     body, type, intent, sent_at, awaiting_on, next_expected_from
+   ) VALUES (...)
+
+2. INSERT INTO thread_message_receipts (
+     receipt_id, message_id, recipient_id, 
+     status='sent', sent_at=NOW()
+   ) 
+   FOR EACH thread participant
+
+3. UPDATE threads 
+   SET last_activity=NOW(), has_reply_pending=true 
+   WHERE thread_id=?
+
+4. INSERT INTO thread_flow (path[]) 
+   { event_type: 'answer', from_actor: 'SANJAYA', created_at: NOW() }
+```
+
+**Response:**
+```json
+{
+  "ok": true,
+  "message_id": "c5bd70eb-76dc-49f0-a106-001077865986",
+  "receipt_summary": {
+    "total_recipients": 1,
+    "sent_count": 1,
+    "delivered_count": 0,
+    "read_count": 0,
+    "all_sent": true,
+    "all_delivered": false,
+    "all_read": false
+  }
+}
+```
+
+#### `POST /api/v1/notifications/{notificationId}/process`
+
+**Database Operations:**
+```sql
+UPDATE notifications 
+SET status='processed', processed_at=NOW() 
+WHERE notification_id=?;
+```
+
+**Purpose:** Mark notification as handled (prevents re-processing)
+
+#### `POST /api/v1/threads/{threadId}/messages/{messageId}/delivered`
+
+**Database Operations:**
+```sql
+UPDATE thread_message_receipts 
+SET status='delivered', delivered_at=NOW() 
+WHERE message_id=? AND recipient_id=CURRENT_USER_ID;
+```
+
+#### `POST /api/v1/threads/{threadId}/messages/{messageId}/read`
+
+**Database Operations:**
+```sql
+UPDATE thread_message_receipts 
+SET status='read', read_at=NOW() 
+WHERE message_id=? AND recipient_id=CURRENT_USER_ID;
+```
+
+### Query Performance Considerations
+
+| Query | Optimization |
+|-------|--------------|
+| `notifications` lookup | INDEX (status, created_at) for fast pending query |
+| `thread_message_receipts` aggregate | GROUP BY on message_id is fast due to FK index |
+| `thread_messages` by thread_id | INDEX (thread_id) for range queries |
+| Vector search (embedding) | pgvector HNSW index on `embedding` column |
+
+---
+
+## 12. Files & Locations
 
 | File | Purpose |
 |------|---------|
@@ -834,7 +1329,7 @@ No LLM dispatch
 
 ---
 
-## 12. Verification Checklist
+## 13. Verification Checklist
 
 - [ ] Plugin loads (`openclaw logs` shows `Darshan plugin starting`)
 - [ ] WS connection established (`Darshan WS connected` in logs)
