@@ -1476,8 +1476,15 @@ export default function ThreadsPage() {
                       </>
                     )}
                   </div>
-                  <div className="mt-0.5 text-xs text-slate-400">
-                    Started by {selected.created_slug} · {relativeTime(selected.created_at)}
+                  <div className="mt-0.5 space-y-0.5 text-xs text-slate-400">
+                    <div>
+                      Started by {selected.created_slug} · {relativeTime(selected.created_at)}
+                    </div>
+                    {selected.last_activity && selected.last_activity !== selected.created_at && (
+                      <div>
+                        Last updated · {relativeTime(selected.last_activity)}
+                      </div>
+                    )}
                   </div>
                   <div className="mt-2 flex flex-wrap items-center gap-2">
                     {nextReply && (
