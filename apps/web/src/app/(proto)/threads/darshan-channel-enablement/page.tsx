@@ -26,7 +26,47 @@ export default function DarshanChannelEnablementPage() {
 
       {/* ── FIXES LOG ── */}
       <section className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900 space-y-3">
-        <h2 className="text-lg font-semibold">1) All Fixes Applied (2026-03-10)</h2>
+        <h2 className="text-lg font-semibold">1) Features Shipped Today (2026-03-15)</h2>
+        <div className="space-y-2">
+          {[
+            {
+              title: "Message Receipt Ticks — delivery/read status indicators",
+              status: "shipped",
+              detail: "Real-time ✓/✓✓ indicators on sent messages showing delivery and read status. Ticks change color based on participant read status: blue (all read), purple (some read), gray (delivered/sent only).",
+              code: `// Tick rendering logic
+function receiptTick(summary) {
+  if (summary.all_read) return { icon: "✓✓", color: "blue" };
+  if (summary.read_count > 0) return { icon: "✓✓", color: "purple" };
+  if (summary.all_delivered) return { icon: "✓✓", color: "gray" };
+  return { icon: "✓", color: "gray" };
+}
+
+// API endpoints (already existed, now fully utilized)
+POST /threads/:id/messages/:msgId/delivered
+POST /threads/:id/messages/:msgId/read
+
+// Result: 13/19 Telegram parity (68%) — up from 12/19`,
+            },
+          ].map(({ title, status, detail, code }) => (
+            <div key={title} className="rounded-lg border border-slate-100 dark:border-slate-800 p-3 space-y-1.5">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-400">
+                  ✨ SHIPPED
+                </span>
+                <span className="text-sm font-semibold text-slate-800 dark:text-slate-200">{title}</span>
+              </div>
+              <p className="text-xs text-slate-600 dark:text-slate-400">{detail}</p>
+              {code && (
+                <pre className="overflow-x-auto rounded bg-slate-100 p-2 text-xs dark:bg-slate-800 text-slate-700 dark:text-slate-300">{code}</pre>
+              )}
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* ── PRIOR FIXES LOG ── */}
+      <section className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900 space-y-3">
+        <h2 className="text-lg font-semibold">2) All Fixes Applied (2026-03-10)</h2>
         <div className="space-y-2">
           {[
             {
@@ -160,7 +200,7 @@ proxy_send_timeout 3600s;`,
 
       {/* ── GAP ANALYSIS ── */}
       <section className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900 space-y-3">
-        <h2 className="text-lg font-semibold">2) Gap Analysis vs Telegram (updated 2026-03-15)</h2>
+        <h2 className="text-lg font-semibold">3) Gap Analysis vs Telegram (updated 2026-03-15)</h2>
 
         {/* Score */}
         <div className="flex items-center gap-6 rounded-lg bg-slate-50 dark:bg-slate-800/50 p-4">
@@ -241,7 +281,7 @@ proxy_send_timeout 3600s;`,
 
       {/* ── WHAT REMAINS ── */}
       <section className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900 space-y-3">
-        <h2 className="text-lg font-semibold">3) Remaining Gaps (all non-critical)</h2>
+        <h2 className="text-lg font-semibold">4) Remaining Gaps (all non-critical)</h2>
         <div className="space-y-2">
           {[
             {
@@ -303,7 +343,7 @@ proxy_send_timeout 3600s;`,
 
       {/* ── CORRECT DISPATCH PATTERN ── */}
       <section className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900 space-y-3">
-        <h2 className="text-lg font-semibold">4) Correct Dispatch Pattern (current production)</h2>
+        <h2 className="text-lg font-semibold">5) Correct Dispatch Pattern (current production)</h2>
         <pre className="overflow-x-auto rounded bg-slate-100 p-3 text-xs dark:bg-slate-800">{`// 1. Load config + resolve route
 const cfg = await rt.config.loadConfig();
 const route = rt.channel.routing.resolveAgentRoute({
@@ -352,7 +392,7 @@ if (!delivered) await ackOnce("queued for reply");`}</pre>
 
       {/* ── FILES & COMMANDS ── */}
       <section className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900 space-y-3">
-        <h2 className="text-lg font-semibold">5) Files & Commands</h2>
+        <h2 className="text-lg font-semibold">6) Files & Commands</h2>
         <div className="text-sm text-slate-700 dark:text-slate-300 space-y-2">
           {[
             ["Plugin source (edit this)", "C:\\Users\\ssume\\.openclaw\\workspace\\darshan-channel-plugin\\index.ts"],
