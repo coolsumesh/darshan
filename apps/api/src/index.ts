@@ -31,6 +31,7 @@ import { registerAuth, verifyToken } from "./routes/auth.js";
 import { registerUsage } from "./routes/usage.js";
 import { startTaskSlaWorker } from "./workers/taskSlaWorker.js";
 import { startThreadOutboxPublisher } from "./workers/threadOutboxPublisher.js";
+import { startThreadReplyRequiredBroadcaster } from "./workers/threadReplyRequiredBroadcaster.js";
 
 const PORT = Number(process.env.PORT ?? 4000);
 const HOST = process.env.HOST ?? "0.0.0.0";
@@ -126,5 +127,6 @@ await server.register(async (app) => {
 startConnector(db);
 await startTaskSlaWorker(db);
 await startThreadOutboxPublisher(db);
+await startThreadReplyRequiredBroadcaster(db);
 
 await server.listen({ port: PORT, host: HOST });
