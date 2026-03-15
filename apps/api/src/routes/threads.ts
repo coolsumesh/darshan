@@ -942,41 +942,8 @@ async function fanOutNotifications(
   }
 }
 
-async function loadReceiptSummaryByMessageIds(db: pg.Pool, messageIds: string[]) {
-  if (messageIds.length === 0) return new Map<string, Record<string, unknown>>();
-
-  const { rows } = await db.query(
-    `SELECT
-       message_id::text,
-       count(*)::int AS total_recipients,
-       count(*) FILTER (WHERE status IN ('sent','delivered','read'))::int AS sent_count,
-       count(*) FILTER (WHERE status IN ('delivered','read'))::int AS delivered_count,
-       count(*) FILTER (WHERE status = 'read')::int AS read_count
-     FROM thread_message_receipts
-     WHERE message_id = ANY($1::uuid[])
-     GROUP BY message_id`,
-    [messageIds]
-  );
-
-  const map = new Map<string, Record<string, unknown>>();
-  for (const row of rows) {
-    const total = Number(row.total_recipients ?? 0);
-    const sent = Number(row.sent_count ?? 0);
-    const delivered = Number(row.delivered_count ?? 0);
-    const read = Number(row.read_count ?? 0);
-    map.set(String(row.message_id), {
-      total_recipients: total,
-      sent_count: sent,
-      delivered_count: delivered,
-      read_count: read,
-      all_sent: total > 0 && sent === total,
-      all_delivered: total > 0 && delivered === total,
-      all_read: total > 0 && read === total,
-    });
-  }
-
-  return map;
-}
+// Receipts are now denormalized into thread_messages.read_receipt via trigger
+// No aggregation needed — just read from the message row
 
 async function insertEventMessage(
   db: pg.Pool,
@@ -2206,13 +2173,10 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
       // Reverse to maintain chronological order (oldest first in response)
       const rows = rowsDesc.reverse();
 
-      const summaryByMessage = await loadReceiptSummaryByMessageIds(
-        db,
-        rows.map((row) => String(row.message_id))
-      );
+      // read_receipt is now denormalized into each message row
       const messages = rows.map((row) => ({
         ...row,
-        receipt_summary: summaryByMessage.get(String(row.message_id)) ?? {
+        receipt_summary: row.read_receipt ?? {
           total_recipients: 0,
           sent_count: 0,
           delivered_count: 0,
@@ -2244,6 +2208,7 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
       if (!msg) return reply.status(404).send({ ok: false, error: "message not found" });
 
       // Mark as read for the caller receipt row
+      // This will trigger the database trigger to update the message's read_receipt
       await db.query(
         `UPDATE thread_message_receipts
          SET status = 'read',
@@ -2254,8 +2219,13 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
         [req.params.message_id, caller.id]
       );
 
-      const summaryByMessage = await loadReceiptSummaryByMessageIds(db, [req.params.message_id]);
-      const receipt_summary = summaryByMessage.get(req.params.message_id) ?? {
+      // Fetch the updated message to get the current read_receipt
+      const { rows: [updatedMsg] } = await db.query(
+        `SELECT * FROM thread_messages WHERE message_id = $1`,
+        [req.params.message_id]
+      );
+
+      const receipt_summary = updatedMsg?.read_receipt ?? {
         total_recipients: 0,
         sent_count: 0,
         delivered_count: 0,
@@ -2264,13 +2234,14 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
         all_delivered: false,
         all_read: false,
       };
+
       broadcast("thread.message_receipt_updated", {
         thread_id: req.params.thread_id,
         message_id: req.params.message_id,
         receipt_summary,
       });
 
-      return { ok: true, message: { ...msg, receipt_summary } };
+      return { ok: true, message: { ...updatedMsg, receipt_summary } };
     }
   );
 
@@ -2293,8 +2264,13 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
         [req.params.message_id, caller.id]
       );
 
-      const summaryByMessage = await loadReceiptSummaryByMessageIds(db, [req.params.message_id]);
-      const receipt_summary = summaryByMessage.get(req.params.message_id) ?? {
+      // Fetch the updated message to get the current read_receipt
+      const { rows: [updatedMsg] } = await db.query(
+        `SELECT read_receipt FROM thread_messages WHERE message_id = $1`,
+        [req.params.message_id]
+      );
+
+      const receipt_summary = updatedMsg?.read_receipt ?? {
         total_recipients: 0,
         sent_count: 0,
         delivered_count: 0,
@@ -2332,8 +2308,13 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
         [req.params.message_id, caller.id]
       );
 
-      const summaryByMessage = await loadReceiptSummaryByMessageIds(db, [req.params.message_id]);
-      const receipt_summary = summaryByMessage.get(req.params.message_id) ?? {
+      // Fetch the updated message to get the current read_receipt
+      const { rows: [updatedMsg] } = await db.query(
+        `SELECT read_receipt FROM thread_messages WHERE message_id = $1`,
+        [req.params.message_id]
+      );
+
+      const receipt_summary = updatedMsg?.read_receipt ?? {
         total_recipients: 0,
         sent_count: 0,
         delivered_count: 0,
@@ -2362,7 +2343,7 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
       const access = await checkThreadAccess(req.params.thread_id, caller, db);
       if (!access) return reply.status(404).send({ ok: false, error: "thread not found or no access" });
 
-      const { rows } = await db.query(
+      const { rows: receipts } = await db.query(
         `SELECT recipient_id, recipient_slug, status,
                 sent_at, delivered_at, read_at, updated_at
          FROM thread_message_receipts
@@ -2371,8 +2352,13 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
         [req.params.message_id]
       );
 
-      const summaryByMessage = await loadReceiptSummaryByMessageIds(db, [req.params.message_id]);
-      const receipt_summary = summaryByMessage.get(req.params.message_id) ?? {
+      // Fetch the message to get its denormalized read_receipt
+      const { rows: [msg] } = await db.query(
+        `SELECT read_receipt FROM thread_messages WHERE message_id = $1`,
+        [req.params.message_id]
+      );
+
+      const receipt_summary = msg?.read_receipt ?? {
         total_recipients: 0,
         sent_count: 0,
         delivered_count: 0,
@@ -2382,7 +2368,7 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
         all_read: false,
       };
 
-      return { ok: true, message_id: req.params.message_id, receipts: rows, receipt_summary };
+      return { ok: true, message_id: req.params.message_id, receipts, receipt_summary };
     }
   );
 
