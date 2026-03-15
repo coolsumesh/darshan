@@ -2375,5 +2375,62 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
       return { ok: true, message_id: req.params.message_id, receipts: rows, receipt_summary };
     }
   );
+
+  // ── POST reply-status ─────────────────────────────────────────────────────
+  // Agents call this to emit responder lifecycle status (queued|picked|thinking|responded|blocked|failed)
+  // Server validates, persists to Redis (or lightweight store), and broadcasts via WS.
+  server.post<{ Params: { thread_id: string } }>(
+    "/threads/:thread_id/reply-status",
+    async (req, reply) => {
+      const caller = await resolveCaller(req, db);
+      if (!caller) return reply.status(401).send({ ok: false, error: "not authenticated" });
+
+      const access = await checkThreadAccess(req.params.thread_id, caller, db);
+      if (!access) return reply.status(404).send({ ok: false, error: "thread not found or no access" });
+
+      const body = req.body as {
+        source_message_id?: string;
+        status?: string;
+        intent?: string;
+        failure_code?: string;
+        failure_message?: string;
+      };
+
+      const VALID_STATUSES = ["queued", "picked", "thinking", "responded", "blocked", "failed"];
+      const status = body?.status?.trim();
+      if (!status || !VALID_STATUSES.includes(status)) {
+        return reply.status(400).send({ ok: false, error: `status must be one of: ${VALID_STATUSES.join(", ")}` });
+      }
+
+      const sourceMessageId = body?.source_message_id ?? null;
+
+      // Fetch caller slug for WS event
+      const { rows: [callerRow] } = await db.query(
+        `SELECT COALESCE(slug, upper(regexp_replace(name,'[^A-Za-z0-9]','_','g'))) AS slug, name
+         FROM agents WHERE id = $1`,
+        [caller.id]
+      ).catch(() => ({ rows: [{}] } as any));
+      const callerSlug = callerRow?.slug ?? caller.id;
+      const callerName = callerRow?.name ?? callerSlug;
+
+      // Broadcast responder status update to all thread participants
+      broadcast("thread.reply_status_updated", {
+        thread_id: req.params.thread_id,
+        source_message_id: sourceMessageId,
+        responder: {
+          participant_id: caller.id,
+          participant_slug: callerSlug,
+          display_name: callerName,
+        },
+        status,
+        intent: body?.intent ?? null,
+        failure_code: body?.failure_code ?? null,
+        failure_message: body?.failure_message ?? null,
+        occurred_at: new Date().toISOString(),
+      });
+
+      return { ok: true, thread_id: req.params.thread_id, status };
+    }
+  );
 }
 

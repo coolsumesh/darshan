@@ -34,6 +34,16 @@ import {
   type ThreadSlaState,
   type ThreadFlow,
 } from "@/lib/api";
+
+type ResponderStatus = "queued" | "picked" | "thinking" | "responded" | "blocked" | "failed";
+type ResponderState = {
+  participant_id: string;
+  participant_slug: string;
+  display_name: string;
+  status: ResponderStatus;
+  source_message_id: string | null;
+  occurred_at: string;
+};
 import { ThreadFlowPanel } from "@/components/proto/thread-flow-panel";
 import { ChevronDown, Inbox, Send, RefreshCw, CheckCircle, ArchiveIcon, Plus, X, Paperclip, UserPlus, Mic, Square } from "lucide-react";
 
@@ -505,6 +515,8 @@ export default function ThreadsPage() {
   const [threads, setThreads] = React.useState<Thread[]>([]);
   const [messages, setMessages] = React.useState<ThreadMessage[]>([]);
   const [selected, setSelected] = React.useState<Thread | null>(null);
+  // responderStatuses: slug → latest ResponderState for the currently selected thread
+  const [responderStatuses, setResponderStatuses] = React.useState<Record<string, ResponderState>>({});
   const [previews, setPreviews] = React.useState<Record<string, { text: string; time: string }>>({});
   const [loading, setLoading] = React.useState(true);
   const [sending, setSending] = React.useState(false);
@@ -831,6 +843,36 @@ export default function ThreadsPage() {
             return;
           }
 
+          if (type === "thread.reply_status_updated") {
+            const threadId = data?.thread_id as string | undefined;
+            if (!threadId || selected?.thread_id !== threadId) return;
+            const responder = data?.responder as { participant_id: string; participant_slug: string; display_name: string } | undefined;
+            if (!responder?.participant_slug) return;
+            const status = data?.status as ResponderStatus | undefined;
+            if (!status) return;
+            const slug = responder.participant_slug.toUpperCase();
+            setResponderStatuses((prev) => {
+              // Clear terminal states after a short delay by using responded/blocked/failed as final
+              const terminal: ResponderStatus[] = ["responded", "blocked", "failed"];
+              if (terminal.includes(status)) {
+                // Keep it briefly so UI can show the last state, then caller can clean up
+                return { ...prev, [slug]: { ...responder, participant_slug: slug, status, source_message_id: data?.source_message_id ?? null, occurred_at: data?.occurred_at ?? new Date().toISOString() } };
+              }
+              return { ...prev, [slug]: { ...responder, participant_slug: slug, status, source_message_id: data?.source_message_id ?? null, occurred_at: data?.occurred_at ?? new Date().toISOString() } };
+            });
+            // Auto-clear terminal statuses after 4 seconds
+            if (["responded", "blocked", "failed"].includes(status)) {
+              setTimeout(() => {
+                setResponderStatuses((prev) => {
+                  const next = { ...prev };
+                  if (next[slug]?.status === status) delete next[slug];
+                  return next;
+                });
+              }, 4000);
+            }
+            return;
+          }
+
           if (type === "thread.created" || type === "thread.status_changed" || type === "thread.deleted") {
             loadThreads(projectId, threadStatusFilter, { silent: true, search: debouncedThreadSearch });
           }
@@ -858,6 +900,7 @@ export default function ThreadsPage() {
     setThreadRole(detail?.role ?? null);
     setThreadFlow(detail?.flow ?? { path: [], awaiting_on: null, next_expected_from: null });
     setMessages([]);
+    setResponderStatuses({});
     const msgs = await fetchThreadMessages(thread.thread_id, 200);
     setMessages(msgs);
 
@@ -1646,6 +1689,40 @@ export default function ThreadsPage() {
                   />
                 ))
               )}
+              {/* Responder thinking indicators */}
+              {Object.values(responderStatuses).map((rs) => {
+                if (rs.status === "responded" || rs.status === "blocked") return null;
+                const isThinking = rs.status === "thinking";
+                const isPicked = rs.status === "picked" || rs.status === "queued";
+                const isFailed = rs.status === "failed";
+                return (
+                  <div key={rs.participant_slug} className="flex items-center gap-3 px-1 py-1">
+                    <div className={`h-6 w-6 rounded-full flex items-center justify-center text-[10px] font-bold text-white ${slugColor(rs.participant_slug)}`}>
+                      {rs.participant_slug.slice(0, 2)}
+                    </div>
+                    <div className={`flex items-center gap-1.5 rounded-2xl rounded-tl-sm px-3 py-2 text-xs ${
+                      isFailed
+                        ? "bg-red-50 text-red-500 ring-1 ring-red-200 dark:bg-red-950/20 dark:ring-red-900/50"
+                        : "bg-white text-slate-400 ring-1 ring-slate-200 dark:bg-slate-800 dark:ring-slate-700"
+                    }`}>
+                      {isThinking && (
+                        <span className="flex gap-0.5">
+                          <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400 [animation-delay:0ms]" />
+                          <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400 [animation-delay:150ms]" />
+                          <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400 [animation-delay:300ms]" />
+                        </span>
+                      )}
+                      <span>
+                        {isFailed
+                          ? `${rs.display_name} failed to respond. Retry needed.`
+                          : isPicked
+                          ? `Waiting for ${rs.display_name}…`
+                          : `${rs.display_name} is thinking…`}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
               <div ref={bottomRef} />
             </div>
 
