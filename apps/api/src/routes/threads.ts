@@ -736,66 +736,6 @@ async function hydrateThread(db: DbExecutor, threadId: string) {
   };
 }
 
-async function buildThreadFlow(db: DbExecutor, threadId: string) {
-  const { rows: [thread] } = await db.query(
-    `SELECT thread_id, created_at, created_slug
-     FROM threads
-     WHERE thread_id = $1
-     LIMIT 1`,
-    [threadId]
-  );
-  if (!thread) return { path: [] as Array<Record<string, unknown>>, awaiting_on: null as string | null, next_expected_from: null as string | null };
-
-  const { rows: messages } = await db.query(
-    `SELECT message_id, sender_slug, sent_at, type, intent, awaiting_on, next_expected_from
-     FROM thread_messages
-     WHERE thread_id = $1
-     ORDER BY sent_at ASC, message_id ASC`,
-    [threadId]
-  );
-
-  const path: Array<Record<string, unknown>> = [
-    {
-      seq: 1,
-      event_type: "created",
-      from_actor: "SYSTEM",
-      to_actor: thread.created_slug,
-      message_id: null,
-      created_at: thread.created_at,
-      awaiting_on: "none",
-      next_expected_from: thread.created_slug,
-    },
-  ];
-
-  let lastAwaitingOn: string | null = null;
-  let lastNextExpectedFrom: string | null = null;
-  for (const [index, message] of messages.entries()) {
-    const eventType = (message.intent as string | null) ?? (message.type === "event" ? "status_update" : "answer");
-    const awaitingOn = (message.awaiting_on as string | null) ?? "none";
-    const nextExpectedFrom = (message.next_expected_from as string | null) ?? null;
-    path.push({
-      seq: index + 2,
-      event_type: eventType,
-      from_actor: message.sender_slug,
-      to_actor: nextExpectedFrom,
-      message_id: message.message_id,
-      created_at: message.sent_at,
-      awaiting_on: awaitingOn,
-      next_expected_from: nextExpectedFrom,
-    });
-    if (awaitingOn && awaitingOn !== "none") {
-      lastAwaitingOn = awaitingOn;
-      lastNextExpectedFrom = nextExpectedFrom;
-    }
-  }
-
-  return {
-    path,
-    awaiting_on: lastAwaitingOn,
-    next_expected_from: lastNextExpectedFrom,
-  };
-}
-
 async function notifyTaskAssignee(threadId: string, db: pg.Pool) {
   const { rows } = await db.query(
     `SELECT
@@ -1440,8 +1380,7 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
       );
 
       const thread = await hydrateThread(db, req.params.thread_id);
-      const flow = await buildThreadFlow(db, req.params.thread_id);
-      return { ok: true, thread: thread ?? access.thread, participants, role: access.role, flow };
+      return { ok: true, thread: thread ?? access.thread, participants, role: access.role };
     }
   );
 
