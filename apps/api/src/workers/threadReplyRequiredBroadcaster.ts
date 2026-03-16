@@ -53,7 +53,7 @@ export async function startThreadReplyRequiredBroadcaster(_db: pg.Pool) {
 
         for (const stream of results) {
           for (const msg of stream.messages ?? []) {
-            await handleStreamMessage(client, msg);
+            await handleStreamMessage(client, msg, _db);
           }
         }
 
@@ -63,7 +63,7 @@ export async function startThreadReplyRequiredBroadcaster(_db: pg.Pool) {
             STREAM_KEY, CONSUMER_GROUP, CONSUMER_ID, 60000, "0-0", { COUNT: 10 }
           );
           for (const msg of reclaimed?.messages ?? []) {
-            await handleStreamMessage(client, msg);
+            await handleStreamMessage(client, msg, _db);
           }
         } catch { /* xAutoClaim not supported on older Redis — skip silently */ }
 
@@ -81,7 +81,11 @@ export async function startThreadReplyRequiredBroadcaster(_db: pg.Pool) {
   loop().catch((e) => console.error("[reply-broadcaster] fatal:", e));
 }
 
-async function handleStreamMessage(client: any, msg: { id: string; message: Record<string, string> }) {
+async function handleStreamMessage(
+  client: any,
+  msg: { id: string; message: Record<string, string> },
+  db: pg.Pool,
+) {
   const fields = msg.message;
   const targetAgentId = fields.target_agent_id;
   const eventId       = fields.event_id;
@@ -89,7 +93,6 @@ async function handleStreamMessage(client: any, msg: { id: string; message: Reco
   const messageId     = fields.message_id;
 
   if (!targetAgentId || !threadId || !messageId) {
-    // Malformed — ack and skip
     await client.xAck(STREAM_KEY, CONSUMER_GROUP, msg.id).catch(() => {});
     return;
   }
@@ -98,7 +101,31 @@ async function handleStreamMessage(client: any, msg: { id: string; message: Reco
   try {
     payload = JSON.parse(fields.payload ?? "{}");
   } catch {
-    payload = { event_id: eventId, thread_id: threadId, message_id: messageId, target_agent_id: targetAgentId };
+    payload = {};
+  }
+
+  // Fetch full message details from DB so the plugin has body/sender/subject
+  // (the outbox payload only contains IDs — no message content)
+  let message_body    = "";
+  let message_from    = "";
+  let message_subject = "";
+  try {
+    const { rows } = await db.query<{
+      body: string; sender_slug: string; subject: string;
+    }>(
+      `SELECT tm.body, tm.sender_slug, t.subject
+       FROM thread_messages tm
+       JOIN threads t ON t.thread_id = tm.thread_id
+       WHERE tm.message_id = $1`,
+      [messageId],
+    );
+    if (rows[0]) {
+      message_body    = rows[0].body;
+      message_from    = rows[0].sender_slug;
+      message_subject = rows[0].subject;
+    }
+  } catch (e: any) {
+    console.warn(`[reply-broadcaster] failed to fetch message details for ${messageId}: ${e?.message}`);
   }
 
   // Push to the target agent over its existing WebSocket connection
@@ -109,12 +136,14 @@ async function handleStreamMessage(client: any, msg: { id: string; message: Reco
     target_agent_id: targetAgentId,
     reason:          payload.reason ?? "all_participants",
     created_at:      payload.created_at ?? new Date().toISOString(),
+    // Message context — required by handleNotification in the plugin
+    message_body,
+    message_from,
+    message_subject,
   });
 
-  // Ack immediately — pushToAgent is fire-and-forget (agent reconnects if missed)
   await client.xAck(STREAM_KEY, CONSUMER_GROUP, msg.id).catch(() => {});
-
-  console.info(`[reply-broadcaster] pushed reply_required → agent ${targetAgentId} thread ${threadId}`);
+  console.info(`[reply-broadcaster] pushed reply_required → agent ${targetAgentId} thread ${threadId} from=${message_from}`);
 }
 
 export function stopThreadReplyRequiredBroadcaster() {

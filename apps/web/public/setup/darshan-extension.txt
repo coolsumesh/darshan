@@ -125,6 +125,17 @@ async function handleNotification(
   }
   if (!fromSlug) fromSlug = "agent";
 
+  // Mark this message as delivered + read by the agent (fixes grey ticks for sender)
+  // Fire-and-forget — don't block dispatch on this
+  const markRead = async () => {
+    const base = `${baseUrl}/api/v1/threads/${threadId}/messages/${sourceMessageId}`;
+    const headers = { Authorization: `Bearer ${agentToken}`, "Content-Type": "application/json" };
+    const opts = { method: "POST", headers, signal: AbortSignal.timeout(5000) };
+    await fetch(`${base}/delivered`, opts).catch(() => {});
+    await fetch(`${base}/read`, opts).catch(() => {});
+  };
+  markRead();
+
   const postReply = async (replyText: string): Promise<boolean> => {
     const clean = replyText.trim();
     if (!clean || clean === "NO_REPLY" || clean === "HEARTBEAT_OK") return false;
