@@ -873,7 +873,7 @@ export default function ThreadsPage() {
                       setMessages((prev) =>
                         prev.map((m) =>
                           m.message_id === msg.message_id
-                            ? { ...m, read_receipt: receipt_summary }
+                            ? { ...m, receipt_summary }
                             : m
                         )
                       );
@@ -999,7 +999,7 @@ export default function ThreadsPage() {
             setMessages((prev) =>
               prev.map((msg) =>
                 msg.message_id === m.message_id
-                  ? { ...msg, read_receipt: receipt_summary }
+                  ? { ...msg, receipt_summary }
                   : msg
               )
             );
