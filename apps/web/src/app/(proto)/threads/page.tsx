@@ -578,7 +578,6 @@ export default function ThreadsPage() {
   const [voiceSupported, setVoiceSupported] = React.useState(false);
   const [isListening, setIsListening] = React.useState(false);
   const bottomRef = React.useRef<HTMLDivElement>(null);
-  const messageListRef = React.useRef<HTMLDivElement>(null);
   const isLoadingPhase2Ref = React.useRef(false);
   const recognitionRef = React.useRef<any>(null);
   const voiceBaseDraftRef = React.useRef("");
@@ -689,20 +688,9 @@ export default function ThreadsPage() {
       // Phase 2: Load remaining in background (prepend older messages above)
       isLoadingPhase2Ref.current = true;
       setTimeout(async () => {
-        // Save scroll position before adding new messages
-        const scrollContainer = messageListRef.current;
-        const scrollBefore = scrollContainer?.scrollTop ?? 0;
-        
         const full = await fetchThreadMessages(direct.thread.thread_id, 50);
         setMessages(full);
-        
-        // Restore scroll position after DOM update
-        setTimeout(() => {
-          if (scrollContainer) {
-            scrollContainer.scrollTop = scrollBefore;
-          }
-          isLoadingPhase2Ref.current = false;
-        }, 0);
+        isLoadingPhase2Ref.current = false;
       }, 0);
     };
 
@@ -735,22 +723,11 @@ export default function ThreadsPage() {
         // Mark that we're entering phase 2 to prevent scroll animation
         isLoadingPhase2Ref.current = true;
         setTimeout(async () => {
-          // Save scroll position before adding new messages
-          const scrollContainer = messageListRef.current;
-          const scrollBefore = scrollContainer?.scrollTop ?? 0;
-          
           const full = await fetchThreadMessages(selected.thread_id, 50);
           // Prepend older messages (indices 0 to 44) above recent (indices 45 to 49)
           // Newest message stays in same visual position without scrolling
           setMessages(full);
-          
-          // Restore scroll position after DOM update
-          setTimeout(() => {
-            if (scrollContainer) {
-              scrollContainer.scrollTop = scrollBefore;
-            }
-            isLoadingPhase2Ref.current = false;
-          }, 0);
+          isLoadingPhase2Ref.current = false;
         }, 0);
       } catch (err) {
         console.error("Error loading messages:", err);
@@ -994,20 +971,9 @@ export default function ThreadsPage() {
     // Phase 2: Load remaining in background (prepend older messages above)
     isLoadingPhase2Ref.current = true;
     setTimeout(async () => {
-      // Save scroll position before adding new messages
-      const scrollContainer = messageListRef.current;
-      const scrollBefore = scrollContainer?.scrollTop ?? 0;
-      
       const full = await fetchThreadMessages(thread.thread_id, 50);
       setMessages(full);
-      
-      // Restore scroll position after DOM update
-      setTimeout(() => {
-        if (scrollContainer) {
-          scrollContainer.scrollTop = scrollBefore;
-        }
-        isLoadingPhase2Ref.current = false;
-      }, 0);
+      isLoadingPhase2Ref.current = false;
     }, 0);
 
     // Mark incoming messages as delivered/read when the thread is opened.
@@ -1178,20 +1144,9 @@ export default function ThreadsPage() {
     // Phase 2: Load remaining in background (prepend older messages above)
     isLoadingPhase2Ref.current = true;
     setTimeout(async () => {
-      // Save scroll position before adding new messages
-      const scrollContainer = messageListRef.current;
-      const scrollBefore = scrollContainer?.scrollTop ?? 0;
-      
       const full = await fetchThreadMessages(thread.thread_id, 50);
       setMessages(full);
-      
-      // Restore scroll position after DOM update
-      setTimeout(() => {
-        if (scrollContainer) {
-          scrollContainer.scrollTop = scrollBefore;
-        }
-        isLoadingPhase2Ref.current = false;
-      }, 0);
+      isLoadingPhase2Ref.current = false;
     }, 0);
   };
 
@@ -1811,7 +1766,7 @@ export default function ThreadsPage() {
             )}
 
             {/* Messages */}
-            <div ref={messageListRef} className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
+            <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
               {messages.length === 0 ? (
                 <div className="flex h-full items-center justify-center text-sm text-slate-400">
                   Loading messages…
