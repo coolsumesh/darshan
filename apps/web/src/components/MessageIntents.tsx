@@ -42,7 +42,7 @@ export function MessageIntents({ intents }: MessageIntentsProps) {
         return (
           <span
             key={intent}
-            className={`${colors.bg} ${colors.text} px-2 py-1 rounded text-xs font-medium whitespace-nowrap border border-current border-opacity-20`}
+            className={`${colors.bg} ${colors.text} px-1.5 py-0.5 rounded text-[10px] font-medium whitespace-nowrap border border-current border-opacity-20`}
             title={intent}
           >
             [{intent}]
