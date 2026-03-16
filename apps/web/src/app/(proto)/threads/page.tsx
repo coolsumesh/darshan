@@ -969,7 +969,7 @@ export default function ThreadsPage() {
     // Mark incoming messages as delivered/read when the thread is opened.
     const currentMe = await authMe();
     if (currentMe) setMe(currentMe);
-    const incoming = msgs.filter((m) => m.sender_id !== currentMe?.id);
+    const incoming = recent.filter((m) => m.sender_id !== currentMe?.id);
     incoming.forEach((m) => {
       markThreadMessageDelivered(thread.thread_id, m.message_id).catch(() => {});
       markThreadMessageRead(thread.thread_id, m.message_id).catch(() => {});
