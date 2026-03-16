@@ -805,22 +805,15 @@ async function notifyTaskAssignee(threadId: string, db: pg.Pool) {
        t.priority,
        t.task_status,
        t.status,
+       t.first_message_body,
        a.id AS assignee_agent_id,
        a.name AS assignee_name,
        p.slug AS project_slug,
        p.name AS project_name,
-       p.agent_briefing,
-       first_message.body AS description
+       p.agent_briefing
      FROM threads t
      JOIN agents a ON a.id = t.assignee_agent_id
      LEFT JOIN projects p ON p.id = t.project_id
-     LEFT JOIN LATERAL (
-       SELECT tm.body
-       FROM thread_messages tm
-       WHERE tm.thread_id = t.thread_id AND tm.type = 'message'
-       ORDER BY tm.sent_at ASC
-       LIMIT 1
-     ) first_message ON true
      WHERE t.thread_id = $1
      LIMIT 1`,
     [threadId]
@@ -836,7 +829,7 @@ async function notifyTaskAssignee(threadId: string, db: pg.Pool) {
     project_name: task.project_name ?? null,
     agent_briefing: task.agent_briefing ?? null,
     title: task.subject,
-    description: task.description ?? "",
+    description: task.first_message_body ?? "",
     priority: task.priority ?? "normal",
     status: task.task_status ?? task.status,
     assigned_to: task.assignee_name,
