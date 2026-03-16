@@ -131,7 +131,7 @@ async function handleNotification(
     const res = await fetch(`${baseUrl}/api/v1/threads/${threadId}/messages`, {
       method: "POST",
       headers: { Authorization: `Bearer ${agentToken}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ body: clean, intent: "answer", awaiting_on: "none" }),
+      body: JSON.stringify({ body: clean, intents: ["response"], awaiting_on: "none" }),
       signal: AbortSignal.timeout(15000),
     }).catch(() => null);
     if (!res?.ok) return false;
@@ -185,7 +185,7 @@ async function handleNotification(
           const ok = await postReply(out);
           if (ok) {
             delivered = true;
-            await emitResponderStatus(baseUrl, agentToken, threadId, sourceMessageId, "responded", { intent: "answer" }, log);
+            await emitResponderStatus(baseUrl, agentToken, threadId, sourceMessageId, "responded", { intent: "response" }, log);
             log?.warn?.("[darshan] real reply posted");
             const dCfg = getDarshanConfig(cfg);
             void recordUsageEvent(dCfg.baseUrl, dCfg.agentToken ?? "", threadSessionKey, threadId, aId ?? "");
