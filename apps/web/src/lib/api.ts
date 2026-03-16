@@ -137,15 +137,13 @@ export type ThreadAttachment = {
 };
 
 export type ThreadMessageIntent =
-  | "greeting"
-  | "question"
-  | "answer"
-  | "suggest"
-  | "work_confirmation"
-  | "status_update"
-  | "review_request"
-  | "blocked"
-  | "closure";
+  | "question"          // Need a response
+  | "answer"            // Providing a response
+  | "in_progress"       // Currently doing the work
+  | "blocked"           // Need help / work is blocked
+  | "status_update"     // Progress/status update
+  | "request_review"    // Please review/provide feedback
+  | "work_confirmation"; // Work is complete
 
 export type ThreadReceiptSummary = {
   total_recipients: number;
@@ -167,7 +165,8 @@ export type ThreadMessage = {
   body: string;
   attachments?: ThreadAttachment[];
   sent_at: string;
-  intent?: ThreadMessageIntent;
+  intents?: ThreadMessageIntent[];      // Array of intents (e.g., ["answer", "question"])
+  intent?: ThreadMessageIntent;         // Backward compatibility (deprecated)
   intent_confidence?: number | null;
   awaiting_on?: "user" | "agent" | "none";
   next_expected_from?: string | null;
@@ -283,6 +282,34 @@ export async function fetchThreadMessages(threadId: string, limit = 50): Promise
     `/api/v1/threads/${threadId}/messages?limit=${safeLimit}`
   );
   return data?.ok ? (data.messages ?? []) : [];
+}
+
+// Helper: Filter messages with specific intents
+export function filterMessagesByIntents(messages: ThreadMessage[], intents: ThreadMessageIntent[]): ThreadMessage[] {
+  return messages.filter((msg) => {
+    const msgIntents = msg.intents ?? (msg.intent ? [msg.intent] : []);
+    return intents.some((intent) => msgIntents.includes(intent));
+  });
+}
+
+// Helper: Get messages with pending actions (need response or action)
+export function getPendingActionMessages(messages: ThreadMessage[]): ThreadMessage[] {
+  const pendingIntents: ThreadMessageIntent[] = [
+    "question",           // Someone asked me
+    "in_progress",        // I'm working, might need help
+    "blocked",            // I need help
+    "request_review"      // Need feedback
+  ];
+  return filterMessagesByIntents(messages, pendingIntents);
+}
+
+// Helper: Get completed messages
+export function getCompletedMessages(messages: ThreadMessage[]): ThreadMessage[] {
+  const completedIntents: ThreadMessageIntent[] = [
+    "work_confirmation",
+    "status_update"
+  ];
+  return filterMessagesByIntents(messages, completedIntents);
 }
 
 export async function markThreadMessageDelivered(threadId: string, messageId: string): Promise<ThreadReceiptSummary | null> {

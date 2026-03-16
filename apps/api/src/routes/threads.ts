@@ -40,15 +40,13 @@ const THREAD_STATUSES = new Set(["open", "closed", "archived"]);
 const TASK_STATUSES = new Set(["proposed", "approved", "in-progress", "review", "blocked"]);
 const TASK_PRIORITIES = new Set(["high", "medium", "normal", "low"]);
 const MESSAGE_INTENTS = new Set([
-  "greeting",
-  "question",
-  "answer",
-  "suggest",
-  "work_confirmation",
-  "status_update",
-  "review_request",
-  "blocked",
-  "closure",
+  "question",          // Need a response
+  "answer",            // Providing a response
+  "in_progress",       // Currently doing the work
+  "blocked",           // Need help / work is blocked
+  "status_update",     // Progress/status update
+  "request_review",    // Please review/provide feedback
+  "work_confirmation"  // Work is complete
 ]);
 const TARGETED_REPLY_MESSAGE_INTENTS = new Set(["answer", "review_request", "blocked"]);
 const AWAITING_ON_VALUES = new Set(["user", "agent", "none"]);
