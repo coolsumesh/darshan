@@ -375,6 +375,11 @@ const plugin = {
             }
             return { channel: CHANNEL_ID, messageId: `darshan-${Date.now()}`, chatId: String(to ?? "unknown") };
           },
+          // Required by OpenClaw delivery handler (checked alongside sendText).
+          // Darshan has media:false so this is a stub — media messages are not supported.
+          sendMedia: async ({ to }: any) => {
+            return { channel: CHANNEL_ID, messageId: `darshan-${Date.now()}`, chatId: String(to ?? "unknown") };
+          },
         },
         gateway: {
           startAccount: async (ctx: any) => {
