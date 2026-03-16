@@ -241,11 +241,14 @@ export type ThreadParticipantMutationResult = {
 export async function fetchThreads(
   projectId?: string | null,
   status: "open" | "closed" | "archived" | "all" = "open",
-  search?: string
+  search?: string,
+  opts?: { type?: string; excludeType?: string }
 ): Promise<Thread[]> {
   const qs = new URLSearchParams({ limit: "50", status });
   if (projectId) qs.set("project_id", projectId);
   if (search?.trim()) qs.set("search", search.trim());
+  if (opts?.type) qs.set("type", opts.type);
+  if (opts?.excludeType) qs.set("exclude_type", opts.excludeType);
   const data = await apiFetch<{ ok: boolean; threads: Thread[] }>(`/api/v1/threads?${qs}`);
   return data?.ok ? (data.threads ?? []) : [];
 }
@@ -506,6 +509,24 @@ export async function createThread(
   const data = await apiFetch<{ ok: boolean; thread: Thread }>(
     `/api/v1/threads`,
     { method: "POST", body: JSON.stringify({ subject, project_id: projectId, participants: participantIds }) }
+  );
+  return data?.ok ? data.thread ?? null : null;
+}
+
+export async function createLevelTestThread(
+  projectId: string,
+  subject: string,
+  body?: string
+): Promise<Thread | null> {
+  const payload: Record<string, unknown> = {
+    subject,
+    project_id: projectId,
+    thread_type: "level_test",
+  };
+  if (body?.trim()) payload.first_message_body = body.trim();
+  const data = await apiFetch<{ ok: boolean; thread: Thread }>(
+    `/api/v1/threads`,
+    { method: "POST", body: JSON.stringify(payload) }
   );
   return data?.ok ? data.thread ?? null : null;
 }

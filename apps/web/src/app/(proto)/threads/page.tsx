@@ -658,7 +658,7 @@ export default function ThreadsPage() {
     if (!silent) setLoading(true);
 
     const s = statusFilter ?? threadStatusFilter;
-    const data = await fetchThreads(pid ?? projectId, s, opts?.search ?? debouncedThreadSearch);
+    const data = await fetchThreads(pid ?? projectId, s, opts?.search ?? debouncedThreadSearch, { excludeType: 'level_test' });
     setThreads(data);
 
     // Load last message preview for each thread

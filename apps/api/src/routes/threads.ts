@@ -1212,6 +1212,7 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
       project_id?: string;
       status?: string;
       type?: string;
+      exclude_type?: string;
       task_status?: string;
       assignee_agent_id?: string;
       assignee_user_id?: string;
@@ -1230,6 +1231,7 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
         project_id,
         status = "open",
         type,
+        exclude_type,
         task_status,
         assignee_agent_id,
         assignee_user_id,
@@ -1240,6 +1242,7 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
       const pid = project_id?.trim() || null;
       const statusFilter = THREAD_STATUSES.has(status) ? status : null;
       const typeFilter = type && THREAD_TYPES.has(type) ? type : null;
+      const excludeTypeFilter = exclude_type && THREAD_TYPES.has(exclude_type) ? exclude_type : null;
       const taskStatusFilter = task_status && TASK_STATUSES.has(task_status) ? task_status : null;
       const assigneeAgentFilter = assignee_agent_id?.trim() || null;
       const assigneeUserFilter = assignee_user_id?.trim() || null;
@@ -1293,15 +1296,16 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
             AND ($4::uuid IS NULL OR t.project_id = $4)
             AND ($5::text IS NULL OR t.status = $5)
             AND ($6::text IS NULL OR t.thread_type = $6)
-            AND ($7::text IS NULL OR t.task_status = $7)
-            AND ($8::uuid IS NULL OR t.assignee_agent_id = $8)
-            AND ($9::uuid IS NULL OR t.assignee_user_id = $9)
+            AND ($7::text IS NULL OR t.thread_type != $7)
+            AND ($8::text IS NULL OR t.task_status = $8)
+            AND ($9::uuid IS NULL OR t.assignee_agent_id = $9)
+            AND ($10::uuid IS NULL OR t.assignee_user_id = $10)
             AND (
-              to_tsvector('english', t.subject) @@ plainto_tsquery('english', $10)
-              OR to_tsvector('english', COALESCE(t.first_message_body, '')) @@ plainto_tsquery('english', $10)
+              to_tsvector('english', t.subject) @@ plainto_tsquery('english', $11)
+              OR to_tsvector('english', COALESCE(t.first_message_body, '')) @@ plainto_tsquery('english', $11)
             )
           ORDER BY COALESCE(t.last_activity_at, t.created_at) DESC, t.created_at DESC
-          LIMIT $11 OFFSET $12`;
+          LIMIT $12 OFFSET $13`;
         params = [
           caller.id,
           caller.type === "user",
@@ -1309,6 +1313,7 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
           pid,
           statusFilter,
           typeFilter,
+          excludeTypeFilter,
           taskStatusFilter,
           assigneeAgentFilter,
           assigneeUserFilter,
@@ -1334,11 +1339,12 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
             AND ($4::uuid IS NULL OR t.project_id = $4)
             AND ($5::text IS NULL OR t.status = $5)
             AND ($6::text IS NULL OR t.thread_type = $6)
-            AND ($7::text IS NULL OR t.task_status = $7)
-            AND ($8::uuid IS NULL OR t.assignee_agent_id = $8)
-            AND ($9::uuid IS NULL OR t.assignee_user_id = $9)
+            AND ($7::text IS NULL OR t.thread_type != $7)
+            AND ($8::text IS NULL OR t.task_status = $8)
+            AND ($9::uuid IS NULL OR t.assignee_agent_id = $9)
+            AND ($10::uuid IS NULL OR t.assignee_user_id = $10)
           ORDER BY COALESCE(t.last_activity_at, t.created_at) DESC, t.created_at DESC
-          LIMIT $10 OFFSET $11`;
+          LIMIT $11 OFFSET $12`;
         params = [
           caller.id,
           caller.type === "user",
@@ -1346,6 +1352,7 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
           pid,
           statusFilter,
           typeFilter,
+          excludeTypeFilter,
           taskStatusFilter,
           assigneeAgentFilter,
           assigneeUserFilter,

@@ -16,6 +16,7 @@ import {
   CalendarDays,
   CheckCircle,
   ChevronDown,
+  ClipboardCheck,
   ChevronLeft,
   ChevronRight,
   Code2,
@@ -52,6 +53,7 @@ const AGENTS_NAV = [
   { href: "/agents/onboard",  label: "Onboard",   icon: Terminal       },
   { href: "/agents/chat",     label: "Chat",      icon: MessageSquareText },
   { href: "/agents/levels",   label: "Levels",    icon: Award          },
+  { href: "/level-tests",     label: "Level Tests", icon: ClipboardCheck },
   { href: "/agents/activity",      label: "Activity",  icon: Zap   },
   { href: "/agents/api-reference", label: "API Ref",   icon: Code2     },
   { href: "/agents/usage",         label: "Usage",     icon: BarChart2 },
@@ -505,7 +507,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     } catch { /* no-op */ }
   }
 
-  const useFullHeightMain = pathname === "/threads" || pathname.startsWith("/agents/chat");
+  const useFullHeightMain = pathname === "/threads" || pathname === "/level-tests" || pathname.startsWith("/agents/chat");
 
   return (
     <div className="flex h-full flex-col bg-zinc-50 dark:bg-[#0C0A12]">
