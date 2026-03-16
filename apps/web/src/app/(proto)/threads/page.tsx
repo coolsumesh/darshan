@@ -866,8 +866,20 @@ export default function ThreadsPage() {
             if (selected && selected.thread_id === threadId) {
               setMessages((prev) => prev.some((m) => m.message_id === msg.message_id) ? prev : [...prev, msg]);
               if (me && msg.sender_id !== me.id) {
-                markThreadMessageDelivered(threadId, msg.message_id).catch(() => {});
-                markThreadMessageRead(threadId, msg.message_id).catch(() => {});
+                // Mark as delivered and read, then update the local message with new receipt status
+                markThreadMessageRead(threadId, msg.message_id)
+                  .then((receipt_summary) => {
+                    if (receipt_summary) {
+                      setMessages((prev) =>
+                        prev.map((m) =>
+                          m.message_id === msg.message_id
+                            ? { ...m, read_receipt: receipt_summary }
+                            : m
+                        )
+                      );
+                    }
+                  })
+                  .catch(() => {});
               }
               fetchThreadSla(threadId)
                 .then((state) => {
@@ -981,8 +993,19 @@ export default function ThreadsPage() {
     if (currentMe) setMe(currentMe);
     const incoming = recent.filter((m) => m.sender_id !== currentMe?.id);
     incoming.forEach((m) => {
-      markThreadMessageDelivered(thread.thread_id, m.message_id).catch(() => {});
-      markThreadMessageRead(thread.thread_id, m.message_id).catch(() => {});
+      markThreadMessageRead(thread.thread_id, m.message_id)
+        .then((receipt_summary) => {
+          if (receipt_summary) {
+            setMessages((prev) =>
+              prev.map((msg) =>
+                msg.message_id === m.message_id
+                  ? { ...msg, read_receipt: receipt_summary }
+                  : msg
+              )
+            );
+          }
+        })
+        .catch(() => {});
     });
   }, []);
 
