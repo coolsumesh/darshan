@@ -578,6 +578,7 @@ export default function ThreadsPage() {
   const [voiceSupported, setVoiceSupported] = React.useState(false);
   const [isListening, setIsListening] = React.useState(false);
   const bottomRef = React.useRef<HTMLDivElement>(null);
+  const isLoadingPhase2Ref = React.useRef(false);
   const recognitionRef = React.useRef<any>(null);
   const voiceBaseDraftRef = React.useRef("");
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
@@ -684,10 +685,12 @@ export default function ThreadsPage() {
       // Phase 1: Instant render with last 5 messages
       const recent = await fetchThreadMessages(direct.thread.thread_id, 5);
       setMessages(recent);
-      // Phase 2: Load remaining in background
+      // Phase 2: Load remaining in background (prepend older messages above)
+      isLoadingPhase2Ref.current = true;
       setTimeout(async () => {
         const full = await fetchThreadMessages(direct.thread.thread_id, 50);
         setMessages(full);
+        isLoadingPhase2Ref.current = false;
       }, 0);
     };
 
@@ -717,9 +720,14 @@ export default function ThreadsPage() {
         setMessages(recent);
         
         // Phase 2: Load remaining messages in background (don't block)
+        // Mark that we're entering phase 2 to prevent scroll animation
+        isLoadingPhase2Ref.current = true;
         setTimeout(async () => {
           const full = await fetchThreadMessages(selected.thread_id, 50);
+          // Prepend older messages (indices 0 to 44) above recent (indices 45 to 49)
+          // Newest message stays in same visual position without scrolling
           setMessages(full);
+          isLoadingPhase2Ref.current = false;
         }, 0);
       } catch (err) {
         console.error("Error loading messages:", err);
@@ -960,10 +968,12 @@ export default function ThreadsPage() {
     // Phase 1: Instant render with last 5 messages
     const recent = await fetchThreadMessages(thread.thread_id, 5);
     setMessages(recent);
-    // Phase 2: Load remaining in background
+    // Phase 2: Load remaining in background (prepend older messages above)
+    isLoadingPhase2Ref.current = true;
     setTimeout(async () => {
       const full = await fetchThreadMessages(thread.thread_id, 50);
       setMessages(full);
+      isLoadingPhase2Ref.current = false;
     }, 0);
 
     // Mark incoming messages as delivered/read when the thread is opened.
@@ -976,9 +986,12 @@ export default function ThreadsPage() {
     });
   }, []);
 
-  // Scroll to bottom when messages load
+  // Scroll to bottom when messages load (Phase 1 only, not Phase 2)
+  // During Phase 2, older messages prepend above recent ones, so we don't scroll
   React.useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (!isLoadingPhase2Ref.current) {
+      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
   }, [messages]);
 
   const mentionSuggestions = React.useMemo(() => {
@@ -1128,10 +1141,12 @@ export default function ThreadsPage() {
     // Phase 1: Instant render with last 5 messages
     const recent = await fetchThreadMessages(thread.thread_id, 5);
     setMessages(recent);
-    // Phase 2: Load remaining in background
+    // Phase 2: Load remaining in background (prepend older messages above)
+    isLoadingPhase2Ref.current = true;
     setTimeout(async () => {
       const full = await fetchThreadMessages(thread.thread_id, 50);
       setMessages(full);
+      isLoadingPhase2Ref.current = false;
     }, 0);
   };
 
