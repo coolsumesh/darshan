@@ -277,7 +277,7 @@ export async function fetchThreadSla(threadId: string): Promise<{ reply_policy: 
   };
 }
 
-export async function fetchThreadMessages(threadId: string, limit = 100): Promise<ThreadMessage[]> {
+export async function fetchThreadMessages(threadId: string, limit = 50): Promise<ThreadMessage[]> {
   const safeLimit = Math.min(Math.max(limit, 1), 200);
   const data = await apiFetch<{ ok: boolean; messages: ThreadMessage[] }>(
     `/api/v1/threads/${threadId}/messages?limit=${safeLimit}`

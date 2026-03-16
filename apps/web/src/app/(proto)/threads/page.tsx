@@ -659,8 +659,8 @@ export default function ThreadsPage() {
         setSelected(detail.thread);
         setThreadParticipants(detail.participants);
         setThreadRole(detail.role);
-        setThreadFlow(detail.flow);
-        const msgs = await fetchThreadMessages(existing.thread_id, 200);
+        setThreadFlow({ path: [], awaiting_on: null, next_expected_from: null });
+        const msgs = await fetchThreadMessages(existing.thread_id, 50);
         setMessages(msgs);
         return;
       }
@@ -674,8 +674,8 @@ export default function ThreadsPage() {
       setSelected(direct.thread);
       setThreadParticipants(direct.participants);
       setThreadRole(direct.role);
-      setThreadFlow(direct.flow);
-      const msgs = await fetchThreadMessages(direct.thread.thread_id, 200);
+      setThreadFlow({ path: [], awaiting_on: null, next_expected_from: null });
+      const msgs = await fetchThreadMessages(direct.thread.thread_id, 50);
       setMessages(msgs);
     };
 
@@ -695,7 +695,7 @@ export default function ThreadsPage() {
   // Load messages when thread selected
   React.useEffect(() => {
     if (!selected) return;
-    fetchThreadMessages(selected.thread_id, 200).then(setMessages).catch(() => {});
+    fetchThreadMessages(selected.thread_id, 50).then(setMessages).catch(() => {});
   }, [selected?.thread_id]); // eslint-disable-line
 
   React.useEffect(() => {
@@ -926,7 +926,7 @@ export default function ThreadsPage() {
     setThreadFlow(detail?.flow ?? { path: [], awaiting_on: null, next_expected_from: null });
     setMessages([]);
     setResponderStatuses({});
-    const msgs = await fetchThreadMessages(thread.thread_id, 200);
+    const msgs = await fetchThreadMessages(thread.thread_id, 50);
     setMessages(msgs);
 
     // Mark incoming messages as delivered/read when the thread is opened.
@@ -1088,7 +1088,7 @@ export default function ThreadsPage() {
     setThreadParticipants(detail?.participants ?? []);
     setThreadRole(detail?.role ?? null);
     setThreadFlow(detail?.flow ?? { path: [], awaiting_on: null, next_expected_from: null });
-    const msgs = await fetchThreadMessages(thread.thread_id, 200);
+    const msgs = await fetchThreadMessages(thread.thread_id, 50);
     setMessages(msgs);
   };
 
