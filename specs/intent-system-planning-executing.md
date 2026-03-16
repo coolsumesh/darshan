@@ -61,8 +61,8 @@ Can be **added to any base intent** (0, 1, or 2 modifiers per message):
 - Keyboard shortcut: `Shift + Tab` to toggle
 
 **Behavior:**
-- Same intents available
-- Same modifiers available
+- Same base intents available
+- Modifiers only editable after send
 - Signals: "We're discussing/planning/ideating"
 - Use case: Spec discussions, design, approach decisions
 
@@ -72,13 +72,17 @@ PLANNING MODE
 ┌───────────────────────────────────────┐
 │ [Type your message...]                │
 │                                       │
-│ Base Intent:                          │
-│ ◉ request  ○ response  ○ thinking    │
+│ [🎯 request] [📎] [Send]             │
+│   ↑ Icon button, click for popup    │
 │                                       │
-│ Modifiers:                            │
-│ ☐ not_handled  ☐ handled_incorrectly │
+│ Popup on click:                       │
+│ ┌────────────────────┐               │
+│ │ ◉ request         │               │
+│ │ ○ response        │               │
+│ │ ○ thinking        │               │
+│ └────────────────────┘               │
 │                                       │
-│ [Send]  [Shift+Tab to Execute]      │
+│ [Shift+Tab to Execute]               │
 └───────────────────────────────────────┘
 ```
 
@@ -90,8 +94,8 @@ PLANNING MODE
 - Keyboard shortcut: `Shift + Tab` to toggle (default mode)
 
 **Behavior:**
-- Same intents available
-- Same modifiers available
+- Same base intents available
+- Modifiers only editable after send
 - Signals: "We're building/implementing/delivering"
 - Use case: Building features, fixing bugs, delivery
 
@@ -101,13 +105,17 @@ EXECUTING MODE
 ┌───────────────────────────────────────┐
 │ [Type your message...]                │
 │                                       │
-│ Base Intent:                          │
-│ ◉ request  ○ response  ○ thinking    │
+│ [🎯 request] [📎] [Send]             │
+│   ↑ Icon button, click for popup    │
 │                                       │
-│ Modifiers:                            │
-│ ☐ not_handled  ☐ handled_incorrectly │
+│ Popup on click:                       │
+│ ┌────────────────────┐               │
+│ │ ◉ request         │               │
+│ │ ○ response        │               │
+│ │ ○ thinking        │               │
+│ └────────────────────┘               │
 │                                       │
-│ [Send]  [Shift+Tab to Plan]          │
+│ [Shift+Tab to Plan]                  │
 └───────────────────────────────────────┘
 ```
 
@@ -119,32 +127,55 @@ EXECUTING MODE
 
 **User (Sumesh):**
 - Base intent defaults to `request`
-- Can toggle to `response` or `thinking`
+- Can change via icon button popup
 
 **Agent (Sanjaya):**
 - Base intent defaults to `response`
-- Can toggle to `request` or `thinking`
+- Can change via icon button popup
 
-### Multi-Intent Support
+### Base Intent Selection (Persistent per Session)
 
-Example sends:
+- Icon button appears **above** attachment button in compose box
+- Click → compact popup showing 3 radio buttons (request, response, thinking)
+- Selection persists until changed again (session-wide, not per-message)
+- Current selection displayed/indicated on button (optional: show emoji or abbreviation)
+
+### Modifiers (Per-Message, Edit-Only)
+
+- Modifiers are **NOT** available in compose
+- Only editable **after sending** via [✎ edit] button on message header
+- Full modal opens with ability to add/remove not_handled and/or handled_incorrectly
+
+### Message Sending
+
+Sends message with only the **base intent**:
+
 ```json
-// Planning mode, thinking
 {
   "body": "Let me work through this approach",
   "intents": ["thinking"]
 }
+```
 
-// Executing mode, request with modifier
+No modifiers in initial send. Add them later via edit if needed.
+
+### Multi-Intent (Editing)
+
+Example edits (after send):
+```json
+// Add not_handled modifier
 {
-  "body": "Can someone fix this? (still waiting)",
   "intents": ["request", "not_handled"]
 }
 
-// Executing mode, response with modifier
+// Add both modifiers
 {
-  "body": "That fix doesn't work",
-  "intents": ["response", "handled_incorrectly"]
+  "intents": ["response", "not_handled", "handled_incorrectly"]
+}
+
+// Change base intent + modifiers
+{
+  "intents": ["thinking"]
 }
 ```
 
@@ -323,27 +354,41 @@ Display:
 PLANNING MODE [P]     or     EXECUTING MODE [E]
 ```
 
-Keyboard shortcut handled globally.
+Keyboard shortcut handled globally (Shift + Tab).
 
-### 2. Intent Selector (Compose)
+### 2. Base Intent Button (Compose)
 
-**File:** `apps/web/src/components/IntentSelector.tsx`
+**File:** `apps/web/src/components/BaseIntentButton.tsx`
 
 Props:
 ```typescript
 {
   baseIntent: "request" | "response" | "thinking"
-  modifiers: ("not_handled" | "handled_incorrectly")[]
-  onBaseIntentChange: (intent: string) => void
-  onModifiersChange: (modifiers: string[]) => void
+  onBaseIntentChange: (intent: "request" | "response" | "thinking") => void
 }
 ```
 
-Display:
-- Radio buttons: request, response, thinking
-- Checkboxes: not_handled, handled_incorrectly
+**Location:** Above attachment button in compose box
 
-### 3. Intent Edit Modal
+**Display:**
+- Icon button (🎯 or similar emoji/icon)
+- Optional: show current intent abbreviation or emoji on button
+- Click → compact popup with 3 radio options (request, response, thinking)
+
+**Popup Behavior:**
+```
+┌────────────────────┐
+│ ◉ request         │
+│ ○ response        │
+│ ○ thinking        │
+└────────────────────┘
+```
+
+- Selection persists until changed again
+- Popup closes after selection
+- Works in both Planning and Executing modes
+
+### 3. Intent Edit Modal (Post-Send)
 
 **File:** `apps/web/src/components/IntentEditModal.tsx`
 
@@ -357,11 +402,25 @@ Props:
 }
 ```
 
-Display:
-- Same as IntentSelector but in modal form
-- Cancel / Save buttons
+**Display:**
+- Base Intent (radio buttons, read-only or editable):
+  ```
+  ◉ request
+  ○ response
+  ○ thinking
+  ```
+- Modifiers (checkboxes, editable):
+  ```
+  ☐ not_handled
+  ☐ handled_incorrectly
+  ```
+- [Cancel] [Save] buttons
 
-### 4. Message Header with Edit
+**Rules:**
+- Exactly 1 base intent required
+- 0, 1, or 2 modifiers optional
+
+### 4. Message Header with Edit Button
 
 **Update:** `apps/web/src/app/(proto)/threads/page.tsx`
 
@@ -375,17 +434,78 @@ Updated:
 SENDER  time ago  [intents] [✎ edit]  message_id
 ```
 
-Click edit → open IntentEditModal
+Click [✎] → open IntentEditModal for that message
 
 ### 5. Compose Box with Mode Context
 
 **Update:** `apps/web/src/app/(proto)/threads/page.tsx`
 
 Add:
-- Mode toggle (`P`/`E` keyboard shortcuts)
-- Background color based on mode
-- Intent selector component
+- Mode toggle (Shift+Tab keyboard shortcut)
+- Background color based on mode (planning = blue-50, executing = white)
+- Base Intent Button component (above attachment)
 - Send button
+- No modifiers in compose
+
+---
+
+## UI Layout (Detailed)
+
+### Compose Box Flow
+
+```
+┌─────────────────────────────────────────────────────┐
+│ PLANNING MODE [P indicator]                         │
+│                                                     │
+│ [Message input area]                                │
+│ Type your message here...                           │
+│                                                     │
+│ [🎯] [📎] [Send]                                   │
+│  ↑    ↑      ↑                                      │
+│  |    |      Send button (always enabled)          │
+│  |    Attachment button (existing)                 │
+│  Base Intent Button                                │
+│                                                     │
+│ When you click [🎯]:                               │
+│ ┌─────────────────────┐                            │
+│ │ Select Base Intent: │                            │
+│ │ ◉ request          │                            │
+│ │ ○ response         │                            │
+│ │ ○ thinking         │                            │
+│ └─────────────────────┘                            │
+│ (closes after selection)                           │
+│                                                     │
+└─────────────────────────────────────────────────────┘
+```
+
+### Sent Message & Edit Flow
+
+```
+┌─────────────────────────────────────────────────────┐
+│ SUMESH  2m ago  [request] [✎ edit]  msg-id-1234   │
+│                           ↑                        │
+│                    Click to edit                   │
+│ Here's my thought on this...                        │
+│                                                     │
+└─────────────────────────────────────────────────────┘
+
+When you click [✎ edit]:
+
+┌─────────────────────────────────────────┐
+│ Edit Intent                             │
+├─────────────────────────────────────────┤
+│ Base Intent (pick one):                 │
+│ ◉ request                               │
+│ ○ response                              │
+│ ○ thinking                              │
+│                                         │
+│ Modifiers (optional):                   │
+│ ☐ not_handled                           │
+│ ☐ handled_incorrectly                   │
+│                                         │
+│ [Cancel]  [Save]                        │
+└─────────────────────────────────────────┘
+```
 
 ---
 
@@ -473,48 +593,80 @@ Agent:  [response] "Found the issue, redeploying..."
 ## Implementation Order
 
 1. **Backend:**
-   - Update MESSAGE_INTENTS: remove old intents, add request/response/thinking/not_handled/handled_incorrectly
-   - Update POST /messages to accept intents array
-   - Add PATCH /messages/{id} endpoint for intent editing
+   - ✅ intents JSONB array exists (migration 068)
+   - ✅ POST /messages accepts intents array
+   - PATCH /messages/{id} endpoint for intent editing (in progress)
    - Validation: 1 base intent required, max 2 modifiers
 
 2. **Frontend:**
-   - Create ModeToggle component
-   - Create IntentSelector component
-   - Create IntentEditModal component
-   - Update message header with edit button
-   - Add keyboard shortcut handlers (P/E)
-   - Add mode background color styling
-   - Wire up API calls
+   - Create **BaseIntentButton** component (icon + compact popup)
+   - Create **IntentEditModal** component (post-send editing)
+   - Create **ModeToggle** component (planning/executing with Shift+Tab)
+   - Update message header with [✎ edit] button
+   - Add keyboard shortcut handlers (Shift+Tab)
+   - Add mode background color styling (planning = blue-50, executing = white)
+   - Wire up API calls (POST intents on send, PATCH on edit)
 
 3. **Testing:**
-   - Planning mode: toggle P, send messages with intents
-   - Executing mode: toggle E, send with modifiers
-   - Edit intents: click button, change, save
-   - Multi-intent: check display (request + not_handled, etc)
+   - Compose: click icon button, select intent, send
+   - After send: click [✎], add modifiers, save
+   - Planning mode: toggle with Shift+Tab, background changes
+   - Executing mode: same flow, different background
+   - Multi-intent: send request, edit to add not_handled
+   - Verify colors match spec
 
 ---
 
 ## Success Criteria
 
-- ✅ Mode toggle works (P/E keyboard shortcuts)
-- ✅ Background changes based on mode
-- ✅ Intent selector shows correct defaults by sender type
-- ✅ Can send with 1+ intents
-- ✅ Can edit intents after sending
-- ✅ Modifiers display alongside base intents
-- ✅ Colors match spec
-- ✅ API validation enforces 1 base intent
+- ✅ Mode toggle works (Shift+Tab keyboard shortcut)
+- ✅ Background changes based on mode (planning = blue-50, executing = white)
+- ✅ Base Intent Button above attachment, click opens popup
+- ✅ Popup shows 3 radio buttons (request, response, thinking)
+- ✅ Selection persists until changed
+- ✅ Message sends with only base intent (no compose modifiers)
+- ✅ After send: [✎ edit] button appears on message
+- ✅ Click [✎] → IntentEditModal opens with base intent + modifier checkboxes
+- ✅ Can add/remove not_handled and/or handled_incorrectly in edit modal
+- ✅ Save calls PATCH /messages/{id} with updated intents
+- ✅ Intents display as colored badges (request=blue, response=green, thinking=amber, not_handled=yellow, handled_incorrectly=red)
 - ✅ Works in both modes (planning & executing)
 - ✅ Mode is per-thread, resets on page reload (not persisted)
+- ✅ API validation enforces 1 base intent, max 2 modifiers
+
+---
+
+## Base Intent Button Details
+
+### Icon & Display
+
+**Icon Options:**
+- 🎯 (bullseye — specific intent/goal)
+- 💬 (speech bubble — communication intent)
+- 🏷️ (label — intent as a label)
+- ✏️ (pencil — editable intent)
+
+**Recommendation:** 🎯 (minimal, clear intent selection purpose)
+
+**Button Style:**
+- Compact icon button (no text label in normal state)
+- Optional: show current intent as abbreviation (R/r/t) on button
+- Positioned directly above attachment button
+- Same styling/sizing as attachment button for consistency
+
+**Keyboard Alternative (optional, future):**
+- Cmd/Ctrl+Shift+I to open intent popup
+- Or use number keys (1=request, 2=response, 3=thinking)
 
 ---
 
 ## Deferred (Future)
 
 - Persist mode per thread (user preference)
+- Persist base intent selection per user (defaults)
 - Auto-suggest intents based on message content
 - Intent-based notifications/escalations
 - Analytics: track request → not_handled → resolved workflow
 - Bulk intent editing
 - Intent history/audit trail
+- Keyboard shortcuts for intent selection (1/2/3 keys)
