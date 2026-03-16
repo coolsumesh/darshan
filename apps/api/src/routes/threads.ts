@@ -2033,10 +2033,10 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
         }
       }
 
-      // Default awaiting behavior for user questions:
+      // Default awaiting behavior for request messages (user or agent):
       // - no @mentions => await all active participants (except sender)
       // - @mentions present => await only mentioned active participants
-      if (caller.type === "user" && effectiveIntent === "request") {
+      if (effectiveIntent === "request") {
         const { rows: activeParticipants } = await db.query(
           `SELECT participant_id, participant_slug
            FROM thread_participants
@@ -2154,7 +2154,7 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
         },
       };
 
-      if (caller.type === "user" && effectiveIntent === "request") {
+      if (effectiveIntent === "request") {
         await enqueueReplyRequiredOutbox(
           db,
           req.params.thread_id,
