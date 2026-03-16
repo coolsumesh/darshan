@@ -689,7 +689,14 @@ export default function ThreadsPage() {
       isLoadingPhase2Ref.current = true;
       setTimeout(async () => {
         const full = await fetchThreadMessages(direct.thread.thread_id, 50);
-        setMessages(full);
+        // Merge Phase 2 messages with Phase 1 (preserving any receipt updates)
+        setMessages((current) => {
+          const currentMap = new Map(current.map((m) => [m.message_id, m]));
+          return full.map((m) => ({
+            ...m,
+            receipt_summary: currentMap.get(m.message_id)?.receipt_summary ?? m.receipt_summary,
+          }));
+        });
         isLoadingPhase2Ref.current = false;
       }, 0);
     };
@@ -724,9 +731,15 @@ export default function ThreadsPage() {
         isLoadingPhase2Ref.current = true;
         setTimeout(async () => {
           const full = await fetchThreadMessages(selected.thread_id, 50);
-          // Prepend older messages (indices 0 to 44) above recent (indices 45 to 49)
-          // Newest message stays in same visual position without scrolling
-          setMessages(full);
+          // Merge Phase 2 messages with Phase 1 (preserving any receipt updates)
+          setMessages((current) => {
+            const currentMap = new Map(current.map((m) => [m.message_id, m]));
+            // Merge: keep receipt_summary from Phase 1 if already updated
+            return full.map((m) => ({
+              ...m,
+              receipt_summary: currentMap.get(m.message_id)?.receipt_summary ?? m.receipt_summary,
+            }));
+          });
           isLoadingPhase2Ref.current = false;
         }, 0);
       } catch (err) {
@@ -984,7 +997,14 @@ export default function ThreadsPage() {
     isLoadingPhase2Ref.current = true;
     setTimeout(async () => {
       const full = await fetchThreadMessages(thread.thread_id, 50);
-      setMessages(full);
+      // Merge Phase 2 messages with Phase 1 (preserving any receipt updates)
+      setMessages((current) => {
+        const currentMap = new Map(current.map((m) => [m.message_id, m]));
+        return full.map((m) => ({
+          ...m,
+          receipt_summary: currentMap.get(m.message_id)?.receipt_summary ?? m.receipt_summary,
+        }));
+      });
       isLoadingPhase2Ref.current = false;
     }, 0);
 
@@ -1168,7 +1188,14 @@ export default function ThreadsPage() {
     isLoadingPhase2Ref.current = true;
     setTimeout(async () => {
       const full = await fetchThreadMessages(thread.thread_id, 50);
-      setMessages(full);
+      // Merge Phase 2 messages with Phase 1 (preserving any receipt updates)
+      setMessages((current) => {
+        const currentMap = new Map(current.map((m) => [m.message_id, m]));
+        return full.map((m) => ({
+          ...m,
+          receipt_summary: currentMap.get(m.message_id)?.receipt_summary ?? m.receipt_summary,
+        }));
+      });
       isLoadingPhase2Ref.current = false;
     }, 0);
   };
