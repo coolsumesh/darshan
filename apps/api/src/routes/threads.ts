@@ -39,20 +39,24 @@ const THREAD_TYPES = new Set(["conversation", "feature", "level_test", "task"]);
 const THREAD_STATUSES = new Set(["open", "closed", "archived"]);
 const TASK_STATUSES = new Set(["proposed", "approved", "in-progress", "review", "blocked"]);
 const TASK_PRIORITIES = new Set(["high", "medium", "normal", "low"]);
-// Conversation flow intents
-const MESSAGE_INTENTS = new Set([
-  "question",            // I asked a question
-  "clarification",       // I need more details / clarification
-  "thought",             // I'm thinking / analyzing / working through it
-  "answer",              // I answered the question
-  "disagreement",        // I disagree / don't think that's right
-  "suggestion",          // I made a suggestion
-  "should_i",            // Proposing something / asking for approval
-  "blocked",             // I'm blocked / can't proceed
-  "work_confirmation"    // I did the thing / confirmed completion
+// Base intents (exactly 1 per message)
+const BASE_INTENTS = new Set([
+  "request",             // greeting, question, instruction, anything needing response
+  "response",            // answering/responding to a request
+  "thinking"             // analyzing, working through, no response needed
 ]);
+
+// Status modifiers (0, 1, or 2 per message)
+const STATUS_MODIFIERS = new Set([
+  "not_handled",         // request/task hasn't been addressed yet
+  "handled_incorrectly"  // response/work was done but incorrectly
+]);
+
+// All valid intents (for validation)
+const MESSAGE_INTENTS = new Set([...BASE_INTENTS, ...STATUS_MODIFIERS]);
 // Intents that require targeted/awaiting response (expect specific people to reply)
-const TARGETED_REPLY_MESSAGE_INTENTS = new Set(["answer", "should_i", "blocked", "suggestion"]);
+// For now: all "request" intents expect a response
+const TARGETED_REPLY_MESSAGE_INTENTS = new Set(["request"]);
 const AWAITING_ON_VALUES = new Set(["user", "agent", "none"]);
 const ACTIVE_RESPONDERS_MAX_NEXT = Math.max(1, Number(process.env.ACTIVE_RESPONDERS_MAX_NEXT ?? 100));
 
@@ -1949,7 +1953,7 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
       const cleanBody = body.trim();
       const safeAttachments = Array.isArray(attachments) ? attachments.filter(Boolean).slice(0, 8) : [];
 
-      // Normalize intents: accept either single intent or array
+      // Normalize intents: accept array, validate against base intents + modifiers
       let effectiveIntents: string[] = [];
       if (Array.isArray(intents)) {
         effectiveIntents = intents
@@ -1957,6 +1961,7 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
           .map((i) => i.trim().toLowerCase())
           .filter((i) => i && MESSAGE_INTENTS.has(i));
       } else if (typeof intent === "string") {
+        // Backward compat: single intent string
         const normalizedIntent = intent.trim().toLowerCase();
         if (normalizedIntent && MESSAGE_INTENTS.has(normalizedIntent)) {
           effectiveIntents = [normalizedIntent];
@@ -1965,12 +1970,26 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
 
       // Fallback to default intent if none provided
       if (effectiveIntents.length === 0) {
-        const defaultIntent = caller.type === "agent" ? "answer" : "question";
+        const defaultIntent = caller.type === "agent" ? "response" : "request";
         effectiveIntents = [defaultIntent];
       }
 
-      // Use first intent as effectiveIntent for backward compatibility with validation
-      const effectiveIntent = effectiveIntents[0];
+      // Validate: must have exactly 1 base intent
+      const baseIntentsInMessage = effectiveIntents.filter((i) => BASE_INTENTS.has(i));
+      if (baseIntentsInMessage.length === 0) {
+        return reply.status(400).send({ ok: false, error: "message must have exactly 1 base intent (request, response, or thinking)" });
+      }
+      if (baseIntentsInMessage.length > 1) {
+        return reply.status(400).send({ ok: false, error: "message can only have 1 base intent" });
+      }
+
+      // Validate: max 2 total intents (1 base + 1 modifier)
+      if (effectiveIntents.length > 2) {
+        return reply.status(400).send({ ok: false, error: "message can have at most 2 intents (1 base + 1 modifier)" });
+      }
+
+      // Use base intent as effectiveIntent for backward compatibility
+      const effectiveIntent = baseIntentsInMessage[0];
 
       const normalizedAwaitingOn = typeof awaiting_on === "string" ? awaiting_on.trim().toLowerCase() : "none";
       const normalizedNextExpectedFrom =
@@ -1999,12 +2018,8 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
       if (!AWAITING_ON_VALUES.has(normalizedAwaitingOn)) {
         return reply.status(400).send({ ok: false, error: "awaiting_on must be user, agent, or none" });
       }
-      if ((effectiveIntent === "blocked" || effectiveIntent === "should_i") && normalizedAwaitingOn === "none") {
-        return reply.status(400).send({ ok: false, error: "awaiting_on is required for blocked/should_i intents" });
-      }
-      if ((effectiveIntent === "blocked" || effectiveIntent === "should_i") && !normalizedNextExpectedFrom) {
-        return reply.status(400).send({ ok: false, error: "next_expected_from is required for blocked/should_i intents" });
-      }
+      // Note: awaiting_on and next_expected_from are optional now
+      // They can be used with any intent type but are not required
       if (intent_confidence !== undefined) {
         if (typeof intent_confidence !== "number" || Number.isNaN(intent_confidence) || intent_confidence < 0 || intent_confidence > 1) {
           return reply.status(400).send({ ok: false, error: "intent_confidence must be between 0 and 1" });
