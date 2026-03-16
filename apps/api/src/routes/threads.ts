@@ -48,7 +48,7 @@ const MESSAGE_INTENTS = new Set([
   "request_review",    // Please review/provide feedback
   "work_confirmation"  // Work is complete
 ]);
-const TARGETED_REPLY_MESSAGE_INTENTS = new Set(["answer", "review_request", "blocked"]);
+const TARGETED_REPLY_MESSAGE_INTENTS = new Set(["answer", "request_review", "blocked"]);
 const AWAITING_ON_VALUES = new Set(["user", "agent", "none"]);
 const ACTIVE_RESPONDERS_MAX_NEXT = Math.max(1, Number(process.env.ACTIVE_RESPONDERS_MAX_NEXT ?? 100));
 
@@ -1911,6 +1911,7 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
       priority?: string;
       attachments?: ThreadAttachment[];
       intent?: string;
+      intents?: string[];          // New: array of intents
       intent_confidence?: number;
       awaiting_on?: "user" | "agent" | "none";
       next_expected_from?: string | null;
@@ -1935,7 +1936,8 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
         reply_to,
         priority = "normal",
         attachments = [],
-        intent,
+        intent,          // Backward compat: single intent string
+        intents,         // New: array of intents
         intent_confidence,
         awaiting_on,
         next_expected_from,
@@ -1943,11 +1945,32 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
       const cleanBody = body.trim();
       const safeAttachments = Array.isArray(attachments) ? attachments.filter(Boolean).slice(0, 8) : [];
 
-      const normalizedIntent = typeof intent === "string" ? intent.trim().toLowerCase() : "";
+      // Normalize intents: accept either single intent or array
+      let effectiveIntents: string[] = [];
+      if (Array.isArray(intents)) {
+        effectiveIntents = intents
+          .filter((i) => typeof i === "string")
+          .map((i) => i.trim().toLowerCase())
+          .filter((i) => i && MESSAGE_INTENTS.has(i));
+      } else if (typeof intent === "string") {
+        const normalizedIntent = intent.trim().toLowerCase();
+        if (normalizedIntent && MESSAGE_INTENTS.has(normalizedIntent)) {
+          effectiveIntents = [normalizedIntent];
+        }
+      }
+
+      // Fallback to default intent if none provided
+      if (effectiveIntents.length === 0) {
+        const defaultIntent = caller.type === "agent" ? "answer" : "question";
+        effectiveIntents = [defaultIntent];
+      }
+
+      // Use first intent as effectiveIntent for backward compatibility with validation
+      const effectiveIntent = effectiveIntents[0];
+
       const normalizedAwaitingOn = typeof awaiting_on === "string" ? awaiting_on.trim().toLowerCase() : "none";
       const normalizedNextExpectedFrom =
         typeof next_expected_from === "string" ? next_expected_from.trim() : next_expected_from ?? null;
-      const effectiveIntent = normalizedIntent || (caller.type === "agent" ? "answer" : "question");
 
       let effectiveAwaitingOn = normalizedAwaitingOn;
       let effectiveNextExpectedFrom = normalizedNextExpectedFrom;
@@ -1966,8 +1989,8 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
       if (!MESSAGE_INTENTS.has(effectiveIntent)) {
         return reply.status(400).send({ ok: false, error: "invalid intent" });
       }
-      if (caller.type === "agent" && !normalizedIntent) {
-        return reply.status(400).send({ ok: false, error: "intent is required for agent messages" });
+      if (caller.type === "agent" && (!intent && !Array.isArray(intents))) {
+        return reply.status(400).send({ ok: false, error: "intent or intents is required for agent messages" });
       }
       if (!AWAITING_ON_VALUES.has(normalizedAwaitingOn)) {
         return reply.status(400).send({ ok: false, error: "awaiting_on must be user, agent, or none" });
@@ -2029,9 +2052,9 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
       const { rows: [msg] } = await db.query(
         `INSERT INTO thread_messages (
            thread_id, reply_to, sender_id, sender_slug, body, attachments,
-           intent, intent_confidence, awaiting_on, next_expected_from
+           intent, intents, intent_confidence, awaiting_on, next_expected_from
          )
-         VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10) RETURNING *`,
+         VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8::jsonb, $9, $10, $11) RETURNING *`,
         [
           req.params.thread_id,
           reply_to ?? null,
@@ -2040,6 +2063,7 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
           cleanBody,
           JSON.stringify(safeAttachments),
           effectiveIntent,
+          JSON.stringify(effectiveIntents),  // New intents array
           intent_confidence ?? null,
           effectiveAwaitingOn,
           effectiveNextExpectedFrom,
@@ -2128,7 +2152,7 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
   // ── GET /api/v1/threads/:thread_id/messages — list messages ───────────────
   server.get<{
     Params: { thread_id: string };
-    Querystring: { limit?: string; before?: string; types?: string };
+    Querystring: { limit?: string; before?: string; types?: string; intents?: string; intents_all?: string };
   }>(
     "/threads/:thread_id/messages",
     async (req, reply) => {
@@ -2141,15 +2165,31 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
       const lim = Math.min(Number(req.query.limit ?? 50), 200);
       const before = req.query.before; // ISO timestamp
       const types = req.query.types?.split(",") ?? ["message", "event"];
+      const intentsFilter = req.query.intents?.split(",").map((i) => i.trim().toLowerCase()) ?? [];
+      const intentsAllFilter = req.query.intents_all?.split(",").map((i) => i.trim().toLowerCase()) ?? [];
+
+      let intentWhereClause = "";
+      let intentParams: any[] = [];
+
+      if (intentsFilter.length > 0) {
+        // Filter: any of these intents (OR logic)
+        intentWhereClause = ` AND (${intentsFilter.map((_, i) => `intents @> jsonb_build_array($${5 + i})`).join(" OR ")})`;
+        intentParams = intentsFilter;
+      } else if (intentsAllFilter.length > 0) {
+        // Filter: all of these intents (AND logic)
+        intentWhereClause = ` AND (${intentsAllFilter.map((_, i) => `intents @> jsonb_build_array($${5 + i})`).join(" AND ")})`;
+        intentParams = intentsAllFilter;
+      }
 
       const { rows: rowsDesc } = await db.query(
         `SELECT * FROM thread_messages
          WHERE thread_id = $1
            AND type = ANY($2)
            AND ($3::timestamptz IS NULL OR sent_at < $3)
+           ${intentWhereClause}
          ORDER BY sent_at DESC
          LIMIT $4`,
-        [req.params.thread_id, types, before ?? null, lim]
+        [req.params.thread_id, types, before ?? null, lim, ...intentParams]
       );
       // Reverse to maintain chronological order (oldest first in response)
       const rows = rowsDesc.reverse();
