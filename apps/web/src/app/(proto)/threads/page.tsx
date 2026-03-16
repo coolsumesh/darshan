@@ -660,8 +660,14 @@ export default function ThreadsPage() {
         setThreadParticipants(detail.participants);
         setThreadRole(detail.role);
         setThreadFlow({ path: [], awaiting_on: null, next_expected_from: null });
-        const msgs = await fetchThreadMessages(existing.thread_id, 50);
-        setMessages(msgs);
+        // Phase 1: Instant render with last 5 messages
+        const recent = await fetchThreadMessages(existing.thread_id, 5);
+        setMessages(recent);
+        // Phase 2: Load remaining in background
+        setTimeout(async () => {
+          const full = await fetchThreadMessages(existing.thread_id, 50);
+          setMessages(full);
+        }, 0);
         return;
       }
 
@@ -675,8 +681,14 @@ export default function ThreadsPage() {
       setThreadParticipants(direct.participants);
       setThreadRole(direct.role);
       setThreadFlow({ path: [], awaiting_on: null, next_expected_from: null });
-      const msgs = await fetchThreadMessages(direct.thread.thread_id, 50);
-      setMessages(msgs);
+      // Phase 1: Instant render with last 5 messages
+      const recent = await fetchThreadMessages(direct.thread.thread_id, 5);
+      setMessages(recent);
+      // Phase 2: Load remaining in background
+      setTimeout(async () => {
+        const full = await fetchThreadMessages(direct.thread.thread_id, 50);
+        setMessages(full);
+      }, 0);
     };
 
     pickThread().catch(() => {});
@@ -693,9 +705,28 @@ export default function ThreadsPage() {
   };
 
   // Load messages when thread selected
+  // Phase 1: Load & render last 5 messages immediately
+  // Phase 2: Load remaining older messages in background
   React.useEffect(() => {
     if (!selected) return;
-    fetchThreadMessages(selected.thread_id, 50).then(setMessages).catch(() => {});
+    
+    const loadMessages = async () => {
+      try {
+        // Phase 1: Get last 5 messages for instant render
+        const recent = await fetchThreadMessages(selected.thread_id, 5);
+        setMessages(recent);
+        
+        // Phase 2: Load remaining messages in background (don't block)
+        setTimeout(async () => {
+          const full = await fetchThreadMessages(selected.thread_id, 50);
+          setMessages(full);
+        }, 0);
+      } catch (err) {
+        console.error("Error loading messages:", err);
+      }
+    };
+    
+    loadMessages();
   }, [selected?.thread_id]); // eslint-disable-line
 
   React.useEffect(() => {
@@ -926,8 +957,14 @@ export default function ThreadsPage() {
     setThreadFlow(detail?.flow ?? { path: [], awaiting_on: null, next_expected_from: null });
     setMessages([]);
     setResponderStatuses({});
-    const msgs = await fetchThreadMessages(thread.thread_id, 50);
-    setMessages(msgs);
+    // Phase 1: Instant render with last 5 messages
+    const recent = await fetchThreadMessages(thread.thread_id, 5);
+    setMessages(recent);
+    // Phase 2: Load remaining in background
+    setTimeout(async () => {
+      const full = await fetchThreadMessages(thread.thread_id, 50);
+      setMessages(full);
+    }, 0);
 
     // Mark incoming messages as delivered/read when the thread is opened.
     const currentMe = await authMe();
@@ -1088,8 +1125,14 @@ export default function ThreadsPage() {
     setThreadParticipants(detail?.participants ?? []);
     setThreadRole(detail?.role ?? null);
     setThreadFlow(detail?.flow ?? { path: [], awaiting_on: null, next_expected_from: null });
-    const msgs = await fetchThreadMessages(thread.thread_id, 50);
-    setMessages(msgs);
+    // Phase 1: Instant render with last 5 messages
+    const recent = await fetchThreadMessages(thread.thread_id, 5);
+    setMessages(recent);
+    // Phase 2: Load remaining in background
+    setTimeout(async () => {
+      const full = await fetchThreadMessages(thread.thread_id, 50);
+      setMessages(full);
+    }, 0);
   };
 
   const activeParticipants = React.useMemo(
