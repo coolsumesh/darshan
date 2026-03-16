@@ -47,6 +47,7 @@ type ResponderState = {
   occurred_at: string;
 };
 import { ThreadFlowPanel } from "@/components/proto/thread-flow-panel";
+import { MessageIntents } from "@/components/MessageIntents";
 import { ChevronDown, Inbox, Send, RefreshCw, CheckCircle, ArchiveIcon, Plus, X, Paperclip, UserPlus, Mic, Square } from "lucide-react";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -339,7 +340,7 @@ function MessageBubble({ msg, isMe, knownSlugs }: { msg: ThreadMessage; isMe: bo
     <div className={`flex items-start gap-3 ${isMe ? "flex-row-reverse" : ""}`}>
       <Avatar slug={msg.sender_slug} size="sm" />
       <div className={`max-w-[75%] ${isMe ? "items-end" : "items-start"} flex flex-col gap-1`}>
-        <div className="flex items-baseline gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           {!isMe && (
             <span className="text-xs font-semibold text-slate-600 dark:text-slate-400">
               {msg.sender_slug}
@@ -352,6 +353,8 @@ function MessageBubble({ msg, isMe, knownSlugs }: { msg: ThreadMessage; isMe: bo
               {tick.icon}
             </span>
           )}
+          {/* Message intents */}
+          <MessageIntents intents={msg.intents} />
           <span className="text-[10px] font-mono text-slate-300 dark:text-slate-600 select-all" title={msg.message_id}>
             {msg.message_id.slice(0, 8)}
           </span>
