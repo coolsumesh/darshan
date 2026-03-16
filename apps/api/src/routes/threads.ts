@@ -39,16 +39,20 @@ const THREAD_TYPES = new Set(["conversation", "feature", "level_test", "task"]);
 const THREAD_STATUSES = new Set(["open", "closed", "archived"]);
 const TASK_STATUSES = new Set(["proposed", "approved", "in-progress", "review", "blocked"]);
 const TASK_PRIORITIES = new Set(["high", "medium", "normal", "low"]);
+// Conversation flow intents
 const MESSAGE_INTENTS = new Set([
-  "question",          // Need a response
-  "answer",            // Providing a response
-  "in_progress",       // Currently doing the work
-  "blocked",           // Need help / work is blocked
-  "status_update",     // Progress/status update
-  "request_review",    // Please review/provide feedback
-  "work_confirmation"  // Work is complete
+  "question",            // I asked a question
+  "clarification",       // I need more details / clarification
+  "thought",             // I'm thinking / analyzing / working through it
+  "answer",              // I answered the question
+  "disagreement",        // I disagree / don't think that's right
+  "suggestion",          // I made a suggestion
+  "should_i",            // Proposing something / asking for approval
+  "blocked",             // I'm blocked / can't proceed
+  "work_confirmation"    // I did the thing / confirmed completion
 ]);
-const TARGETED_REPLY_MESSAGE_INTENTS = new Set(["answer", "request_review", "blocked"]);
+// Intents that require targeted/awaiting response (expect specific people to reply)
+const TARGETED_REPLY_MESSAGE_INTENTS = new Set(["answer", "should_i", "blocked", "suggestion"]);
 const AWAITING_ON_VALUES = new Set(["user", "agent", "none"]);
 const ACTIVE_RESPONDERS_MAX_NEXT = Math.max(1, Number(process.env.ACTIVE_RESPONDERS_MAX_NEXT ?? 100));
 
@@ -1995,11 +1999,11 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
       if (!AWAITING_ON_VALUES.has(normalizedAwaitingOn)) {
         return reply.status(400).send({ ok: false, error: "awaiting_on must be user, agent, or none" });
       }
-      if ((effectiveIntent === "blocked" || effectiveIntent === "review_request") && normalizedAwaitingOn === "none") {
-        return reply.status(400).send({ ok: false, error: "awaiting_on is required for blocked/review_request" });
+      if ((effectiveIntent === "blocked" || effectiveIntent === "should_i") && normalizedAwaitingOn === "none") {
+        return reply.status(400).send({ ok: false, error: "awaiting_on is required for blocked/should_i intents" });
       }
-      if ((effectiveIntent === "blocked" || effectiveIntent === "review_request") && !normalizedNextExpectedFrom) {
-        return reply.status(400).send({ ok: false, error: "next_expected_from is required for blocked/review_request" });
+      if ((effectiveIntent === "blocked" || effectiveIntent === "should_i") && !normalizedNextExpectedFrom) {
+        return reply.status(400).send({ ok: false, error: "next_expected_from is required for blocked/should_i intents" });
       }
       if (intent_confidence !== undefined) {
         if (typeof intent_confidence !== "number" || Number.isNaN(intent_confidence) || intent_confidence < 0 || intent_confidence > 1) {

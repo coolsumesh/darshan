@@ -137,13 +137,15 @@ export type ThreadAttachment = {
 };
 
 export type ThreadMessageIntent =
-  | "question"          // Need a response
-  | "answer"            // Providing a response
-  | "in_progress"       // Currently doing the work
-  | "blocked"           // Need help / work is blocked
-  | "status_update"     // Progress/status update
-  | "request_review"    // Please review/provide feedback
-  | "work_confirmation"; // Work is complete
+  | "question"            // I asked a question
+  | "clarification"       // I need more details / clarification
+  | "thought"             // I'm thinking / analyzing / working through it
+  | "answer"              // I answered the question
+  | "disagreement"        // I disagree / don't think that's right
+  | "suggestion"          // I made a suggestion
+  | "should_i"            // Proposing something / asking for approval
+  | "blocked"             // I'm blocked / can't proceed
+  | "work_confirmation";  // I did the thing / confirmed completion
 
 export type ThreadReceiptSummary = {
   total_recipients: number;
@@ -292,22 +294,32 @@ export function filterMessagesByIntents(messages: ThreadMessage[], intents: Thre
   });
 }
 
-// Helper: Get messages with pending actions (need response or action)
+// Helper: Get messages that need action/response
 export function getPendingActionMessages(messages: ThreadMessage[]): ThreadMessage[] {
   const pendingIntents: ThreadMessageIntent[] = [
-    "question",           // Someone asked me
-    "in_progress",        // I'm working, might need help
-    "blocked",            // I need help
-    "request_review"      // Need feedback
+    "question",          // Someone asked
+    "clarification",     // Someone needs details
+    "should_i",          // Asking for approval
+    "suggestion",        // Made a suggestion (awaiting response)
+    "blocked"            // I'm blocked (needs help)
   ];
   return filterMessagesByIntents(messages, pendingIntents);
 }
 
-// Helper: Get completed messages
+// Helper: Get conversation responses (answer/thought/disagreement)
+export function getResponseMessages(messages: ThreadMessage[]): ThreadMessage[] {
+  const responseIntents: ThreadMessageIntent[] = [
+    "thought",           // Thinking/analyzing
+    "answer",            // Answered
+    "disagreement"       // Disagreed
+  ];
+  return filterMessagesByIntents(messages, responseIntents);
+}
+
+// Helper: Get completed/confirmed messages
 export function getCompletedMessages(messages: ThreadMessage[]): ThreadMessage[] {
   const completedIntents: ThreadMessageIntent[] = [
-    "work_confirmation",
-    "status_update"
+    "work_confirmation"
   ];
   return filterMessagesByIntents(messages, completedIntents);
 }
