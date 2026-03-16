@@ -2086,6 +2086,26 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
 
       await createMessageReceipts(db, msg.message_id, req.params.thread_id, caller.id);
 
+      // Fetch updated message to get the denormalized read_receipt (populated by trigger)
+      const { rows: [updatedMsg] } = await db.query(
+        `SELECT * FROM thread_messages WHERE message_id = $1`,
+        [msg.message_id]
+      );
+
+      // Add receipt_summary to response
+      const msgToReturn = {
+        ...updatedMsg,
+        receipt_summary: updatedMsg?.read_receipt ?? {
+          total_recipients: 0,
+          sent_count: 0,
+          delivered_count: 0,
+          read_count: 0,
+          all_sent: false,
+          all_delivered: false,
+          all_read: false,
+        },
+      };
+
       if (caller.type === "user" && effectiveIntent === "question") {
         await enqueueReplyRequiredOutbox(
           db,
@@ -2099,11 +2119,11 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
       // Fan out notifications to all active participants except sender
       await fanOutNotifications(db, msg.message_id, req.params.thread_id, caller.id, caller.type, priority, cleanBody);
 
-      broadcast("thread.message_created", { thread_id: req.params.thread_id, message: msg });
+      broadcast("thread.message_created", { thread_id: req.params.thread_id, message: msgToReturn });
       const hydratedThread = await hydrateThread(db, req.params.thread_id);
       broadcast("thread.updated", { thread_id: req.params.thread_id, thread: hydratedThread });
 
-      return { ok: true, message_id: msg.message_id, message: msg };
+      return { ok: true, message_id: msg.message_id, message: msgToReturn };
     }
   );
 
