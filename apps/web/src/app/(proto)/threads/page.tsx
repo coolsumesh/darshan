@@ -996,6 +996,11 @@ export default function ThreadsPage() {
     // Phase 1: Instant render with last 5 messages
     const recent = await fetchThreadMessages(thread.thread_id, 5);
     setMessages(recent);
+    // Mark incoming messages as delivered/read when the thread is opened.
+    // Must resolve currentMe before Phase 2 so we have identity for filtering.
+    const currentMe = await authMe();
+    if (currentMe) setMe(currentMe);
+
     // Phase 2: Load remaining in background (prepend older messages above)
     isLoadingPhase2Ref.current = true;
     setTimeout(async () => {
@@ -1009,27 +1014,26 @@ export default function ThreadsPage() {
         }));
       });
       isLoadingPhase2Ref.current = false;
-    }, 0);
 
-    // Mark incoming messages as delivered/read when the thread is opened.
-    const currentMe = await authMe();
-    if (currentMe) setMe(currentMe);
-    const incoming = recent.filter((m) => m.sender_id !== currentMe?.id);
-    incoming.forEach((m) => {
-      markThreadMessageRead(thread.thread_id, m.message_id)
-        .then((receipt_summary) => {
-          if (receipt_summary) {
-            setMessages((prev) =>
-              prev.map((msg) =>
-                msg.message_id === m.message_id
-                  ? { ...msg, receipt_summary }
-                  : msg
-              )
-            );
-          }
-        })
-        .catch(() => {});
-    });
+      // Mark ALL incoming messages (not just Phase 1 last-5) as read.
+      // Phase 1 only had last 5 — if those were all from self, nothing got marked.
+      const incoming = full.filter((m) => m.sender_id !== currentMe?.id);
+      incoming.forEach((m) => {
+        markThreadMessageRead(thread.thread_id, m.message_id)
+          .then((receipt_summary) => {
+            if (receipt_summary) {
+              setMessages((prev) =>
+                prev.map((msg) =>
+                  msg.message_id === m.message_id
+                    ? { ...msg, receipt_summary }
+                    : msg
+                )
+              );
+            }
+          })
+          .catch(() => {});
+      });
+    }, 0);
   }, []);
 
   // Scroll to bottom when messages load (Phase 1 only, not Phase 2)
