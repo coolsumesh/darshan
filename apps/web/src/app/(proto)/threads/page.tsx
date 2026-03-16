@@ -14,6 +14,7 @@ import {
   fetchTeam,
   fetchAgentsDirectory,
   sendThreadMessage,
+  updateMessageIntents,
   markThreadMessageDelivered,
   markThreadMessageRead,
   setThreadStatus,
@@ -48,7 +49,10 @@ type ResponderState = {
 };
 import { ThreadFlowPanel } from "@/components/proto/thread-flow-panel";
 import { MessageIntents } from "@/components/MessageIntents";
-import { ChevronDown, Inbox, Send, RefreshCw, CheckCircle, ArchiveIcon, Plus, X, Paperclip, UserPlus, Mic, Square } from "lucide-react";
+import { ModeToggle } from "@/components/ModeToggle";
+import { IntentSelector } from "@/components/IntentSelector";
+import { IntentEditModal } from "@/components/IntentEditModal";
+import { ChevronDown, Inbox, Send, RefreshCw, CheckCircle, ArchiveIcon, Plus, X, Paperclip, UserPlus, Mic, Square, Pencil } from "lucide-react";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -333,7 +337,7 @@ function receiptTick(summary?: ThreadMessage["receipt_summary"]): { icon: string
   };
 }
 
-function MessageBubble({ msg, isMe, knownSlugs }: { msg: ThreadMessage; isMe: boolean; knownSlugs: Set<string> }) {
+function MessageBubble({ msg, isMe, knownSlugs, onEditIntents }: { msg: ThreadMessage; isMe: boolean; knownSlugs: Set<string>; onEditIntents?: (msg: ThreadMessage) => void }) {
   const atts = Array.isArray(msg.attachments) ? msg.attachments : [];
   const tick = receiptTick(msg.receipt_summary);
   return (
@@ -355,6 +359,15 @@ function MessageBubble({ msg, isMe, knownSlugs }: { msg: ThreadMessage; isMe: bo
           )}
           {/* Message intents */}
           <MessageIntents intents={msg.intents} />
+          {isMe && onEditIntents && (
+            <button
+              onClick={() => onEditIntents(msg)}
+              className="text-slate-300 hover:text-violet-500 transition-colors"
+              title="Edit intents"
+            >
+              <Pencil className="h-3 w-3" />
+            </button>
+          )}
           <span className="text-[10px] font-mono text-slate-300 dark:text-slate-600 select-all" title={msg.message_id}>
             {msg.message_id.slice(0, 8)}
           </span>
@@ -580,6 +593,11 @@ export default function ThreadsPage() {
   const [countdownNow, setCountdownNow] = React.useState(() => Date.now());
   const [voiceSupported, setVoiceSupported] = React.useState(false);
   const [isListening, setIsListening] = React.useState(false);
+  const [threadMode, setThreadMode] = React.useState<"planning" | "executing">("executing");
+  const [composeBaseIntent, setComposeBaseIntent] = React.useState<"request" | "response" | "thinking">("request");
+  const [composeModifiers, setComposeModifiers] = React.useState<("not_handled" | "handled_incorrectly")[]>([]);
+  const [editModalOpen, setEditModalOpen] = React.useState(false);
+  const [editingMessage, setEditingMessage] = React.useState<ThreadMessage | null>(null);
   const bottomRef = React.useRef<HTMLDivElement>(null);
   const isLoadingPhase2Ref = React.useRef(false);
   const recognitionRef = React.useRef<any>(null);
@@ -595,6 +613,18 @@ export default function ThreadsPage() {
     const params = new URLSearchParams(window.location.search);
     const tid = params.get("thread_id");
     setDeepLinkThreadId(tid && tid.trim() ? tid.trim() : null);
+  }, []);
+
+  // Shift+Tab toggles planning/executing mode
+  React.useEffect(() => {
+    const handleModeToggle = (e: KeyboardEvent) => {
+      if (e.shiftKey && e.key === "Tab") {
+        e.preventDefault();
+        setThreadMode((prev) => (prev === "planning" ? "executing" : "planning"));
+      }
+    };
+    window.addEventListener("keydown", handleModeToggle);
+    return () => window.removeEventListener("keydown", handleModeToggle);
   }, []);
 
   // Load current user once (for isMe tick comparison)
@@ -1071,12 +1101,14 @@ export default function ThreadsPage() {
     if (!selected || sending || (!draft.trim() && draftAttachments.length === 0)) return;
     setSending(true);
     try {
-      const result = await sendThreadMessage(selected.thread_id, draft.trim(), draftAttachments);
+      const intentsToSend = [composeBaseIntent, ...composeModifiers];
+      const result = await sendThreadMessage(selected.thread_id, draft.trim(), draftAttachments, intentsToSend);
       if (result.ok) {
         // Do not append optimistically here.
         // WebSocket thread.message_created is the single source of truth and avoids duplicate flashes.
         setDraft("");
         setDraftAttachments([]);
+        setComposeModifiers([]);
       } else {
         setToast({ tone: "error", message: `Failed to send: ${result.error ?? "unknown error"}` });
       }
@@ -1591,6 +1623,7 @@ export default function ThreadsPage() {
                       </>
                     )}
                   </div>
+                  <ModeToggle mode={threadMode} onChange={setThreadMode} />
                   <div className="mt-0.5 space-y-0.5 text-xs text-slate-400">
                     <div>
                       Started by {selected.created_slug} · {relativeTime(selected.created_at)}
@@ -1823,7 +1856,7 @@ export default function ThreadsPage() {
             )}
 
             {/* Messages */}
-            <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
+            <div className={`flex-1 overflow-y-auto px-6 py-4 space-y-4 transition-colors ${threadMode === "planning" ? "bg-blue-50" : "bg-white"}`}>
               {messages.length === 0 ? (
                 <div className="flex h-full items-center justify-center text-sm text-slate-400">
                   Loading messages…
@@ -1835,6 +1868,7 @@ export default function ThreadsPage() {
                     msg={msg}
                     isMe={!!me && msg.sender_id === me.id}
                     knownSlugs={new Set(mentionSlugs)}
+                    onEditIntents={(m) => { setEditingMessage(m); setEditModalOpen(true); }}
                   />
                 ))
               )}
@@ -1961,7 +1995,26 @@ export default function ThreadsPage() {
                   <Send className="h-4 w-4" />
                 </button>
               </div>
+              <IntentSelector
+                baseIntent={composeBaseIntent}
+                modifiers={composeModifiers}
+                onBaseIntentChange={setComposeBaseIntent}
+                onModifiersChange={setComposeModifiers}
+              />
             </div>
+          <IntentEditModal
+            isOpen={editModalOpen}
+            currentIntents={editingMessage?.intents ?? []}
+            onClose={() => { setEditModalOpen(false); setEditingMessage(null); }}
+            onSave={async (intents) => {
+              if (!selected || !editingMessage) return;
+              const result = await updateMessageIntents(selected.thread_id, editingMessage.message_id, intents);
+              if (result.ok) {
+                const refreshed = await fetchThreadMessages(selected.thread_id, 50);
+                if (refreshed) setMessages(refreshed);
+              }
+            }}
+          />
           </>
         ) : (
           <div className="flex h-full flex-col items-center justify-center gap-3 text-slate-400">

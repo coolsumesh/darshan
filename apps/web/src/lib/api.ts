@@ -348,18 +348,43 @@ export async function uploadThreadAttachment(threadId: string, file: File): Prom
 export async function sendThreadMessage(
   threadId: string,
   body: string,
-  attachments: ThreadAttachment[] = []
+  attachments: ThreadAttachment[] = [],
+  intents?: string[]
 ): Promise<{ ok: true; message: ThreadMessage } | { ok: false; error?: string; status?: number }> {
   try {
+    const payload: Record<string, unknown> = { body, attachments };
+    if (intents && intents.length > 0) payload.intents = intents;
     const res = await fetch(`${API_BASE}/api/v1/threads/${threadId}/messages`, {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ body, attachments }),
+      body: JSON.stringify(payload),
     });
     const data = await res.json().catch(() => null) as { ok?: boolean; message?: ThreadMessage; error?: string } | null;
     if (!res.ok || !data?.ok || !data.message) {
       return { ok: false, error: data?.error ?? `HTTP ${res.status}`, status: res.status };
+    }
+    return { ok: true, message: data.message };
+  } catch {
+    return { ok: false, error: "Network error" };
+  }
+}
+
+export async function updateMessageIntents(
+  threadId: string,
+  messageId: string,
+  intents: string[]
+): Promise<{ ok: true; message: { message_id: string; intents: string[]; updated_at: string } } | { ok: false; error?: string }> {
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/threads/${threadId}/messages/${messageId}`, {
+      method: "PATCH",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ intents }),
+    });
+    const data = await res.json().catch(() => null) as any;
+    if (!res.ok || !data?.ok) {
+      return { ok: false, error: data?.error ?? `HTTP ${res.status}` };
     }
     return { ok: true, message: data.message };
   } catch {

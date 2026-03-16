@@ -12,7 +12,7 @@ import {
   type TaskSlaStateRow,
 } from "../workers/taskSlaQueue.js";
 
-// â”€â”€ Caller resolution â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â"€â"€ Caller resolution â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 // Resolves the calling identity from either JWT cookie (user) or agent
 // callback_token (Bearer header). Returns id + display slug, or null.
 
@@ -204,7 +204,7 @@ async function resolveCaller(req: FastifyRequest, db: pg.Pool): Promise<Caller |
   return { id: rows[0].id, slug: rows[0].slug ?? rows[0].id.slice(0, 8).toUpperCase(), type: "agent" };
 }
 
-// â”€â”€ Thread access check â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â"€â"€ Thread access check â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 // Returns the caller's role in this thread, or null if no access.
 
 type ThreadRole = "creator" | "owner" | "participant" | "removed";
@@ -243,7 +243,7 @@ async function checkThreadAccess(
     if (projAccess.length) return { thread, role: "owner" };
   }
 
-  // Agent owner â€” user who owns an agent that is/was a participant
+  // Agent owner â€" user who owns an agent that is/was a participant
   if (caller.type === "user") {
     const { rows: owned } = await db.query(
       `SELECT 1 FROM thread_participants tp
@@ -782,7 +782,7 @@ async function notifyTaskAssignee(threadId: string, db: pg.Pool) {
   });
 }
 
-// â”€â”€ Fan-out helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â"€â"€ Fan-out helpers â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 function extractMentionSlugs(messageBody: string): string[] {
   return Array.from(
@@ -864,7 +864,7 @@ async function fanOutNotifications(
   priority: string = "normal",
   messageBody: string = ""
 ) {
-  // Parse @mentions â€” if present, only notify mentioned participants
+  // Parse @mentions â€" if present, only notify mentioned participants
   const mentionedSlugs = extractMentionSlugs(messageBody);
 
   // All active participants except sender
@@ -935,7 +935,7 @@ async function fanOutNotifications(
 }
 
 // Receipts are now denormalized into thread_messages.read_receipt via trigger
-// No aggregation needed â€” just read from the message row
+// No aggregation needed â€" just read from the message row
 
 async function insertEventMessage(
   db: pg.Pool,
@@ -954,11 +954,11 @@ async function insertEventMessage(
   return message;
 }
 
-// â”€â”€ Routes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â"€â"€ Routes â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
 
-  // â”€â”€ POST /api/v1/threads â€” create thread â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // â"€â"€ POST /api/v1/threads â€" create thread â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
   server.post<{
     Body: {
       subject: string;
@@ -1095,7 +1095,7 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
     }
   );
 
-  // â”€â”€ POST /threads/direct â€” one-call 1:1 send (conversation thread) â”€â”€â”€â”€â”€â”€
+  // â"€â"€ POST /threads/direct â€" one-call 1:1 send (conversation thread) â"€â"€â"€â"€â"€â"€
   // Finds or creates a 1:1 conversation thread between caller and `to`, then posts body.
   // Replaces the old POST /a2a/send flow.
   server.post<{ Body: { to: string; body: string; subject?: string; priority?: string; project_id: string } }>(
@@ -1150,7 +1150,7 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
           thread_id = existing.thread_id;
         } else {
           // Create new 1:1 conversation thread
-          const autoSubject = subject?.trim() || `${caller.slug} â†” ${recipient.slug}`;
+          const autoSubject = subject?.trim() || `${caller.slug} â†" ${recipient.slug}`;
           const { rows: [thread] } = await client.query(
             `INSERT INTO threads (subject, project_id, created_by, created_slug, thread_type)
              VALUES ($1, $2, $3, $4, 'conversation') RETURNING thread_id`,
@@ -1202,7 +1202,7 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
     }
   );
 
-  // â”€â”€ GET /threads â€” list threads â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // â"€â"€ GET /threads â€" list threads â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
   server.get<{
     Querystring: {
       search?: string;
@@ -1370,7 +1370,7 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
     }
   );
 
-  // â”€â”€ GET /api/v1/threads/:thread_id â€” get thread â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // â"€â"€ GET /api/v1/threads/:thread_id â€" get thread â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
   server.get<{ Params: { thread_id: string } }>(
     "/threads/:thread_id",
     async (req, reply) => {
@@ -1700,7 +1700,7 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
     }
   );
 
-  // â”€â”€ DELETE /api/v1/threads/:thread_id â€” soft delete â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // â"€â"€ DELETE /api/v1/threads/:thread_id â€" soft delete â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
   server.delete<{ Params: { thread_id: string } }>(
     "/threads/:thread_id",
     async (req, reply) => {
@@ -1722,7 +1722,7 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
     }
   );
 
-  // â”€â”€ PATCH /api/v1/threads/:thread_id/status â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // â"€â"€ PATCH /api/v1/threads/:thread_id/status â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
   server.patch<{ Params: { thread_id: string }; Body: { status: string } }>(
     "/threads/:thread_id/status",
     async (req, reply) => {
@@ -1765,7 +1765,7 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
     }
   );
 
-  // â”€â”€ GET /api/v1/threads/:thread_id/participants â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // â"€â"€ GET /api/v1/threads/:thread_id/participants â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
   server.get<{ Params: { thread_id: string } }>(
     "/threads/:thread_id/participants",
     async (req, reply) => {
@@ -1783,7 +1783,7 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
     }
   );
 
-  // â”€â”€ POST /api/v1/threads/:thread_id/participants â€” add â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // â"€â"€ POST /api/v1/threads/:thread_id/participants â€" add â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
   server.post<{ Params: { thread_id: string }; Body: { participant_id: string } }>(
     "/threads/:thread_id/participants",
     async (req, reply) => {
@@ -1809,7 +1809,7 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
       );
       if (!resolved) return reply.status(404).send({ ok: false, error: "participant not found" });
 
-      // Upsert â€” handles re-adding removed participants
+      // Upsert â€" handles re-adding removed participants
       await db.query(
         `INSERT INTO thread_participants
            (thread_id, participant_id, participant_slug, added_by, added_by_slug, joined_at, removed_at)
@@ -1828,7 +1828,7 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
     }
   );
 
-  // â”€â”€ DELETE /api/v1/threads/:thread_id/participants/:pid â€” remove â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // â"€â"€ DELETE /api/v1/threads/:thread_id/participants/:pid â€" remove â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
   server.delete<{ Params: { thread_id: string; pid: string } }>(
     "/threads/:thread_id/participants/:pid",
     async (req, reply) => {
@@ -1863,7 +1863,7 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
     }
   );
 
-  // â”€â”€ POST /api/v1/threads/:thread_id/attachments/upload â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // â"€â"€ POST /api/v1/threads/:thread_id/attachments/upload â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
   server.post<{ Params: { thread_id: string } }>(
     "/threads/:thread_id/attachments/upload",
     async (req, reply) => {
@@ -1910,7 +1910,7 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
     }
   );
 
-  // â”€â”€ POST /api/v1/threads/:thread_id/messages â€” send message â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // â"€â"€ POST /api/v1/threads/:thread_id/messages â€" send message â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
   server.post<{
     Params: { thread_id: string };
     Body: {
@@ -2168,7 +2168,71 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
     }
   );
 
-  // â”€â”€ GET /api/v1/threads/:thread_id/messages â€” list messages â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // -- PATCH /api/v1/threads/:thread_id/messages/:message_id -- edit intents ---
+  server.patch<{
+    Params: { thread_id: string; message_id: string };
+    Body: { intents: string[] };
+  }>(
+    "/threads/:thread_id/messages/:message_id",
+    async (req, reply) => {
+      const caller = await resolveCaller(req, db);
+      if (!caller) return reply.status(401).send({ ok: false, error: "not authenticated" });
+
+      const access = await checkThreadAccess(req.params.thread_id, caller, db);
+      if (!access) return reply.status(404).send({ ok: false, error: "thread not found or no access" });
+
+      // Fetch the message
+      const { rows: [msg] } = await db.query(
+        `SELECT message_id, sender_id, thread_id FROM thread_messages WHERE message_id = $1 AND thread_id = $2`,
+        [req.params.message_id, req.params.thread_id]
+      );
+      if (!msg) return reply.status(404).send({ ok: false, error: "message not found" });
+
+      // Auth: caller must be message author OR thread creator
+      const thread = access.thread as any;
+      if (msg.sender_id !== caller.id && thread.created_by !== caller.id) {
+        return reply.status(403).send({ ok: false, error: "only the message author or thread creator can edit intents" });
+      }
+
+      const { intents } = req.body ?? {};
+      if (!Array.isArray(intents) || intents.length === 0) {
+        return reply.status(400).send({ ok: false, error: "intents array is required and must not be empty" });
+      }
+
+      // Normalize
+      const cleaned = intents
+        .filter((i) => typeof i === "string")
+        .map((i) => i.trim().toLowerCase())
+        .filter((i) => i && MESSAGE_INTENTS.has(i));
+
+      // Validate: exactly 1 base intent
+      const baseInMsg = cleaned.filter((i) => BASE_INTENTS.has(i));
+      if (baseInMsg.length !== 1) {
+        return reply.status(400).send({ ok: false, error: "must have exactly 1 base intent (request, response, or thinking)" });
+      }
+
+      // Validate: max 3 total (1 base + up to 2 modifiers)
+      if (cleaned.length > 3) {
+        return reply.status(400).send({ ok: false, error: "max 3 intents (1 base + 2 modifiers)" });
+      }
+
+      const { rows: [updated] } = await db.query(
+        `UPDATE thread_messages
+            SET intents = $1::jsonb,
+                intent = $2,
+                updated_at = now()
+          WHERE message_id = $3 AND thread_id = $4
+          RETURNING message_id, intents, updated_at`,
+        [JSON.stringify(cleaned), baseInMsg[0], req.params.message_id, req.params.thread_id]
+      );
+
+      broadcast("thread.message_updated", { thread_id: req.params.thread_id, message: updated });
+
+      return { ok: true, message: updated };
+    }
+  );
+
+  // â"€â"€ GET /api/v1/threads/:thread_id/messages â€" list messages â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
   server.get<{
     Params: { thread_id: string };
     Querystring: { limit?: string; before?: string; types?: string; intents?: string; intents_all?: string };
@@ -2231,7 +2295,7 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
     }
   );
 
-  // â”€â”€ GET /api/v1/threads/:thread_id/messages/:message_id â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // â"€â"€ GET /api/v1/threads/:thread_id/messages/:message_id â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
   server.get<{ Params: { thread_id: string; message_id: string } }>(
     "/threads/:thread_id/messages/:message_id",
     async (req, reply) => {
@@ -2285,7 +2349,7 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
     }
   );
 
-  // â”€â”€ POST delivered/read receipts â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // â"€â"€ POST delivered/read receipts â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
   server.post<{ Params: { thread_id: string; message_id: string } }>(
     "/threads/:thread_id/messages/:message_id/delivered",
     async (req, reply) => {
@@ -2373,7 +2437,7 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
     }
   );
 
-  // â”€â”€ GET receipts â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // â"€â"€ GET receipts â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
   server.get<{ Params: { thread_id: string; message_id: string } }>(
     "/threads/:thread_id/messages/:message_id/receipts",
     async (req, reply) => {
@@ -2412,7 +2476,7 @@ export async function registerThreads(server: FastifyInstance, db: pg.Pool) {
     }
   );
 
-  // â”€â”€ POST reply-status â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // â"€â"€ POST reply-status â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
   // Agents call this to emit responder lifecycle status (queued|picked|thinking|responded|blocked|failed)
   // Server validates, persists to Redis (or lightweight store), and broadcasts via WS.
   server.post<{ Params: { thread_id: string } }>(
